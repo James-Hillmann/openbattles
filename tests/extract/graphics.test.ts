@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CELL_H, CELL_W, decodeChars, decodePalette, metatilePath, parseMap, parseMetatiles, renderMap, renderSheet } from '@lbw/extract';
+import { CELL_H, CELL_W, DETAIL_BASE, bakeTrees, treeKey, treeMetatile, type GameMap, type TreeTable, detailTilesPath, withDetailTiles, decodeChars, decodePalette, metatilePath, parseMap, parseMetatiles, renderMap, renderSheet } from '@lbw/extract';
 
 const bytes = (s: string) => [...s].map((c) => c.charCodeAt(0));
 const u16le = (v: number) => [v & 0xff, v >> 8];
@@ -37,9 +37,11 @@ describe('maps', () => {
   function mapBytes(): Uint8Array {
     const name = bytes('KingTileset').concat(new Array(32 - 11).fill(0));
     const terrain = [0, 3];
-    const extra = [9, 9, 9, 9]; // unknown planes between terrain and ground
+    const edges = [0, 0];
+    const regions = [0, 0];
+    const treeRuns = [...u16le(2), 1, 1]; // 1 open cell, then 1 tree
     const ground = [...u16le(1), ...u16le(0)];
-    return new Uint8Array([...bytes('MAPTERR'), 2, 1, 3, 2, ...name, ...terrain, ...extra, ...ground, ...bytes('RRET'), ...bytes('!PAM')]);
+    return new Uint8Array([...bytes('MAPTERR'), 2, 1, 3, 2, ...name, ...terrain, ...edges, ...regions, ...treeRuns, ...ground, ...bytes('RRET'), ...bytes('MINE'), 0x4c, 0, 0x4c, 1, 5, 7, 0x4c, 0, 0x4c, 0, ...bytes('!PAM')]);
   }
 
   it('parses size, tileset, terrain and the ground layer', () => {
@@ -47,6 +49,8 @@ describe('maps', () => {
     expect([m.width, m.height, m.tileset]).toEqual([2, 1, 'KingTileset']);
     expect([...m.terrain]).toEqual([0, 3]);
     expect([...m.ground]).toEqual([1, 0]);
+    expect([...m.trees]).toEqual([0, 1]);
+    expect(m.mineSites).toEqual([{ x: 5, y: 7 }]);
     expect(metatilePath(m.tileset)).toBe('BP/KingTiles.tbp');
   });
 
@@ -74,5 +78,57 @@ describe('unit sheets', () => {
     const img = renderSheet(sheet, pal, 2); // bank 2 -> colors 32..47
     expect([...img.data.slice(4, 8)]).toEqual([0, 0, 255, 255]); // pixel 1 = index 1 in bank 2
     expect(img.data[3]).toBe(0); // index 0 transparent
+  });
+});
+
+describe('detail tiles', () => {
+  it('overlays the map detail table from id 440', () => {
+    const base = new Uint16Array(500 * 6).fill(1);
+    const detail = new Uint16Array([7, 7, 7, 7, 7, 7, 9, 9, 9, 9, 9, 9]);
+    const t = withDetailTiles(base, detail);
+    expect(t[439 * 6]).toBe(1);
+    expect(t[DETAIL_BASE * 6]).toBe(7);
+    expect(t[(DETAIL_BASE + 1) * 6 + 5]).toBe(9);
+    expect(t[(DETAIL_BASE + 2) * 6]).toBe(1);
+    expect(base[DETAIL_BASE * 6]).toBe(1);
+    expect(detailTilesPath('mp01')).toBe('BP/DetailTiles_mp01.tbp');
+  });
+});
+
+describe('trees', () => {
+  /** 3x3 map, everything a tree except the top-left cell (terrain already baked: 1 = tree). */
+  const map: GameMap = {
+    width: 3, height: 3, tileset: 'KingTileset',
+    terrain: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), edges: new Uint8Array(9), regions: new Uint8Array(9),
+    trees: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), ground: new Uint16Array(9).fill(116), mineSites: [],
+  };
+
+  it('keys a cell by its 3x3 neighbourhood, 2 bits per cell, off-map counts as tree', () => {
+    // Centre cell: only NW (slot 0) is open, every other slot is tree (1).
+    expect(treeKey(map, map.terrain, 1, 1)).toBe(0b010101010101010100);
+    // Bottom-right corner: off-map neighbours count as tree, so all nine slots are 1.
+    expect(treeKey(map, map.terrain, 2, 2)).toBe(0b010101010101010101);
+    // A rough-edge bit turns that neighbour into 2. Bit 1 = N.
+    const rough = { ...map, edges: new Uint8Array(9).fill(0b10) };
+    expect(treeKey(rough, map.terrain, 1, 2) >> 2 & 3).toBe(2);
+  });
+
+  it('looks keys up in range tables with a fallback', () => {
+    const t: TreeTable = { bases: new Uint32Array([0, 100]), lengths: new Uint16Array([2, 3]), tables: [new Uint8Array([5, 0xff]), new Uint8Array([7, 8, 9])], fallback: 6 };
+    expect(treeMetatile(t, 0)).toBe(5);
+    expect(treeMetatile(t, 1)).toBe(6); // 0xff entry
+    expect(treeMetatile(t, 50)).toBe(6); // past the first table's length
+    expect(treeMetatile(t, 102)).toBe(9);
+  });
+
+  it('bakes trees into terrain and ground, but only on open ground', () => {
+    const t: TreeTable = { bases: new Uint32Array([0]), lengths: new Uint16Array([0]), tables: [new Uint8Array()], fallback: 6 };
+    const raw = { ...map, terrain: new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 3]) }; // a "tree" on water stays water
+    const b = bakeTrees(raw, t);
+    expect([...b.terrain]).toEqual([0, 1, 1, 1, 1, 1, 1, 1, 3]);
+    expect(b.ground[8]).toBe(116);
+    expect(b.ground[0]).toBe(116);
+    expect(b.ground[4]).toBe(6);
+    expect(map.ground[4]).toBe(116);
   });
 });

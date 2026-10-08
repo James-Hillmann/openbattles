@@ -10,3 +10,4 @@ export * from './nitro';
 export * from './map';
 export * from './render';
 export * from './bundle';
+export * from './trees';

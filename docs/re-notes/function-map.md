@@ -16,6 +16,14 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020F178C` | ARM | `Res_popScope` | Closes the scope opened by `Res_pushScope` | guess | |
 | `0x0200302C` | ARM | `Fn_makeCallback` | Wraps a function pointer for `Res_loadAsync` | guess | |
 | `0x0204C6E4` | ? | `Mem_alloc` | Allocation with (size, file, line) | guess | Debug-heap style signature |
+| `0x020A3944` | Thumb | `Map_readSection` | Compares a 4-byte tag and dispatches to the TERR/EVNT/TRIG/MINE/MARK readers | confirmed | |
+| `0x020A39E8` | Thumb | `Map_readTerr` | Reads width/height, tileset name, terrain/edges/regions planes, the tree runs and the ground layer into the map object | confirmed | Map object: +0x14 width, +0x15 height, +0x30 ground, +0x2E8 terrain, +0x2EC regions, +0x2F0 edges, +0x2F4 tree runs |
+| `0x020A30C8` | Thumb | `Map_plantTrees` | Walks the tree runs; sets terrain 1 on tree cells that are terrain 0; then calls `Map_retileTrees` | confirmed | |
+| `0x020A40D0` | Thumb | `Map_retileTrees` | Calls `Map_retileTree` for every terrain-1 cell | confirmed | |
+| `0x020A3FC0` | Thumb | `Map_treeKey` | Builds the 18-bit 3x3 neighbourhood key | confirmed | See formats.md "Trees" |
+| `0x020A41E4` | Thumb | `Map_retileTree` | Looks the key up and writes the ground metatile | confirmed | Table addresses in `extract/src/trees.ts` |
+| `0x020A26B8` | Thumb | `Table_findRange` | Binary search: index of the last start key <= key | confirmed | |
+| `0x020A308C` / `0x020A30A0` | Thumb | `Map_getTerrain` / `Map_setTerrain` | Read/write one terrain byte at a cell | confirmed | |
 | `0x02080EF4` | ARM | `Path_astar?` | References the string `AstarSearch.cpp` | guess | Pathfinding lives near here; start M4 movement work from this |
 
 ## Notes
