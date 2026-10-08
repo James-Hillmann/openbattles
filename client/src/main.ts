@@ -16,6 +16,25 @@ import {
   cellCenterY,
   reachableFrom,
   spreadCells,
+  createSkirmish,
+  canPlace,
+  isBuilding,
+  isFinished,
+  getPlayer,
+  popUsed,
+  popCap,
+  starsUsed,
+  starCap,
+  unitCell,
+  TRAINS,
+  PLAYING,
+  WON,
+  START_BRICKS,
+  TERRAIN_TREE,
+  ROLE_BUILDER,
+  type EntityType,
+  type StartSpawn,
+  type WinMode,
   type Fx,
   type MeleeBonusTable,
   type Fog,
@@ -23,7 +42,7 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACINGS, FACTIONS, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FACINGS, FACTIONS, type BuildingSprite, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
@@ -31,7 +50,8 @@ import { mountRomPanel, skirmishFirst } from './romPanel';
 import { Selection, type Pickable } from './selection';
 import { Match, bareWorld, type MatchStart, type RelayClient } from './match';
 import { defaultRelayUrl, mountLobby } from './lobby';
-import type { GameSettings } from '@lbw/server/protocol';
+import type { GameSettings, GameType } from '@lbw/server/protocol';
+import { CommandBar, type CommandItem } from './commandBar';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
 let localPlayer = 0;
@@ -116,6 +136,14 @@ let drawn: Pickable[] = [];
 
 // --- Map + sprites from the ROM ---------------------------------------------
 
+function canvasFrom(img: Rgba): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = img.width;
+  c.height = img.height;
+  c.getContext('2d')!.putImageData(new ImageData(img.data.slice(), img.width, img.height), 0, 0);
+  return c;
+}
+
 function textureFrom(img: Rgba): Texture {
   const c = document.createElement('canvas');
   c.width = img.width;
@@ -139,13 +167,22 @@ let factionUnits = new Map<string, string[]>();
 let unitStats: Record<string, UnitStats> = {};
 let combatBonus: MeleeBonusTable | null = null;
 
-function simType(s: UnitStats | undefined): SimUnitType {
-  if (!s) return {};
-  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role } = s;
-  return { kind: index, speed, hp, priority, moves, layer, role, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+function simType(s: UnitStats): EntityType & SimUnitType {
+  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role, cost, buildTime, size } = s;
+  return {
+    kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield,
+    attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile },
+  };
 }
-/** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
-const unitKind = new Map<number, string>();
+
+/** The lobby's game type as the sim's win rule (GameRuleManager mode). */
+const WIN_MODE: Record<GameType, WinMode> = { 'hunt-the-hero': 0, elimination: 1, 'gold-rush': 2 };
+/** Entity name per entity index (sim Unit.kind), from Entities.ebp. */
+let nameByIndex = new Map<number, string>();
+const unitKind = { get: (id: number) => nameByIndex.get(world.units.find((u) => u.id === id)?.kind ?? -1) };
+/** Building pictures by "<entity name>@<bank>", and every type's picture as a small canvas for the command strip. */
+const buildingTex = new Map<string, Texture>();
+const iconCache = new Map<string, HTMLCanvasElement>();
 const unitSprites = new Map<number, Sprite>();
 /** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
 const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number; clip: ModelClipName; clipStart: number }>();
@@ -157,6 +194,13 @@ function onUnits(u: UnitBundle) {
   unitTypes.clear();
   factionUnits = new Map();
   unitStats = u.stats;
+  nameByIndex = new Map(Object.values(u.stats).map((s) => [s.index, s.name]));
+  buildingTex.clear();
+  iconCache.clear();
+  for (const b of u.buildings) {
+    buildingTex.set(b.key, textureFrom(b.image));
+    iconCache.set(b.key, canvasFrom(b.image));
+  }
   for (const s of u.sprites) {
     const tex = textureFrom(s.atlas);
     const cols = s.atlas.width / s.frameW;
@@ -176,42 +220,55 @@ function onUnits(u: UnitBundle) {
   mountFactionPickers(u);
 }
 
-/** Walkable cells for `count` units near (px, py), all on one landmass. */
-function spawnCells(grid: TerrainGrid, px: number, py: number, count: number): [Fx, Fx][] {
-  const [x, y] = [Math.floor(px / CELL_W), Math.floor(py / CELL_H)];
-  const first = spreadCells(grid, x, y, 1);
-  return spreadCells(grid, x, y, count, reachableFrom(grid, first)).map((c) => [
-    cellCenterX(c % grid.width),
-    cellCenterY(Math.floor(c / grid.width)),
-  ]);
-}
-
-/** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
-function spawnLineups(cx: number, cy: number) {
-  world = createWorld({ seed: worldSeed, grid: mapGrid, bonus: combatBonus });
-  unitKind.clear();
-  for (let p = 0; p < factionPick.length; p++) {
-    const names = factionUnits.get(factionPick[p]!) ?? [];
-    const py = cy + (p === 0 ? -50 : 50);
-    const spots = mapGrid ? spawnCells(mapGrid, cx, py, names.length) : names.map((_, i) => [fx(cx - 90 + i * 36), fx(py)] as [Fx, Fx]);
-    names.forEach((name, i) => {
-      const spot = spots[i];
-      if (!spot) return;
-      const t = unitTypes.get(`${name}@${bankOf(p)}`);
-      const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: (t?.sprite ?? t?.model?.unit)?.speed });
-      unitKind.set(u.id, name);
-    });
-  }
-  if (!factionUnits.size) return resetWorld(cx, cy, mapGrid);
+/** Start a skirmish on the loaded map: each player's start units from the map, the lobby's (or default) rules. */
+function startSkirmish() {
+  if (!mapGrid || !unitStats || !Object.keys(unitStats).length) return resetWorld(mapSize.w / 2, mapSize.h / 2, mapGrid);
+  const types: (EntityType | undefined)[] = [];
+  for (const st of Object.values(unitStats)) types[st.index] = simType(st);
+  const ofRole = (p: number, role: number) =>
+    Object.values(unitStats)
+      .filter((st) => st.name.startsWith(`${factionPick[p] ?? 'K'}_`) && st.role === role)
+      .sort((x, y) => x.index - y.index);
+  const settings = online?.settings;
+  // The sim writes chopped trees and footprints into the grid: every match starts from the map's own.
+  const grid = { ...mapGrid, cells: mapTerrain.slice() };
+  world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines }, mapStarts, {
+    prebuilt: settings?.prebase ?? false,
+    rules: { mode: settings ? WIN_MODE[settings.game] : 0 },
+    bricks: settings?.bank ?? START_BRICKS,
+    slots: factionPick.map((_, p) => p),
+    typeFor: (p, role, index) => {
+      const st = ofRole(p, role)[index];
+      return st ? simType(st) : null;
+    },
+  });
+  mapGrid = grid;
+  groundTrees = treeCount(grid.cells);
   adopt(world);
-  for (const s of unitSprites.values()) s.destroy();
+  for (const sp of unitSprites.values()) sp.destroy();
   unitSprites.clear();
   unitAnim.clear();
   selection.ids.clear();
+  placing = null;
+  const start = getPlayer(world, localPlayer)?.start ?? -1;
+  if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
+
+const cellCenterPx = (c: number, axis: 'x' | 'y') => (axis === 'x' ? c * CELL_W + CELL_W / 2 : c * CELL_H + CELL_H / 2);
+const treeCount = (cells: Uint8Array) => cells.reduce((n, c) => n + (c === TERRAIN_TREE ? 1 : 0), 0);
 
 let mapSize = { w: 600, h: 440 };
 let mapGrid: TerrainGrid | null = null;
+/** The map's terrain as loaded (trees standing), its skirmish start records and Mine sites. */
+let mapTerrain = new Uint8Array(0);
+let mapStarts: StartSpawn[] = [];
+let mapMines: number[] = [];
+let mapName = '';
+/** Trees on the ground texture we show; when the sim's count drops, the ground is redrawn. */
+let groundTrees = 0;
+let groundAsked = 0;
+/** Building picked from the strip, waiting for a spot: entity index. */
+let placing: { type: number } | null = null;
 let minimap: Rgba | undefined;
 /** The local player's fog (presentation only, not part of the lockstep state). */
 let fog: Fog | null = null;
@@ -223,13 +280,18 @@ const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
+  gameIcons = new Map(Object.entries(hud.commandIcons).map(([k, v]) => [k, canvasFrom(v)]));
   minimap = b.minimap;
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
+  mapTerrain = b.terrain.slice();
+  mapStarts = b.starts;
+  mapMines = b.mineSites.map((m) => m.y * b.width + m.x);
+  mapName = b.name;
   fog = createFog(b.width, b.height);
-  spawnLineups(mapSize.w / 2, mapSize.h / 2);
   centerOn(mapSize.w / 2, mapSize.h / 2);
+  startSkirmish();
 }
 
 function mountFactionPickers(u: UnitBundle) {
@@ -246,7 +308,7 @@ function mountFactionPickers(u: UnitBundle) {
     sel.addEventListener('change', () => {
       if (online) return;
       factionPick[p] = sel.value;
-      spawnLineups(mapSize.w / 2, mapSize.h / 2);
+      startSkirmish();
     });
   });
 }
@@ -277,7 +339,8 @@ window.addEventListener('pointerup', (e) => {
   if (!drag) return;
   if (!drag.moved) {
     const w = toWorld(e.clientX, e.clientY);
-    selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+    hover = w;
+    if (!tryPlace()) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
   } else if (boxRect) {
     selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
   }
@@ -285,6 +348,7 @@ window.addEventListener('pointerup', (e) => {
   boxRect = null;
 });
 window.addEventListener('pointermove', (e) => {
+  hover = toWorld(e.clientX, e.clientY);
   if (!drag) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4) return;
   drag.moved = true;
@@ -298,7 +362,10 @@ window.addEventListener('pointermove', (e) => {
   camera.y = e.clientY - drag.y;
 });
 const keys = new Set<string>();
-window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+window.addEventListener('keydown', (e) => {
+  keys.add(e.key.toLowerCase());
+  if (e.key === 'Escape') placing = null;
+});
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 app.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -322,14 +389,35 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
   const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
-  const unitIds = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id)).map((u) => u.id);
+  if (placing) {
+    placing = null;
+    return;
+  }
+  const sel = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id));
+  const unitIds = sel.map((u) => u.id);
   if (unitIds.length === 0) return;
-  // Sprites are anchored near the feet, so hit-test the box above them.
-  const enemy = world.units.find(
-    (u) => u.owner !== localPlayer && !hiddenByFog(u) && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
-  );
-  const cmd = enemy ? { kind: 'attack' as const, unitIds, target: enemy.id } : { kind: 'move' as const, unitIds, x: fx(px), y: fx(py) };
-  match.issue(cmd);
+  const builders = sel.filter((u) => u.role === ROLE_BUILDER).map((u) => u.id);
+  const hit = selection.pick(drawn, px, py);
+  const target = hit && world.units.find((u) => u.id === hit.id);
+  // Builders sent to one of our unfinished buildings go and build it.
+  if (target && target.owner === localPlayer && isBuilding(target) && !isFinished(target) && builders.length) {
+    match.issue({ kind: 'construct', unitIds: builders, site: target.id });
+    return;
+  }
+  if (target && target.owner !== localPlayer) {
+    match.issue({ kind: 'attack', unitIds, target: target.id });
+    return;
+  }
+  // Builders sent to a tree chop it and keep harvesting; everyone else walks there.
+  const g = world.grid;
+  const [cx, cy] = [Math.floor(px / CELL_W), Math.floor(py / CELL_H)];
+  if (g && builders.length && cx >= 0 && cy >= 0 && cx < g.width && cy < g.height && g.cells[cy * g.width + cx] === TERRAIN_TREE) {
+    match.issue({ kind: 'harvest', unitIds: builders, cx, cy });
+    const rest = unitIds.filter((id) => !builders.includes(id));
+    if (rest.length) match.issue({ kind: 'move', unitIds: rest, x: fx(px), y: fx(py) });
+    return;
+  }
+  match.issue({ kind: 'move', unitIds, x: fx(px), y: fx(py) });
 });
 
 // --- Fog of war (sim/src/fog.ts; docs/re-notes/fog.md) --------------------------
@@ -355,6 +443,191 @@ function drawFog() {
     }
   }
   fogLayer.fill(FOG_COLOR);
+}
+
+// --- Buildings ------------------------------------------------------------------
+
+/** A building's footprint in world pixels (top-left cell is where the sim keeps it). */
+function footprint(u: World['units'][number]) {
+  const g = world.grid!;
+  const c = unitCell(world, u);
+  return { left: (c % g.width) * CELL_W, top: Math.floor(c / g.width) * CELL_H, w: u.size * CELL_W, h: u.size * CELL_H };
+}
+
+/**
+ * Building picture with its bottom centre on the footprint's bottom centre: guess, not yet lined
+ * up with the emulator. A site under construction is drawn see-through (our stand-in; the game's
+ * construction look is not traced yet). Selected buildings use the odd (outlined) bank like units.
+ */
+function drawBuilding(u: World['units'][number], isSelected: boolean, out: Pickable[]) {
+  if (!world.grid) return;
+  const f = footprint(u);
+  const name = nameByIndex.get(u.kind);
+  const tex = buildingTex.get(`${name}@${bankOf(u.owner) + (isSelected ? 1 : 0)}`) ?? buildingTex.get(`${name}@${bankOf(u.owner)}`);
+  const top = tex ? f.top + f.h - tex.height : f.top;
+  out.push({ id: u.id, owner: u.owner, x: f.left + f.w / 2, y: f.top + f.h, box: { l: f.left, t: top, r: f.left + f.w, b: f.top + f.h }, building: true });
+  if (!tex) {
+    fallback.rect(f.left + 2, f.top + 2, f.w - 4, f.h - 4).fill(COLORS[teamColor[u.owner] ?? u.owner] ?? 0xffffff);
+  } else {
+    let s = unitSprites.get(u.id);
+    if (!s) {
+      s = new Sprite();
+      s.anchor.set(0.5, 1);
+      unitLayer.addChild(s);
+      unitSprites.set(u.id, s);
+    }
+    s.texture = tex;
+    s.position.set(f.left + f.w / 2, f.top + f.h);
+    s.zIndex = f.top + f.h;
+    s.alpha = isFinished(u) ? 1 : 0.55;
+    s.visible = true;
+  }
+  // Buildings show bars when selected or at <= 32% HP (emulator); we also show them while being built.
+  if (isSelected || !isFinished(u) || u.hp * 100 <= u.maxHp * 32) drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), top + 4, u.hp, u.maxHp);
+}
+
+// --- Build and train strip (docs/re-notes/build-ui.md) ---------------------------
+
+/** Order of the Builder's strip in the game: Castle, Farm, Lumber Mill, Mine, Barracks, Stables, Shipyard, Tower (then Wall, Bridge, not built yet). */
+const BUILD_ORDER = [7, 10, 8, 9, 11, 12, 16, 13];
+
+const endEl = document.createElement('div');
+endEl.className = 'endbanner';
+endEl.hidden = true;
+stageEl.appendChild(endEl);
+
+const bar = new CommandBar(stageEl, (key) => {
+  const [what, idx] = key.split(':');
+  const type = Number(idx);
+  if (what === 'build') placing = { type };
+  else if (what === 'train') {
+    const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
+    if (b) match.issue({ kind: 'train', building: b.id, type });
+  }
+});
+
+const factionStats = (p: number) =>
+  Object.values(unitStats)
+    .filter((st) => st.name.startsWith(`${factionPick[p] ?? 'K'}_`))
+    .sort((a, b) => a.index - b.index);
+
+/** The game's own strip icons (UI/MiniHeadsGame), for entities whose icon number is known. */
+let gameIcons = new Map<string, HTMLCanvasElement>();
+
+/**
+ * Picture for a strip button: the game's icon when we know its number, else a stand-in (the
+ * building itself, or the unit's front idle frame; model units get their name).
+ */
+function iconFor(name: string): HTMLCanvasElement | null {
+  const game = gameIcons.get(name);
+  if (game) return game;
+  const bank = bankOf(localPlayer);
+  const key = `${name}@${bank}`;
+  const hit = iconCache.get(key);
+  if (hit) return hit;
+  const t = unitTypes.get(key)?.sprite;
+  if (!t) return null;
+  const c = document.createElement('canvas');
+  c.width = t.frameW;
+  c.height = t.frameH;
+  const img = new ImageData(t.atlas.data.slice(), t.atlas.width, t.atlas.height);
+  const tmp = canvasFrom({ width: img.width, height: img.height, data: img.data });
+  c.getContext('2d')!.drawImage(tmp, t.idle * t.frameW, 4 * t.frameH, t.frameW, t.frameH, 0, 0, t.frameW, t.frameH);
+  iconCache.set(key, c);
+  return c;
+}
+
+const displayName = (name: string) => hudView.label(name)?.display ?? name.replace(/^._/, '');
+
+function updateStrip() {
+  const me = getPlayer(world, localPlayer);
+  const sel = world.units.filter((u) => u.owner === localPlayer && u.hp > 0 && selection.ids.has(u.id));
+  if (!me || me.status !== PLAYING || sel.length === 0) return bar.hide();
+  const item = (st: UnitStats, verb: string): CommandItem => ({
+    key: `${verb}:${st.index}`,
+    label: `${displayName(st.name)}: ${st.cost} bricks`,
+    cost: st.cost,
+    icon: iconFor(st.name),
+    enabled: me.bricks >= st.cost,
+  });
+  const b = sel.find(isBuilding);
+  if (b) {
+    const name = nameByIndex.get(b.kind) ?? '';
+    if (!isFinished(b)) return bar.show(`${displayName(name)}: ${Math.floor((100 * b.progress) / Math.max(1, b.buildTime))}%`, []);
+    const roles = TRAINS[b.role] ?? [];
+    // One hero icon (the first), as the Castle strip shows in the emulator.
+    const items = factionStats(localPlayer)
+      .filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st))
+      .map((st) => item(st, 'train'));
+    const queue = b.queue.map((k, i) => {
+      const n = nameByIndex.get(k) ?? '';
+      const bt = world.types[k]?.buildTime ?? 1;
+      return { icon: iconFor(n), pct: i === 0 ? Math.floor((100 * b.prod) / Math.max(1, bt)) : -1 };
+    });
+    return bar.show(displayName(name), items, queue);
+  }
+  if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
+  const all = factionStats(localPlayer);
+  const items = BUILD_ORDER.map((r) => all.find((st) => st.role === r && st.speed === 0xffff)).filter((st): st is UnitStats => !!st).map((st) => item(st, 'build'));
+  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')} (right-click cancels)` : 'Build', items);
+}
+
+let hover = { x: 0, y: 0 };
+
+/** Top-left cell of a footprint of `size` centred on the pointer. */
+function placeCell(size: number) {
+  const cx = Math.floor(hover.x / CELL_W) - ((size - 1) >> 1);
+  const cy = Math.floor(hover.y / CELL_H) - ((size - 1) >> 1);
+  return { cx, cy };
+}
+
+/** Building preview under the pointer: green where it can stand, red where not. */
+function drawPlacement() {
+  ghost.visible = false;
+  if (!placing || !world.grid) return;
+  const t = world.types[placing.type];
+  if (!t) return;
+  const { cx, cy } = placeCell(t.size);
+  const ok = canPlace(world, t, cx, cy);
+  const [l, tp, w, h] = [cx * CELL_W, cy * CELL_H, t.size * CELL_W, t.size * CELL_H];
+  overlay.rect(l, tp, w, h).fill({ color: ok ? 0x30ff30 : 0xff3030, alpha: 0.35 });
+  const tex = buildingTex.get(`${nameByIndex.get(placing.type)}@${bankOf(localPlayer)}`);
+  if (tex) {
+    ghost.texture = tex;
+    ghost.position.set(l + w / 2, tp + h);
+    ghost.visible = true;
+  }
+}
+
+const ghost = new Sprite();
+ghost.anchor.set(0.5, 1);
+ghost.alpha = 0.6;
+camera.addChild(ghost);
+
+/** Place the picked building at the pointer with the selected Builders. */
+function tryPlace(): boolean {
+  if (!placing) return false;
+  const t = world.types[placing.type];
+  const unitIds = world.units.filter((u) => u.owner === localPlayer && u.role === ROLE_BUILDER && selection.ids.has(u.id)).map((u) => u.id);
+  if (t && unitIds.length) {
+    const { cx, cy } = placeCell(t.size);
+    if (!canPlace(world, t, cx, cy)) return true; // keep the preview up; the spot is taken
+    match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
+  }
+  placing = null;
+  return true;
+}
+
+/** Redraw the ground when trees have been chopped (at most twice a second). */
+function checkGround() {
+  if (!world.grid || !mapName || !rom.summary()) return;
+  const now = performance.now();
+  if (now - groundAsked < 500) return;
+  const n = treeCount(world.grid.cells);
+  if (n === groundTrees) return;
+  groundTrees = n;
+  groundAsked = now;
+  rom.rebake(mapName, world.grid.cells);
 }
 
 // --- Loop: fixed-step sim, interpolated render ---------------------------------
@@ -431,6 +704,10 @@ app.ticker.add((t) => {
       if (hidden) hidden.visible = false;
       continue;
     }
+    if (isBuilding(u)) {
+      drawBuilding(u, selection.ids.has(u.id), nextDrawn);
+      continue;
+    }
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
@@ -494,16 +771,21 @@ app.ticker.add((t) => {
     overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).stroke({ color: 0xffff00, width: 1 / camera.scale.x });
   }
 
+  drawPlacement();
+  updateStrip();
+  checkGround();
   const mine = world.units.filter((u) => u.owner === localPlayer);
   const firstSelected = mine.find((u) => selection.ids.has(u.id));
   const selectedName = firstSelected && unitKind.get(firstSelected.id);
   const selectedEntity = selectedName ? hudView.entityIndex(selectedName) : -1;
+  const me = getPlayer(world, localPlayer);
+  endEl.hidden = !me || me.status === PLAYING;
+  if (me && me.status !== PLAYING) endEl.textContent = me.status === WON ? 'Victory!' : 'Defeat';
   hudView.update({
-    // Placeholders until the sim has an economy: the skirmish starting bricks and the population cap seen in the emulator.
-    bricks: online?.settings.bank ?? 500,
-    minifigs: mine.length,
-    minifigCap: Math.max(4, mine.length),
-    star: [0, 0],
+    bricks: me?.bricks ?? online?.settings.bank ?? START_BRICKS,
+    minifigs: me ? popUsed(world, localPlayer) : mine.length,
+    minifigCap: me ? popCap(world, localPlayer) : Math.max(4, mine.length),
+    star: me ? [starsUsed(world, localPlayer), starCap(world, localPlayer)] : [0, 0],
     selected: selectedEntity >= 0 && firstSelected ? { entity: selectedEntity, hp: firstSelected.hp } : undefined,
     minimap: minimap && {
       image: minimap,
@@ -514,12 +796,15 @@ app.ticker.add((t) => {
         w: Math.round(app.screen.width / camera.scale.x / 16),
         h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
       },
-      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[teamColor[d.owner] ?? d.owner] ?? [255, 255, 255] })),
+      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: d.building ? 2 : 1, rgb: MINIMAP_DOT[teamColor[d.owner] ?? d.owner] ?? [255, 255, 255] })),
     },
   });
 });
 
 const rom = mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);
+rom.onGround = (name, g) => {
+  if (name === mapName) ground.texture = textureFrom(g);
+};
 
 // --- Online: lobby, then a lockstep match --------------------------------------
 
@@ -554,7 +839,7 @@ function endOnline() {
   factionPick = ['K', 'A'];
   worldSeed = 1234;
   rom.lockMap(null);
-  if (rom.summary()) void rom.loadUnits(teamColor, 0).then(() => spawnLineups(mapSize.w / 2, mapSize.h / 2));
+  if (rom.summary()) void rom.loadUnits(teamColor, 0).then(() => startSkirmish());
   else resetWorld(300, 220);
 }
 
@@ -578,8 +863,37 @@ mountLobby(
   /** True once the online match's world is built and ticking. */
   online: () => online?.ready === true,
   local: () => localPlayer,
-  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y })),
+  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y, role: u.role, kind: u.kind, hp: u.hp, progress: u.progress, queue: [...u.queue], job: u.job?.kind ?? null })),
+  player: (id: number) => getPlayer(world, id) ?? null,
+  /** Select units as a click would (tests drive the strip and orders through the real input path). */
+  select: (ids: number[]) => {
+    selection.ids.clear();
+    for (const id of ids) selection.ids.add(id);
+  },
+  /** World pixel -> page pixel, for clicking. */
+  toScreen: (x: number, y: number) => {
+    const r = app.canvas.getBoundingClientRect();
+    return { x: r.left + camera.x + x * camera.scale.x, y: r.top + camera.y + y * camera.scale.y };
+  },
+  grid: () => world.grid && { width: world.grid.width, height: world.grid.height, cells: [...world.grid.cells] },
   issueMove: (x: number, y: number) =>
     match.issue({ kind: 'move', unitIds: world.units.filter((u) => u.owner === localPlayer).map((u) => u.id), x: fx(x), y: fx(y) }),
   desynced: () => match.desynced,
+  /** Economy orders through the real command path: the base trains a Builder, Builders chop the nearest tree. */
+  issueEconomy: () => {
+    const mine = world.units.filter((u) => u.owner === localPlayer && u.hp > 0);
+    const builder = mine.find((u) => u.role === ROLE_BUILDER);
+    const base = mine.find((u) => u.role === 7);
+    if (base && builder) match.issue({ kind: 'train', building: base.id, type: builder.kind });
+    const g = world.grid;
+    if (!g || !builder) return;
+    const here = unitCell(world, builder);
+    let best = -1;
+    for (let i = 0; i < g.cells.length; i++) {
+      if (g.cells[i] !== TERRAIN_TREE) continue;
+      const d = (i: number) => Math.abs((i % g.width) - (here % g.width)) + Math.abs(Math.floor(i / g.width) - Math.floor(here / g.width));
+      if (best < 0 || d(i) < d(best)) best = i;
+    }
+    if (best >= 0) match.issue({ kind: 'harvest', unitIds: [builder.id], cx: best % g.width, cy: Math.floor(best / g.width) });
+  },
 };

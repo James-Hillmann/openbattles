@@ -46,4 +46,16 @@ describe('fog of war', () => {
     expect(isExplored(f, 5, 5)).toBe(true);
     expect(isVisible(f, 20, 5)).toBe(true);
   });
+
+  it('buildings see without attacking: a castle with no damage still lights its sight circle', () => {
+    const w = createWorld({ seed: 1, grid: open(40, 40) });
+    // Entities.ebp gives a castle melee fields of 0 and no projectile, with sight 11.
+    const castle = spawnUnit(w, 0, cellCenterX(20), cellCenterY(20), { attack: { ...sight(11), damage: 0, damageRand: 0 }, role: 7 });
+    expect(castle.attack).toBeNull();
+    expect(castle.sight).toBe(11);
+    const f = createFog(40, 40);
+    updateFog(f, w, 0);
+    expect(isVisible(f, 20, 9)).toBe(true);
+    expect(isVisible(f, 20, 8)).toBe(false);
+  });
 });

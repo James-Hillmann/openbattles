@@ -12,6 +12,7 @@ import {
   hashWorld,
   isWalkable,
   spawnUnit,
+  stopMove,
   spreadCells,
   step,
   type TerrainGrid,
@@ -255,5 +256,44 @@ describe('chasing on a map', () => {
       expect(isWalkable(g, cx!, cy!)).toBe(true);
     }
     expect(w.units[1]!.hp).toBeLessThan(350);
+  });
+});
+
+describe('stepping past a blocked corner', () => {
+  /**
+   * A unit heading diagonally may claim its target cell while its position
+   * crosses the occupied corner cell first (the game's corner rule). If its
+   * order ends right then, it must still walk into the cell it holds instead
+   * of standing on the corner cell's occupant.
+   */
+  function cornerWorld() {
+    const g = grid(['....', '....', '....']);
+    const w = createWorld({ seed: 1, grid: g });
+    const blocker = spawnUnit(w, 0, cellCenterX(1), cellCenterY(1));
+    // Off-centre in cell (0, 1) so the x boundary is crossed before the y boundary.
+    const u = spawnUnit(w, 0, fx(20), fx(24), { speed: 300 });
+    orderMove(w, u, 1); // cell (1, 0)
+    for (let t = 0; t < 10 && cellXY(u)[0] === 0; t++) step(w, []);
+    expect(cellXY(u)).toEqual([1, 1]); // standing on the blocker's cell...
+    expect(u.cell).toBe(1); // ...while holding the target cell
+    return { w, u, blocker };
+  }
+
+  it('finishes in the cell it holds when its order is dropped', () => {
+    const { w, u, blocker } = cornerWorld();
+    stopMove(w, u);
+    for (let t = 0; t < 20 && u.mv; t++) step(w, []);
+    expect(u.mv).toBeNull();
+    expect(cellXY(u)).toEqual([1, 0]);
+    expect(u.cell).toBe(1);
+    expect(cellXY(blocker)).toEqual([1, 1]);
+  });
+
+  it('aligns to the cell it holds, not the one it stands in', () => {
+    const { w, u } = cornerWorld();
+    u.mv!.align = true; // as when the plotter gives up right after the corner step
+    for (let t = 0; t < 20 && u.mv; t++) step(w, []);
+    expect(cellXY(u)).toEqual([1, 0]);
+    expect(u.cell).toBe(1);
   });
 });

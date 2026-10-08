@@ -8,11 +8,13 @@ import {
   modelClips,
   hex,
   listMaps,
+  rebakeGround,
   tryRomFile,
   unpackRom,
   type HudBundle,
   type MapBundle,
   type UnitBundle,
+  type Rgba,
   type UnpackedRom,
 } from '@lbw/extract';
 
@@ -62,11 +64,14 @@ export type WorkerRequest =
   | { type: 'load'; rom: ArrayBuffer }
   | { type: 'map'; name: string }
   /** Rebuild the unit sheets for these team colors (0..5). */
-  | { type: 'units'; teams: number[]; localTeam: number };
+  | { type: 'units'; teams: number[]; localTeam: number }
+  /** Redraw a map's ground for the live terrain (chopped trees). */
+  | { type: 'ground'; name: string; terrain: Uint8Array };
 export type WorkerResponse =
   | { type: 'loaded'; summary: RomSummary }
   | { type: 'units'; units: UnitBundle }
   | { type: 'map'; bundle: MapBundle; hud: HudBundle }
+  | { type: 'ground'; name: string; ground: Rgba }
   | { type: 'error'; error: string };
 
 let rom: UnpackedRom | null = null;
@@ -95,12 +100,16 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
         },
       });
       const u = units(rom, DEFAULT_TEAMS, LOCAL_TEAM);
-      portraitIds = [...new Set(u.sprites.map((s) => s.name))];
-      post({ type: 'units', units: u }, u.sprites.map((s) => s.atlas.data.buffer));
+      portraitIds = [...new Set([...u.sprites, ...u.buildings].map((s) => s.name))];
+      post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
     } else if (e.data.type === 'units') {
       if (!rom) throw new Error('No ROM loaded');
       const u = units(rom, e.data.teams, e.data.localTeam);
-      post({ type: 'units', units: u }, u.sprites.map((s) => s.atlas.data.buffer));
+      post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
+    } else if (e.data.type === 'ground') {
+      if (!rom) throw new Error('No ROM loaded');
+      const ground = rebakeGround(rom, e.data.name, e.data.terrain);
+      post({ type: 'ground', name: e.data.name, ground }, [ground.data.buffer]);
     } else {
       if (!rom) throw new Error('No ROM loaded');
       const bundle = buildMapBundle(rom, e.data.name);

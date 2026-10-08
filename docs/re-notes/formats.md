@@ -61,7 +61,7 @@ The unit and building table. 75,195 bytes decompressed.
   see "Movement speed and update rate" below.
 - +0x5E u16 cost in bricks (King 500, Engineer 50, Swordsman 100), confirmed for the King against the
   in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed in the emulator.
-  +0x60 u16 maybe build time (600, 150, 270), guess.
+  +0x60 u16 build or train time in ticks (Farm 360, Builder 150), confirmed in the emulator; +0x1D footprint side in cells, likely. See [economy.md](economy.md).
 - **Combat fields +0x66..+0x71** (projectile, damage, random damage, cooldown, range, sight): see
   [combat.md](combat.md). Damage, random damage, cooldown and HP are confirmed in the emulator.
 - +0x14 u8 looks like a unit class (guess): 2 builder, 3 melee and heroes, 4 ranged, 5 siege/flying,
