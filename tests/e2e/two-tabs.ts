@@ -50,10 +50,12 @@ async function main() {
     const [a, b] = await Promise.all([1, 2].map(async () => (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage()));
     for (const p of [a!, b!]) p.on('pageerror', (e) => console.error('page error:', e.message));
     await Promise.all([a!.goto(url), b!.goto(url)]);
-    if (ROM) {
-      for (const p of [a!, b!]) await p.setInputFiles('#rom', ROM);
-      await Promise.all([a!, b!].map((p) => p.waitForSelector('#mapPick', { timeout: 120000 })));
+    for (const p of [a!, b!]) {
+      if (ROM) await p.setInputFiles('#rom', ROM);
+      else await p.click('#playBare');
     }
+    await Promise.all([a!, b!].map((p) => p.waitForSelector('#menuMp', { timeout: 120000 })));
+    for (const p of [a!, b!]) await p.click('#menuMp');
 
     await a!.fill('#mpName', 'Ann');
     await a!.click('#mpHost');
@@ -67,7 +69,13 @@ async function main() {
       await a!.selectOption('#mpMap', MAP);
       await b!.waitForFunction((m) => document.querySelector('.mpSummary')?.textContent?.includes(m), MAP);
     }
-    await b!.selectOption('#mpFaction', 'W');
+    // The guest plays the Wizard's army: picked on the army screen with a ROM, by faction without.
+    if (ROM) {
+      await b!.click('#mpArmy');
+      await b!.click('[data-army=Wizard]');
+      await b!.click('[data-act=ok]');
+      await b!.waitForSelector('#mpReady');
+    } else await b!.selectOption('#mpFaction', 'W');
     await b!.click('#mpReady');
     await a!.waitForSelector('#mpLaunch:not([disabled])');
     await a!.click('#mpLaunch');

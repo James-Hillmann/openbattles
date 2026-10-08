@@ -24,4 +24,6 @@ export * from './raster';
 export * from './modelSprites';
 export * from './nsbca';
 export * from './modelClips';
+export * from './armies';
+export * from './armyBundle';
 export * from './effects';

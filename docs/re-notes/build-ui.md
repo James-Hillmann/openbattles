@@ -51,10 +51,9 @@ construction: see "Construction effect" below.
 ## Ours
 
 - The strip opens as soon as a Builder or a finished production building is selected (no tab tap),
-  at the game's spot (DS (8,32), shown at 2x), with each icon's cost under it.
-- Icons are the game's own (`UI/MiniHeadsGame.NCGR`, see hud.md "Command icons") for the King entities whose
-  icon number we read off the emulator; everything else falls back to the building's own picture or the
-  unit's front idle frame (model units show their name) until the icon mapping is found.
+  at the game's spot (DS y 32, shown at 2x): a red band from the left edge that ends after the last
+  icon, unaffordable icons checkered. The prices are on the top screen's Build Costs panel (armies.md).
+- Icons come from the ARM9 icon table (armies.md); a unit with no strip icon shows its head.
 - Placement: click a spot (green = `canPlace`), right-click or Escape cancels. No check mark.
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.
 - Chopped trees: the client asks the ROM worker to re-bake the ground with the live terrain
@@ -62,8 +61,7 @@ construction: see "Construction effect" below.
 
 ## Open
 
-- Where the game keeps each entity's icon number (other factions); the top-screen cost panel; the strip's
-  end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
+- Strip icons of Imperial, Earth and Aliens units; the strip's exact end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
 - Stables and Shipyard lists; Wall and Bridge placement; the blue order strip; hero spells.
 - The game's placement rules beyond "walkable and free"; the yellow outline under a site.
 

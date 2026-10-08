@@ -163,6 +163,8 @@ export interface TopScreenState {
   /** The selected entity, if any: index into `labels`, and its current HP. */
   selected?: { entity: number; hp: number };
   minimap?: MinimapState;
+  /** While the build/train strip is open: the panel title ("Build Costs") and what the strip offers. Replaces the minimap. */
+  costs?: { title: string; items: { icon: Rgba; cost: number }[] };
 }
 
 /** Minimap contents, all in minimap pixels (map px * 1.5 / cell size, i.e. x / 16, y * 3 / 32). */
@@ -222,6 +224,28 @@ function drawMinimap(out: Rgba, m: MinimapState): void {
   }
 }
 
+/**
+ * "Build Costs" panel (emulator, Builder and Castle selected): a dark panel over the minimap's
+ * place, x 136-239, y 40-167, holding the strip's icons in rows of three at x 144 + 32n,
+ * y 40 + 32n, each cost on the 8 px tile grid in the row under its icon, centred. confirmed
+ * against the King Builder's ten buildings.
+ */
+export const COST_PANEL = { x: 136, y: 40, w: 104, h: 128, iconX: 144, iconY: 40, step: 32, cols: 3, rgb: [40, 32, 48] } as const;
+
+function drawCosts(out: Rgba, hud: HudBundle, items: readonly { icon: Rgba; cost: number }[]): void {
+  const P = COST_PANEL;
+  for (let y = P.y; y < P.y + P.h; y++)
+    for (let x = P.x; x < P.x + P.w; x++) out.data.set([P.rgb[0], P.rgb[1], P.rgb[2], 255], (y * TOP_W + x) * 4);
+  items.forEach((it, i) => {
+    const x = P.iconX + (i % P.cols) * P.step;
+    const y = P.iconY + Math.floor(i / P.cols) * P.step;
+    if (y + 32 > P.y + P.h + 8) return;
+    draw(out, it.icon, x, y);
+    const text = String(it.cost);
+    drawDigits(out, hud, text, Math.floor((x + 12 - text.length * 4) / 8) * 8, y + 24);
+  });
+}
+
 /** Name text color: sub BG palette bank 0 color 14 (white 0x7FFF). */
 const NAME_RGB: [number, number, number] = [255, 255, 255];
 
@@ -235,7 +259,8 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   drawDigits(out, hud, String(s.bricks), L.counters.bricks, L.counters.y);
   drawDigits(out, hud, `${s.minifigs}/${s.minifigCap}`, L.counters.minifigs, L.counters.y);
   drawDigits(out, hud, `${s.star[0]}/${s.star[1]}`, L.counters.star, L.counters.y);
-  if (s.minimap) drawMinimap(out, s.minimap);
+  if (s.costs) drawCosts(out, hud, s.costs.items);
+  else if (s.minimap) drawMinimap(out, s.minimap);
   const label = s.selected ? hud.labels[s.selected.entity] : undefined;
   if (s.selected && label) {
     const p = hud.portraits[label.id];
@@ -246,7 +271,7 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
       }
       draw(out, p, L.portrait.x, L.portrait.y);
     }
-    const name = renderText(hud.nameFont, label.display, NAME_RGB);
+    const name = renderText(hud.nameFont, s.costs?.title ?? label.display, NAME_RGB);
     draw(out, name, (L.nameSpan - name.width) >> 1, L.nameY);
     const hp = `${Math.max(0, s.selected.hp)}/${label.maxHp}`;
     // On the 8 px tile grid, centered under the portrait.

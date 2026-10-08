@@ -64,6 +64,14 @@ describe('relay lobby', () => {
     // Taken colors can't be stolen.
     b.send({ t: 'me', color: 0 });
     expect((await b.settle()).players[1]!.color).toBe(1);
+    // An army from the army screen: nine entity names; anything else is ignored.
+    const army = ['DwarfKing', 'P_Builder', 'Troll', 'K_Archer', 'W_Skeleknight', 'K_Ballista', 'WarJunk', 'A_SiegeThree', 'I_TransportShip'];
+    b.send({ t: 'me', army });
+    expect((await b.settle()).players[1]!.army).toEqual(army);
+    b.send({ t: 'me', army: ['<script>', ...army.slice(1)] });
+    expect((await b.settle()).players[1]!.army).toEqual(army);
+    b.send({ t: 'me', army: null });
+    expect((await b.settle()).players[1]!.army).toBeUndefined();
     a.ws.close();
     b.ws.close();
   });

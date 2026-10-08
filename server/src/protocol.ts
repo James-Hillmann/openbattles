@@ -39,6 +39,12 @@ export interface LobbyPlayer {
   /** 0..TEAM_COLORS-1, unique within a room. */
   color: number;
   faction: string;
+  /**
+   * The army picked on the army screen: entity names for the nine unit slots (hero, builder,
+   * close combat, ranged, mounted, three specials, transport). Buildings come from `faction`.
+   * Absent: the faction's own army.
+   */
+  army?: string[];
   ready: boolean;
 }
 
@@ -49,7 +55,7 @@ export type ClientMsg =
   /** Host only, before launch. */
   | { t: 'settings'; settings: GameSettings }
   /** Change your own lobby entry. */
-  | { t: 'me'; color?: number; faction?: string; ready?: boolean }
+  | { t: 'me'; color?: number; faction?: string; army?: string[] | null; ready?: boolean }
   /** Host only: remove a player from the lobby. */
   | { t: 'kick'; slot: number }
   /** Host only: start the match once everyone else is ready. */
@@ -74,7 +80,15 @@ export type ServerMsg =
  * Bump whenever the protocol or the sim rules change: clients on different builds would
  * desync, so the lobby only pairs equal versions (sent as part of the `rom` fingerprint).
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
+
+/** Unit slots in an army (the army screen's nine). */
+export const ARMY_SLOTS = 9;
+
+/** An army as sent over the wire: nine short entity names (letters, digits, '_'; '' for an empty slot). */
+export function validArmy(a: unknown): a is string[] {
+  return Array.isArray(a) && a.length === ARMY_SLOTS && a.every((n) => typeof n === 'string' && /^[A-Za-z0-9_]{0,32}$/.test(n));
+}
 
 /** Players per room. 1v1 for now; the protocol and relay work for any count up to TEAM_COLORS. */
 export const ROOM_SIZE = 2;

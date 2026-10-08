@@ -90,6 +90,17 @@ export function hashWorld(w: World): number {
   if (w.occ) for (const c of w.occ) mix(c);
   mix(w.players.length);
   for (const p of w.players) for (const v of [p.id, p.team, p.bricks, p.status, p.start]) mix(v);
+  // Armies only when someone has one, so worlds without them keep their hashes.
+  if (w.players.some((p) => p.army)) {
+    for (const p of w.players) {
+      if (!p.army) {
+        mix(-1);
+        continue;
+      }
+      for (const k of p.army.units) mix(k);
+      for (let i = 0; i < p.army.base.length; i++) mix(p.army.base.charCodeAt(i));
+    }
+  }
   mix(w.rules ? w.rules.mode : -1);
   return h >>> 0;
 }

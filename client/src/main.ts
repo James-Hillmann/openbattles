@@ -1,3 +1,4 @@
+import './ui.css';
 import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import {
   TICK_MS,
@@ -43,15 +44,18 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACINGS, FACTIONS, type BuildingSprite, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FE_TEXT, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
-import { mountRomPanel, skirmishFirst } from './romPanel';
+import { createRom, savedRom, saveRom, skirmishFirst } from './romPanel';
 import { Selection, type Pickable } from './selection';
 import { Match, bareWorld, type MatchStart, type RelayClient } from './match';
 import { defaultRelayUrl, mountLobby } from './lobby';
+import { canvasOf, defaultPick, type ArmyPick } from './armySelect';
+import { mountMenus } from './menus';
 import type { GameSettings, GameType } from '@lbw/server/protocol';
+import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
 import { SiteFx } from './siteFx';
 
@@ -132,6 +136,9 @@ camera.addChild(fogLayer);
 const overlay = new Graphics();
 camera.addChild(overlay);
 const hudView = new HudView(document.getElementById('side')!);
+/** `?dev` shows the tick and state hash. */
+const DEV = new URLSearchParams(location.search).has('dev');
+document.getElementById('dev')!.hidden = !DEV;
 const selection = new Selection();
 /** Where each unit was drawn last frame, for picking. */
 let drawn: Pickable[] = [];
@@ -163,16 +170,16 @@ function textureFrom(img: Rgba): Texture {
 type UnitType = { sprite: UnitSprite; frames: Texture[][]; model?: undefined } | { model: ModelView; sprite?: undefined };
 /** By "<entity name>@<bank>". */
 const unitTypes = new Map<string, UnitType>();
-/** Entity names per faction prefix, in table order (heroes, builder, melee, ranged, mounted, siege, ship). */
-let factionUnits = new Map<string, string[]>();
 /** Sim stats per entity name, from Entities.ebp. */
 let unitStats: Record<string, UnitStats> = {};
 let combatBonus: MeleeBonusTable | null = null;
 
 function simType(s: UnitStats): EntityType & SimUnitType {
   const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role, cost, buildTime, size } = s;
+  // Faction prefix of the six factions' entities; bonus characters (DwarfKing, ...) have none.
+  const faction = /^[KWPIEA]_/.test(s.name) ? s.name[0] : undefined;
   return {
-    kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield, faction: s.name.slice(0, s.name.indexOf('_')),
+    kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield, ...(faction ? { faction } : {}),
     attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile },
   };
 }
@@ -189,12 +196,17 @@ const unitSprites = new Map<number, Sprite>();
 /** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
 const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number; clip: ModelClipName; clipStart: number }>();
 const bgr = (c: number): [number, number, number] => [((c & 31) * 255) / 31, (((c >> 5) & 31) * 255) / 31, (((c >> 10) & 31) * 255) / 31];
-let factionPick: string[] = ['K', 'A'];
+/** The ROM's armies (army screen data and strip icons), once a ROM is loaded. */
+let armyBundle: ArmyBundle | null = null;
+/** Army per player. Offline: yours, then the opponent's. */
+let picks: ArmyPick[] = [];
+const pickOf = (p: number): ArmyPick | null => picks[p] ?? (armyBundle ? defaultPick(armyBundle, p === 0 ? 'King' : 'Aliens') : null);
+/** Faction prefix of a player's buildings. */
+const basePrefix = (p: number) => (armyBundle && armyBundle.prefixes[pickOf(p)?.army ?? 'King']) ?? (p === 0 ? 'K' : 'A');
 
 function onUnits(u: UnitBundle) {
   for (const t of unitTypes.values()) t.model?.destroy();
   unitTypes.clear();
-  factionUnits = new Map();
   unitStats = u.stats;
   nameByIndex = new Map(Object.values(u.stats).map((s) => [s.index, s.name]));
   buildingTex.clear();
@@ -212,14 +224,6 @@ function onUnits(u: UnitBundle) {
     unitTypes.set(s.key, { sprite: s, frames });
   }
   for (const m of u.models) unitTypes.set(m.key, { model: new ModelView(m, textureFrom) });
-  // Table order within each faction: heroes ... mounted (sprites), then siege, flyers, ships (models).
-  for (const s of [...u.sprites, ...u.models]) {
-    const prefix = s.name.slice(0, 1);
-    const list = factionUnits.get(prefix) ?? [];
-    if (!list.includes(s.name)) list.push(s.name);
-    factionUnits.set(prefix, list);
-  }
-  mountFactionPickers(u);
 }
 
 /** Start a skirmish on the loaded map: each player's start units from the map, the lobby's (or default) rules. */
@@ -227,18 +231,27 @@ function startSkirmish() {
   if (!mapGrid || !unitStats || !Object.keys(unitStats).length) return resetWorld(mapSize.w / 2, mapSize.h / 2, mapGrid);
   const types: (EntityType | undefined)[] = [];
   for (const st of Object.values(unitStats)) types[st.index] = simType(st);
-  const ofRole = (p: number, role: number) =>
-    Object.values(unitStats)
-      .filter((st) => st.name.startsWith(`${factionPick[p] ?? 'K'}_`) && st.role === role)
+  const ofRole = (p: number, role: number) => {
+    const army = pickOf(p);
+    // Units come from the player's army: the slots holding this role, in slot order.
+    if (army && role < 7) return army.units.map((n) => unitStats[n]).filter((st): st is UnitStats => !!st && st.role === role);
+    return Object.values(unitStats)
+      .filter((st) => st.name.startsWith(`${basePrefix(p)}_`) && st.role === role)
       .sort((x, y) => x.index - y.index);
-  const settings = online?.settings;
+  };
+  const players = online ? teamColor.length : 2;
+  const settings = online?.settings ?? offlineSettings;
   // The sim writes chopped trees and footprints into the grid: every match starts from the map's own.
   const grid = { ...mapGrid, cells: mapTerrain.slice() };
   world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines }, mapStarts, {
     prebuilt: settings?.prebase ?? false,
     rules: { mode: settings ? WIN_MODE[settings.game] : 0 },
     bricks: settings?.bank ?? START_BRICKS,
-    slots: factionPick.map((_, p) => p),
+    slots: Array.from({ length: players }, (_, p) => p),
+    armies: Array.from({ length: players }, (_, p) => {
+      const army = pickOf(p);
+      return army ? { units: army.units.map((n) => unitStats[n]?.index ?? -1), base: basePrefix(p) } : undefined;
+    }),
     typeFor: (p, role, index) => {
       const st = ofRole(p, role)[index];
       return st ? simType(st) : null;
@@ -282,7 +295,6 @@ const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
-  gameIcons = new Map(Object.entries(hud.commandIcons).map(([k, v]) => [k, canvasFrom(v)]));
   siteFx = hud.particles ? new SiteFx(hud.particles) : null;
   minimap = b.minimap;
   combatBonus = b.combatBonus;
@@ -295,25 +307,6 @@ function onMap(b: MapBundle, hud: HudBundle) {
   fog = createFog(b.width, b.height);
   centerOn(mapSize.w / 2, mapSize.h / 2);
   startSkirmish();
-}
-
-function mountFactionPickers(u: UnitBundle) {
-  const el = document.getElementById('factions')!;
-  const opts = FACTIONS.map((f) => `<option value="${f.prefix}">${f.name}</option>`).join('');
-  el.innerHTML = `
-    <label>You <select data-p="0">${opts}</select></label>
-    <label>Opponent <select data-p="1">${opts}</select></label>
-    ${u.missing.length ? `<p class="muted">Not drawn: ${u.missing.map((m) => m.name).join(', ')}</p>` : ''}`;
-  el.querySelectorAll<HTMLSelectElement>('select').forEach((sel) => {
-    const p = Number(sel.dataset.p);
-    sel.value = factionPick[p]!;
-    sel.disabled = online !== null;
-    sel.addEventListener('change', () => {
-      if (online) return;
-      factionPick[p] = sel.value;
-      startSkirmish();
-    });
-  });
 }
 
 // --- Camera: drag with left mouse, or arrow keys / WASD ------------------------
@@ -593,21 +586,32 @@ const bar = new CommandBar(stageEl, (key) => {
   }
 });
 
-const factionStats = (p: number) =>
+/** Stats of what player p's buildings train: their army's units, in slot order. */
+function armyUnits(p: number): UnitStats[] {
+  const army = pickOf(p);
+  if (!army) return Object.values(unitStats).filter((st) => st.name.startsWith(`${basePrefix(p)}_`) && st.role < 7).sort((a, b) => a.index - b.index);
+  return [...new Set(army.units)].map((n) => unitStats[n]).filter((st): st is UnitStats => !!st);
+}
+/** Stats of player p's buildings (their army's base faction). */
+const armyBuildings = (p: number) =>
   Object.values(unitStats)
-    .filter((st) => st.name.startsWith(`${factionPick[p] ?? 'K'}_`))
+    .filter((st) => st.name.startsWith(`${basePrefix(p)}_`) && st.speed === 0xffff)
     .sort((a, b) => a.index - b.index);
 
-/** The game's own strip icons (UI/MiniHeadsGame), for entities whose icon number is known. */
-let gameIcons = new Map<string, HTMLCanvasElement>();
+/** Strip icon canvases by entity name. */
+const stripIconCache = new Map<string, HTMLCanvasElement>();
 
 /**
- * Picture for a strip button: the game's icon when we know its number, else a stand-in (the
- * building itself, or the unit's front idle frame; model units get their name).
+ * Picture for a strip button: the game's icon (UI/MiniHeadsGame through the ROM's icon table),
+ * else a stand-in (the building itself, or the unit's front idle frame).
  */
 function iconFor(name: string): HTMLCanvasElement | null {
-  const game = gameIcons.get(name);
-  if (game) return game;
+  const game = armyBundle?.stripIcons[name];
+  if (game) {
+    let c = stripIconCache.get(name);
+    if (!c) stripIconCache.set(name, (c = canvasOf(game)));
+    return c;
+  }
   const bank = bankOf(localPlayer);
   const key = `${name}@${bank}`;
   const hit = iconCache.get(key);
@@ -626,7 +630,11 @@ function iconFor(name: string): HTMLCanvasElement | null {
 
 const displayName = (name: string) => hudView.label(name)?.display ?? name.replace(/^._/, '');
 
+/** What the top screen's "Build Costs" panel shows while the strip is open, or null. */
+let stripCosts: { title: string; items: { icon: Rgba; cost: number }[] } | null = null;
+
 function updateStrip() {
+  stripCosts = null;
   const me = getPlayer(world, localPlayer);
   const sel = world.units.filter((u) => u.owner === localPlayer && u.hp > 0 && selection.ids.has(u.id));
   if (!me || me.status !== PLAYING || sel.length === 0) return bar.hide();
@@ -637,26 +645,31 @@ function updateStrip() {
     icon: iconFor(st.name),
     enabled: me.bricks >= st.cost,
   });
+  const costs = (list: UnitStats[]) => {
+    const icons = armyBundle?.stripIcons;
+    if (!icons) return;
+    stripCosts = { title: armyBundle!.text[FE_TEXT.buildCosts] ?? 'Build Costs', items: list.filter((st) => icons[st.name]).map((st) => ({ icon: icons[st.name]!, cost: st.cost })) };
+  };
   const b = sel.find(isBuilding);
   if (b) {
     const name = nameByIndex.get(b.kind) ?? '';
     if (!isFinished(b)) return bar.show(`${displayName(name)}: ${Math.floor((100 * b.progress) / Math.max(1, b.buildTime))}%`, []);
     const roles = TRAINS[b.role] ?? [];
     // One hero icon (the first), as the Castle strip shows in the emulator.
-    const items = factionStats(localPlayer)
-      .filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st))
-      .map((st) => item(st, 'train'));
+    const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
+    costs(list);
     const queue = b.queue.map((k, i) => {
       const n = nameByIndex.get(k) ?? '';
       const bt = world.types[k]?.buildTime ?? 1;
       return { icon: iconFor(n), pct: i === 0 ? Math.floor((100 * b.prod) / Math.max(1, bt)) : -1 };
     });
-    return bar.show(displayName(name), items, queue);
+    return bar.show('', list.map((st) => item(st, 'train')), queue);
   }
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
-  const all = factionStats(localPlayer);
-  const items = BUILD_ORDER.map((r) => all.find((st) => st.role === r && st.speed === 0xffff)).filter((st): st is UnitStats => !!st).map((st) => item(st, 'build'));
-  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')} (right-click cancels)` : 'Build', items);
+  const all = armyBuildings(localPlayer);
+  const list = BUILD_ORDER.map((r) => all.find((st) => st.role === r)).filter((st): st is UnitStats => !!st);
+  costs(list);
+  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', list.map((st) => item(st, 'build')));
 }
 
 let hover = { x: 0, y: 0 };
@@ -880,6 +893,7 @@ app.ticker.add((t) => {
   endEl.hidden = !me || me.status === PLAYING;
   if (me && me.status !== PLAYING) endEl.textContent = me.status === WON ? 'Victory!' : 'Defeat';
   hudView.update({
+    costs: stripCosts ?? undefined,
     bricks: me?.bricks ?? online?.settings.bank ?? START_BRICKS,
     minifigs: me ? popUsed(world, localPlayer) : mine.length,
     minifigCap: me ? popCap(world, localPlayer) : Math.max(4, mine.length),
@@ -899,10 +913,97 @@ app.ticker.add((t) => {
   });
 });
 
-const rom = mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);
+// --- ROM, menus, lobby -----------------------------------------------------------
+
+const rom = createRom({
+  onMap,
+  onUnits,
+  onArmy: (a) => {
+    armyBundle = a;
+    stripIconCache.clear();
+  },
+  onError: (m) => console.error(m),
+});
 rom.onGround = (name, g) => {
   if (name === mapName) ground.texture = textureFrom(g);
 };
+
+const appEl = document.getElementById('app')!;
+const screensEl = document.getElementById('screens')!;
+/** Menus over a dimmed battlefield, or the battlefield with the top screen beside it. */
+function setMode(mode: 'menu' | 'game') {
+  appEl.classList.toggle('menu', mode === 'menu');
+  screensEl.hidden = mode === 'game';
+  if (mode === 'game') requestAnimationFrame(() => app.resize());
+}
+
+const skirmishMaps = () => skirmishFirst(rom.summary()?.maps ?? []).filter((m) => /^mp\d+$/.test(m));
+const PICK_KEY = 'ob.army';
+let myPick: ArmyPick | null = null;
+try {
+  const saved = JSON.parse(localStorage.getItem(PICK_KEY) ?? 'null') as ArmyPick | null;
+  if (saved && typeof saved.army === 'string' && Array.isArray(saved.units) && saved.units.length === 9) myPick = saved;
+} catch {
+  /* storage blocked or bad data: start from the King */
+}
+/** The saved pick only if this ROM has those characters. */
+const validPick = (p: ArmyPick | null) =>
+  p && armyBundle && armyBundle.armies[p.army] && p.units.every((u, i) => armyBundle!.choices[i]?.includes(u)) ? p : null;
+
+const menus = mountMenus(screensEl, {
+  army: () => armyBundle,
+  maps: skirmishMaps,
+  loadRom: async (bytes) => {
+    const keep = bytes.slice(0);
+    await rom.load(bytes);
+    await saveRom(keep);
+  },
+  savedRom,
+  forgetRom: () => saveRom(null),
+  pick: () => validPick(myPick),
+  setPick: (p) => {
+    myPick = p;
+    try {
+      localStorage.setItem(PICK_KEY, JSON.stringify(p));
+    } catch {
+      /* ignore */
+    }
+  },
+  startSkirmish: (setup) => void startOffline(setup),
+  startBare: () => {
+    offlineSettings = null;
+    resetWorld(300, 220);
+    setMode('game');
+  },
+  openLobby: () => lobby.show(),
+});
+
+/** Offline game settings (from the skirmish setup screen). */
+let offlineSettings: GameSettings | null = null;
+
+async function startOffline(setup: SkirmishSetup) {
+  offlineSettings = { game: setup.game, map: setup.map, randomStart: false, prebase: setup.prebase, bank: setup.bank };
+  const b = armyBundle!;
+  picks = [validPick(myPick) ?? defaultPick(b), defaultPick(b, setup.opponent)];
+  setMode('game');
+  await rom.loadMap(setup.map);
+}
+
+document.getElementById('quit')!.onclick = () => {
+  if (lobby.inGame()) return lobby.leave();
+  backToMenu();
+};
+document.getElementById('helpBtn')!.onclick = () => {
+  const h = document.getElementById('help')!;
+  h.hidden = !h.hidden;
+};
+
+function backToMenu() {
+  offlineSettings = null;
+  selection.ids.clear();
+  setMode('menu');
+  menus.main();
+}
 
 // --- Online: lobby, then a lockstep match --------------------------------------
 
@@ -910,15 +1011,22 @@ async function startOnline(relay: RelayClient, start: MatchStart) {
   const players = [...start.players].sort((a, b) => a.slot - b.slot);
   localPlayer = start.you;
   teamColor = players.map((p) => p.color);
-  factionPick = players.map((p) => p.faction);
+  const b = armyBundle;
+  // Each side's army: the nine names they sent, or their faction's own army.
+  picks = b
+    ? players.map((p) => {
+        const army = Object.entries(b.prefixes).find(([, pre]) => pre === p.faction)?.[0] ?? 'King';
+        return { army, units: p.army ? [...p.army] : [...b.armies[army]!.units] };
+      })
+    : [];
   worldSeed = start.seed;
   online = { settings: start.settings, relay, ready: false };
   selection.ids.clear();
+  setMode('game');
   // Freeze the offline sandbox until the world is built, so nothing ticks early.
   match.dispose();
   match = new Match(world, localPlayer, [-1]);
   if (rom.summary()) {
-    rom.lockMap(start.settings.map);
     // Same ROM (the lobby checked) + same seed + same lineups = the same world everywhere.
     await rom.loadUnits(teamColor, teamColor[localPlayer]!);
     await rom.loadMap(start.settings.map);
@@ -930,29 +1038,37 @@ async function startOnline(relay: RelayClient, start: MatchStart) {
   unitAnim.clear();
 }
 
-function endOnline() {
+function endOnline(reason: string) {
   online = null;
   localPlayer = 0;
   teamColor = [0, 1];
-  factionPick = ['K', 'A'];
+  picks = [];
   worldSeed = 1234;
-  rom.lockMap(null);
-  if (rom.summary()) void rom.loadUnits(teamColor, 0).then(() => startSkirmish());
-  else resetWorld(300, 220);
+  if (rom.summary()) void rom.loadUnits(teamColor, 0);
+  resetWorld(300, 220);
+  setMode('menu');
+  // A lost connection shows on the multiplayer screen; quitting goes to the main menu.
+  if (!reason) menus.main();
 }
 
-mountLobby(
-  document.getElementById('mp')!,
+const lobby = mountLobby(
+  screensEl,
   {
     rom: () => {
       const s = rom.summary();
-      return s && { fingerprint: s.fingerprint, maps: skirmishFirst(s.maps).filter((m) => /^mp\d+$/.test(m)) };
+      return s && { fingerprint: s.fingerprint, maps: skirmishMaps() };
     },
+    army: () => armyBundle,
+    pick: () => validPick(myPick) ?? (armyBundle ? defaultPick(armyBundle) : null),
+    chooseArmy: (done) => menus.chooseArmy(done),
     start: (relay, start) => void startOnline(relay, start),
     ended: endOnline,
+    back: () => menus.main(),
   },
   defaultRelayUrl(location),
 );
+
+void menus.boot();
 
 /** Read-only hooks for the two-tab browser test (tests/e2e). Not used by the game. */
 (window as unknown as { __ob: object }).__ob = {

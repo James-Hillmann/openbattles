@@ -1,53 +1,48 @@
-import type { HudBundle, MapBundle, Rgba, UnitBundle } from '@lbw/extract';
+import type { ArmyBundle, HudBundle, MapBundle, Rgba, UnitBundle } from '@lbw/extract';
 import type { RomSummary, WorkerRequest, WorkerResponse } from './romWorker';
 
 /** What the rest of the client can ask of the loaded ROM. */
 export interface RomControl {
   /** Null until a ROM is loaded. */
   summary(): RomSummary | null;
+  /** Read a ROM file's bytes in the worker; resolves once its summary, army and unit bundles are in. */
+  load(bytes: ArrayBuffer): Promise<RomSummary>;
   /** Load a map; resolves after `onMap` ran for it. */
   loadMap(name: string): Promise<void>;
   /** Rebuild unit sheets for these team colors; resolves after `onUnits` ran. */
   loadUnits(teams: number[], localTeam: number): Promise<void>;
-  /** Lock the map picker (an online match chose the map). */
-  lockMap(name: string | null): void;
   /** Ask for the ground redrawn with this terrain; `onGround` gets it. */
   rebake(name: string, terrain: Uint8Array): void;
   onGround: ((name: string, ground: Rgba) => void) | null;
-  /** Called whenever a ROM finishes loading. */
-  onLoaded: (() => void) | null;
 }
 
-/**
- * Sidebar: load the user's ROM in a worker, show what's in it, and let them
- * pick a map. Nothing leaves the browser.
- */
-export function mountRomPanel(
-  input: HTMLInputElement,
-  out: HTMLElement,
-  onMap: (b: MapBundle, hud: HudBundle) => void,
-  onUnits: (u: UnitBundle) => void,
-): RomControl {
+export interface RomHandlers {
+  onMap(b: MapBundle, hud: HudBundle): void;
+  onUnits(u: UnitBundle): void;
+  onArmy(a: ArmyBundle): void;
+  onError(message: string): void;
+}
+
+/** Load the user's ROM in a worker. Nothing leaves the browser. */
+export function createRom(h: RomHandlers): RomControl {
   const worker = new Worker(new URL('./romWorker.ts', import.meta.url), { type: 'module' });
   const send = (req: WorkerRequest, transfer: Transferable[] = []) => worker.postMessage(req, transfer);
   let summary: RomSummary | null = null;
   // The worker answers in request order, so FIFO queues match replies to requests.
-  // Untracked requests (the map picker) queue a no-op so replies stay aligned.
   const mapWaiters: (() => void)[] = [];
   const unitWaiters: (() => void)[] = [];
-  const noop = () => {};
-  const pickMap = (name: string) => {
-    mapWaiters.push(noop);
-    send({ type: 'map', name });
-  };
-  let pick: HTMLSelectElement | null = null;
+  let loading: { resolve: (s: RomSummary) => void; reject: (e: Error) => void; summary?: RomSummary } | null = null;
 
   const ctl: RomControl = {
     summary: () => summary,
+    load: (bytes) =>
+      new Promise((resolve, reject) => {
+        loading = { resolve, reject };
+        send({ type: 'load', rom: bytes }, [bytes]);
+      }),
     loadMap: (name) =>
       new Promise((resolve) => {
         mapWaiters.push(resolve);
-        if (pick) pick.value = name;
         send({ type: 'map', name });
       }),
     loadUnits: (teams, localTeam) =>
@@ -55,56 +50,39 @@ export function mountRomPanel(
         unitWaiters.push(resolve);
         send({ type: 'units', teams, localTeam });
       }),
-    lockMap: (name) => {
-      if (!pick) return;
-      pick.disabled = name !== null;
-      if (name) pick.value = name;
-    },
     rebake: (name, terrain) => send({ type: 'ground', name, terrain: terrain.slice() }),
     onGround: null,
-    onLoaded: null,
   };
 
   worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
     const msg = e.data;
     if (msg.type === 'error') {
-      out.insertAdjacentHTML('beforeend', `<p class="err">${esc(msg.error)}</p>`);
-      mapWaiters.shift()?.();
+      if (loading) {
+        loading.reject(new Error(msg.error));
+        loading = null;
+      } else {
+        h.onError(msg.error);
+        mapWaiters.shift()?.();
+      }
     } else if (msg.type === 'loaded') {
-      const s = msg.summary;
-      summary = s;
-      const options = skirmishFirst(s.maps).map((m) => `<option>${esc(m)}</option>`).join('');
-      const rows = s.inventory
-        .map((i) => `<tr><td>${esc(i.ext || '-')}</td><td>${esc(i.magic)}</td><td>${i.count}</td><td>${(i.bytes / 1024).toFixed(0)}K</td></tr>`)
-        .join('');
-      out.innerHTML = `
-        <p><b>${esc(s.title)}</b> <code>${esc(s.gameCode)}</code><br/>
-        ARM9 ${esc(s.arm9)}, ${s.overlays} overlays, ${s.files} files</p>
-        <label>Map <select id="mapPick">${options}</select></label>
-        <details><summary>File formats</summary>
-        <table><tr><th>ext</th><th>magic</th><th>n</th><th>size</th></tr>${rows}</table></details>`;
-      pick = out.querySelector<HTMLSelectElement>('#mapPick')!;
-      pick.addEventListener('change', () => pickMap(pick!.value));
-      pickMap(pick.value);
-      ctl.onLoaded?.();
+      summary = msg.summary;
+      if (loading) loading.summary = msg.summary;
+    } else if (msg.type === 'army') {
+      h.onArmy(msg.army);
     } else if (msg.type === 'ground') {
       ctl.onGround?.(msg.name, msg.ground);
     } else if (msg.type === 'units') {
-      onUnits(msg.units);
-      unitWaiters.shift()?.();
+      h.onUnits(msg.units);
+      // The first unit bundle after a load finishes the load.
+      if (loading?.summary) {
+        loading.resolve(loading.summary);
+        loading = null;
+      } else unitWaiters.shift()?.();
     } else {
-      onMap(msg.bundle, msg.hud);
+      h.onMap(msg.bundle, msg.hud);
       mapWaiters.shift()?.();
     }
   };
-
-  input.addEventListener('change', async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    out.textContent = 'Reading...';
-    const buf = await file.arrayBuffer();
-    send({ type: 'load', rom: buf }, [buf]);
-  });
   return ctl;
 }
 
@@ -114,4 +92,45 @@ export function skirmishFirst(maps: readonly string[]): string[] {
   return [...skirmish, ...maps.filter((m) => !skirmish.includes(m))];
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+// --- Keep the ROM between visits (IndexedDB, this browser only) ------------------
+
+const DB = 'openbattles';
+const STORE = 'rom';
+
+function db(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open(DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+/** The ROM saved by `saveRom`, or null. Never throws: storage may be blocked. */
+export async function savedRom(): Promise<ArrayBuffer | null> {
+  try {
+    const d = await db();
+    return await new Promise((resolve) => {
+      const r = d.transaction(STORE).objectStore(STORE).get('rom');
+      r.onsuccess = () => resolve(r.result instanceof ArrayBuffer ? r.result : null);
+      r.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRom(bytes: ArrayBuffer | null): Promise<void> {
+  try {
+    const d = await db();
+    await new Promise<void>((resolve) => {
+      const tx = d.transaction(STORE, 'readwrite');
+      if (bytes) tx.objectStore(STORE).put(bytes, 'rom');
+      else tx.objectStore(STORE).delete('rom');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch {
+    /* storage blocked: the player loads it again next time */
+  }
+}

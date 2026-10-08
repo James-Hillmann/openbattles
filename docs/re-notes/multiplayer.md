@@ -16,7 +16,7 @@ instances, so nothing past the host's own lobby could be watched.
 | 4a | `HostLobby.bin` ("Game Lobby") | Top screen: Game / Map / Random Start / Prebase / Bank summary. Bottom: player list (team-color square + profile name), a row of six team-color chips; the chip a player owns shows their player number | confirmed (emulator, host alone) | Same summary table, player list, six chips with the owner's number |
 | 2b | `JoinWifiGame.bin` ("Join Game") | "Searching for Games..." box that lists hosts found nearby | confirmed (emulator; no hosts to find) | Room code instead of a radio scan |
 | 4b | `ClientLobby.bin` | Client's view of the lobby | guess (not reachable without a second DS) | Same lobby view, minus host controls |
-| 5 | `MultiplayerFactionSelect.bin` | Each player picks an army | guess: order relative to the lobby not seen | Army picker inside the lobby |
+| 5 | `MultiplayerFactionSelect.bin` | Each player picks an army | guess: order relative to the lobby not seen | Army button in the lobby opens the army screen (armies.md) |
 | 6 | in game, then `MultiplayerScore.bin` | Score screen | not traced | not built |
 
 Lobby strings that tell us the rules (our paraphrase):
