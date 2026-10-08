@@ -10,6 +10,7 @@ when they explain something; never paste decompiler output wholesale.
 | [function-map.md](function-map.md) | Every function we've named: address, name, purpose, confidence |
 | [formats.md](formats.md) | File formats: layout tables, what's known, what isn't |
 | [hud.md](hud.md) | Top-screen HUD, selection outline, bars over units |
+| [multiplayer.md](multiplayer.md) | DS wireless setup screens, the command lockstep netcode, and our online version |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 
 ## Confidence levels

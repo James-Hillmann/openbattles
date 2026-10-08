@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/relay.ts", "./protocol": "./src/protocol.ts" },
+  "exports": { ".": "./src/index.ts", "./protocol": "./src/protocol.ts" },
   "scripts": { "start": "tsx src/main.ts" },
   "dependencies": { "ws": "^8.18.3" },
   "devDependencies": { "@types/ws": "^8.18.2" }

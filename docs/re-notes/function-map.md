@@ -53,6 +53,12 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x0203BED0` | ARM | `Unit_drawBars` | Health bar (+ hero charge bar) over a unit, as untextured 3D quads | confirmed | Rules in docs/re-notes/hud.md |
 | `0x0203C264` | ARM | (bar layout) | Bar width/cell count and screen position | likely | |
 | `0x0203C480` | ARM | (bar polygons) | Emits the bar's quads; colors packed to BGR555 at `0x0203C640` | likely | |
+| `0x02004350` | ARM | `Cmd_init` | Command base constructor; r1 = command type id | likely (hooked in the emulator) | Every player and CPU order passes through it |
+| `0x02004E9C` | ARM | `Cmd_create` (cases) | Command factory: allocates a command by type id | likely | 5 = SyncCheck, 6 = SyncStatus; see multiplayer.md |
+| `0x020074EC` | ARM | `SyncCheckCommand_ctor` | Type id 5 | likely | |
+| `0x02007514` / `0x02007534` | ARM | `SyncCheckCommand_write` / `_read` | Two u32 at +0x14, +0x18 | likely | Probably (turn, checksum) |
+| `0x02007594` | ARM | `SyncStatusCommand_ctor` | Type id 6 | likely | |
+| `0x020075BC` / `0x020075DC` | ARM | `SyncStatusCommand_write` / `_read` | u32 at +0x14, u8 at +0x18 | likely | |
 
 ## Notes
 

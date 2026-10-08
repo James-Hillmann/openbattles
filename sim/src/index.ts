@@ -8,3 +8,4 @@ export * from './world';
 export * from './combat';
 export * from './hash';
 export * from './replay';
+export * from './lockstep';
