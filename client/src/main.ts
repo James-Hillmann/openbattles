@@ -280,6 +280,7 @@ const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
+  gameIcons = new Map(Object.entries(hud.commandIcons).map(([k, v]) => [k, canvasFrom(v)]));
   minimap = b.minimap;
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
@@ -510,8 +511,16 @@ const factionStats = (p: number) =>
     .filter((st) => st.name.startsWith(`${factionPick[p] ?? 'K'}_`))
     .sort((a, b) => a.index - b.index);
 
-/** Picture for a strip button: the building itself, or the unit's front idle frame. Model units have none yet. */
+/** The game's own strip icons (UI/MiniHeadsGame), for entities whose icon number is known. */
+let gameIcons = new Map<string, HTMLCanvasElement>();
+
+/**
+ * Picture for a strip button: the game's icon when we know its number, else a stand-in (the
+ * building itself, or the unit's front idle frame; model units get their name).
+ */
 function iconFor(name: string): HTMLCanvasElement | null {
+  const game = gameIcons.get(name);
+  if (game) return game;
   const bank = bankOf(localPlayer);
   const key = `${name}@${bank}`;
   const hit = iconCache.get(key);

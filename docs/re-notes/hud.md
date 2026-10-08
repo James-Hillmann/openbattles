@@ -64,3 +64,32 @@ Drawn by `Unit_drawBars` (`0x0203BED0`) as untextured 3D quads; no bitmap exists
 
 `+0x160` -> `[+8]` type record (kind +0x5C, max HP +0x62, max charge +0x64);
 `+0x1A0` s16 current HP, `+0x1A2` s16 hero charge.
+
+## Command icons (build / train strips)
+
+Checked 2026-10-08 against savestates with the Builder (build strip open) and the Castle (train strip open).
+
+- **Bottom strip is 3D** (BG0): disabling main BG0 in DeSmuME removes the strip, the deselect button and
+  the units; BG1 is the map. No OAM. confirmed.
+- **Top "Build Costs" panel is sub BG2** (4bpp, palette bank 7). The game copies each icon's 3x3 tiles
+  from `UI/MiniHeadsGame.NCGR` into VRAM slots (tile 7 + 3*col + 0x60*row) and writes the map entries.
+  The VRAM tiles are byte-identical to the file. confirmed.
+- **Icon sheet** `UI/MiniHeadsGame.NCGR` (also `.NCBR`, the same pixels in linear order): 48x30 tiles, 4bpp,
+  1440 tiles. It is a grid of 160 cells of 24x24, 16 per row; icon `i` is at pixel `((i % 16) * 24, (i / 16) * 24)`.
+  Palette `UI/WorldViewTop_Back.NCLR` bank 7 (red). `blitTile` masks tiles to 10 bits, so it can't
+  draw cells past tile 1023 (rows 7-9 of icons): read `pixels` directly. confirmed.
+- Icon indices: Castle 9, LumberMill 10, Mine 11, Farm 12, Barracks 13, Stables 14, Tower 15, Wall 96,
+  King (hero) 104, Builder 105, Bridge 149, Shipyard 151. confirmed for these, from both screens. No
+  icon field in `Entities.ebp` or table in ARM9 was found. The mapping is still open.
+- Strip order for the King Builder: Castle, Farm, Lumber Mill, Mine, Barracks, Stables, Shipyard, Tower,
+  Wall, Bridge; for the Castle: hero, Builder. Icons are 24x24 at bottom-screen (12 + 24k, 40). confirmed.
+- **Bottom-strip texture**: `UI/AllInOne/UI_MainCastle.NCBR` (256x256, 4bpp) sits at texture VRAM 0 and
+  `UI_MainCastle.NCLR` at texture palette 0. The strip uses bank 7, which equals WorldViewTop_Back bank 7.
+  The game overwrites some 24x24 atlas cells with MiniHeadsGame icons at runtime (Castle/Stables/Tower/
+  Farm/Shipyard with the Builder selected, hero/Builder at (0,120)/(24,120) with the Castle selected).
+  The other cells keep the file's art; the Bridge comes from the atlas at (120,120), not MiniHeadsGame 149
+  (18 px differ). confirmed.
+- Deselect (stop) button: atlas (232,24) 24x24, drawn at bottom (4,168) (first row differs). Strip left cap:
+  atlas (248,168) 8x24 at (4,40), exact. likely / confirmed.
+- The hero icon on the Castle strip is partly drawn in dark red (14,2,0), probably an "unavailable"
+  overlay because the King is alive. guess.

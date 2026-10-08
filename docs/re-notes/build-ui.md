@@ -48,11 +48,13 @@ Our placement of the picture on its footprint (bottom centre on the footprint's 
 **guess** that looks right next to the emulator but hasn't been lined up pixel for pixel. How the game
 draws a site under construction is **not traced**: we draw the finished picture see-through until done.
 
-## Ours (until the game's icon sheet is decoded)
+## Ours
 
 - The strip opens as soon as a Builder or a finished production building is selected (no tab tap),
   at the game's spot (DS (8,32), shown at 2x), with each icon's cost under it.
-- Icons are the building's own picture or the unit's front idle frame; model units show their name.
+- Icons are the game's own (`UI/MiniHeadsGame.NCGR`, see hud.md "Command icons") for the King entities whose
+  icon number we read off the emulator; everything else falls back to the building's own picture or the
+  unit's front idle frame (model units show their name) until the icon mapping is found.
 - Placement: click a spot (green = `canPlace`), right-click or Escape cancels. No check mark.
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.
 - Chopped trees: the client asks the ROM worker to re-bake the ground with the live terrain
@@ -60,6 +62,7 @@ draws a site under construction is **not traced**: we draw the finished picture 
 
 ## Open
 
-- The icon graphics (bottom strip and top-screen cost panel) and their per-entity index.
+- Where the game keeps each entity's icon number (other factions); the top-screen cost panel; the strip's
+  end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
 - Stables and Shipyard lists; Wall and Bridge placement; the blue order strip; hero spells.
 - Construction-site look; the game's placement rules beyond "walkable and free".
