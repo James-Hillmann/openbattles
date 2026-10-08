@@ -1,5 +1,5 @@
 import { isPmoc, pmocDecompress } from './pmoc';
-import { metatilePath, parseMap, parseMetatiles } from './map';
+import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTiles } from './map';
 import { decodeChars, decodePalette } from './nitro';
 import { renderMap, renderSheet, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
@@ -17,8 +17,14 @@ export interface MapBundle {
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
+  const d = tryRomFile(rom, path);
+  if (!d) throw new Error(`File not in ROM: ${path}`);
+  return d;
+}
+
+export function tryRomFile(rom: UnpackedRom, path: string): Uint8Array | undefined {
   const f = rom.files.find((x) => x.path.toLowerCase() === path.toLowerCase());
-  if (!f) throw new Error(`File not in ROM: ${path}`);
+  if (!f) return undefined;
   return isPmoc(f.data) ? pmocDecompress(f.data) : f.data;
 }
 
@@ -35,7 +41,9 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const map = parseMap(romFile(rom, `Maps/${name}.map`));
   const chars = decodeChars(romFile(rom, `${map.tileset}.NCGR`));
   const pal = decodePalette(romFile(rom, `${map.tileset}.NCLR`));
-  const metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));
+  let metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));
+  const detail = tryRomFile(rom, detailTilesPath(name));
+  if (detail) metatiles = withDetailTiles(metatiles, parseMetatiles(detail));
   const units: Record<string, Rgba> = {};
   for (const u of M1_UNITS) {
     const sheet = decodeChars(romFile(rom, `Sprites/${u.sheet}.NCBR`));

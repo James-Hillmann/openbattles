@@ -99,8 +99,9 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
 - **Cells are 24x16 pixels** (3x2 tiles of 8x8), so a 64x64 map is 1536x1024 px. confirmed.
 - Terrain codes seen: 0 (most common, open ground), 2, 3 (water on lake maps), 5. Exact
   meanings (passable, buildable, shallow?) are open; we need them for M2 pathing.
-- Some ground cells use fully transparent metatiles. These line up with trees, rocks and other
-  objects, which are drawn by something else (not found yet). They show as dark holes for now.
+- Ground ids >= 440 are **per-map detail metatiles**: id N reads entry N-440 of
+  `BP/DetailTiles_<map>.tbp` (confirmed: with this rule mp01 and mp12 render with zero transparent
+  pixels, and seams line up). In the tileset table, entries from 440 up are transparent filler.
 - Mars maps have LEGO-brick tiles in some cells; whether those are decoration or object markers is open.
 - 41 maps use KingTileset, 41 PirateTileset, 40 MarsTileset.
 
@@ -109,8 +110,8 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
 - Graphics: `<Name>Tileset.NCGR` (PMOC > standard NCGR, 8bpp, 1024 tiles) + `<Name>Tileset.NCLR` (256 colors).
 - Metatiles: `BP/<Name>Tiles.tbp` (PMOC). u16 count (5120), then count x 6 u16 **BG screen entries**
   in row order (3 across, 2 down). Screen entry bits: 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette (unused at 8bpp).
-- `BP/DetailTiles_<map>.tbp`: same layout (u16 count + 6-entry metatiles), one per map. Not referenced
-  by the ground layer; maybe the object/detail layer. open.
+- `BP/DetailTiles_<map>.tbp`: same layout (u16 count + 6-entry metatiles), one per map (133 files,
+  incl. mp01..mp30). Indexed by ground id - 440 (confirmed, see Maps above).
 
 ## Unit sprites (confirmed)
 

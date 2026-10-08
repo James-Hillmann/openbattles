@@ -112,10 +112,11 @@ app.canvas.addEventListener('wheel', (e) => {
   const sy = e.clientY - r.top;
   const wx = (sx - camera.x) / camera.scale.x;
   const wy = (sy - camera.y) / camera.scale.y;
-  const s = Math.min(4, Math.max(1, camera.scale.x * (e.deltaY < 0 ? 1.25 : 0.8)));
+  // Whole-number zoom only, so every game pixel stays a crisp square like on the DS.
+  const s = Math.min(4, Math.max(1, Math.round(camera.scale.x) + (e.deltaY < 0 ? 1 : -1)));
   camera.scale.set(s);
-  camera.x = sx - wx * s;
-  camera.y = sy - wy * s;
+  camera.x = Math.round(sx - wx * s);
+  camera.y = Math.round(sy - wy * s);
 });
 
 // --- Input: right-click moves your units ---------------------------------------

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CELL_H, CELL_W, decodeChars, decodePalette, metatilePath, parseMap, parseMetatiles, renderMap, renderSheet } from '@lbw/extract';
+import { CELL_H, CELL_W, DETAIL_BASE, detailTilesPath, withDetailTiles, decodeChars, decodePalette, metatilePath, parseMap, parseMetatiles, renderMap, renderSheet } from '@lbw/extract';
 
 const bytes = (s: string) => [...s].map((c) => c.charCodeAt(0));
 const u16le = (v: number) => [v & 0xff, v >> 8];
@@ -74,5 +74,19 @@ describe('unit sheets', () => {
     const img = renderSheet(sheet, pal, 2); // bank 2 -> colors 32..47
     expect([...img.data.slice(4, 8)]).toEqual([0, 0, 255, 255]); // pixel 1 = index 1 in bank 2
     expect(img.data[3]).toBe(0); // index 0 transparent
+  });
+});
+
+describe('detail tiles', () => {
+  it('overlays the map detail table from id 440', () => {
+    const base = new Uint16Array(500 * 6).fill(1);
+    const detail = new Uint16Array([7, 7, 7, 7, 7, 7, 9, 9, 9, 9, 9, 9]);
+    const t = withDetailTiles(base, detail);
+    expect(t[439 * 6]).toBe(1);
+    expect(t[DETAIL_BASE * 6]).toBe(7);
+    expect(t[(DETAIL_BASE + 1) * 6 + 5]).toBe(9);
+    expect(t[(DETAIL_BASE + 2) * 6]).toBe(1);
+    expect(base[DETAIL_BASE * 6]).toBe(1);
+    expect(detailTilesPath('mp01')).toBe('BP/DetailTiles_mp01.tbp');
   });
 });

@@ -51,5 +51,21 @@ export function parseMetatiles(tbp: Uint8Array): Uint16Array {
   return out;
 }
 
+/** Ground ids at or above this index come from the map's own DetailTiles table, not the tileset's. */
+export const DETAIL_BASE = 440;
+
+/**
+ * Overlay a map's detail metatiles (BP/DetailTiles_<map>.tbp, same format) onto the
+ * tileset table from DETAIL_BASE. Returns a new table; the inputs are untouched.
+ */
+export function withDetailTiles(base: Uint16Array, detail: Uint16Array): Uint16Array {
+  const out = new Uint16Array(Math.max(base.length, DETAIL_BASE * 6 + detail.length));
+  out.set(base);
+  out.set(detail, DETAIL_BASE * 6);
+  return out;
+}
+
+export const detailTilesPath = (mapName: string) => `BP/DetailTiles_${mapName}.tbp`;
+
 /** "KingTileset" -> "BP/KingTiles.tbp" */
 export const metatilePath = (tileset: string) => `BP/${tileset.replace(/Tileset$/, 'Tiles')}.tbp`;
