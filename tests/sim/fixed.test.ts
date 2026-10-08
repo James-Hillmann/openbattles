@@ -23,4 +23,9 @@ describe('fixed point', () => {
   it('fxLen of a 3-4-5 triangle', () => {
     expect(fxLen(fx(3), fx(4))).toBe(fx(5));
   });
+  it('fxLen handles map-sized distances', () => {
+    // A 96x96-cell map is 2304x1536 px; its diagonal must not overflow.
+    expect(fxToInt(fxLen(fx(2304), fx(1536)))).toBe(2769);
+    expect(Math.abs(fxLen(fx(-3000), fx(4000)) - fx(5000))).toBeLessThanOrEqual(2);
+  });
 });

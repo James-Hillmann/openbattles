@@ -42,8 +42,8 @@ npm run m0 -- path/to/your.nds   # M0 recon: unpack into ./out (gitignored)
 
 ## Milestones
 
-- **M0 Recon** (now): see [docs/re-notes/m0-recon.md](docs/re-notes/m0-recon.md)
-- M1 Assets: one sprite sheet, one map, the unit table, rendered in the browser
+- **M0 Recon** (done): see [docs/re-notes/m0-recon.md](docs/re-notes/m0-recon.md) and [formats.md](docs/re-notes/formats.md)
+- **M1 Assets** (in progress): load your ROM in the sidebar, pick a map, and real units walk on it. Still missing: trees/objects, unit stats
 - M2 Sandbox: gather, build, train, move, attack
 - M3 Lockstep: two browsers in one room, in sync
 - M4 Faithful rules for one faction

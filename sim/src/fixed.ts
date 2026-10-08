@@ -50,10 +50,17 @@ export function isqrt(n: number): number {
   return x;
 }
 
-/** Length of (dx, dy) in Fx. */
+/** Length of (dx, dy) in Fx. Exact for short vectors; halves precision as needed for long ones. */
 export function fxLen(dx: Fx, dy: Fx): Fx {
   // dx*dx in raw units is 2^32 scale; isqrt brings it back to 2^16 scale.
-  const sq = dx * dx + dy * dy;
-  if (sq > Number.MAX_SAFE_INTEGER) throw new RangeError('fxLen overflow: distance > ~1400 units');
-  return isqrt(sq) as Fx;
+  // Above 2^53 doubles lose integer precision, so drop low bits first (deterministically).
+  let x = Math.abs(dx);
+  let y = Math.abs(dy);
+  let shift = 0;
+  while (x * x + y * y > Number.MAX_SAFE_INTEGER) {
+    x >>>= 1;
+    y >>>= 1;
+    shift++;
+  }
+  return (isqrt(x * x + y * y) * 2 ** shift) as Fx;
 }

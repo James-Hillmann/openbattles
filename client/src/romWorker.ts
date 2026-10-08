@@ -1,30 +1,49 @@
 /// <reference lib="webworker" />
-import { hex, unpackRom } from '@lbw/extract';
+import { buildMapBundle, hex, listMaps, unpackRom, type MapBundle, type UnpackedRom } from '@lbw/extract';
 
 export type RomSummary = {
   title: string;
   gameCode: string;
   arm9: string;
-  arm9Compressed: boolean;
   overlays: number;
   files: number;
-  inventory: { ext: string; magic: string; count: number; bytes: number; example: string }[];
+  maps: string[];
+  inventory: { ext: string; magic: string; count: number; bytes: number }[];
 };
 
-self.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+export type WorkerRequest = { type: 'load'; rom: ArrayBuffer } | { type: 'map'; name: string };
+export type WorkerResponse =
+  | { type: 'loaded'; summary: RomSummary }
+  | { type: 'map'; bundle: MapBundle }
+  | { type: 'error'; error: string };
+
+let rom: UnpackedRom | null = null;
+
+const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, transfer);
+
+self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   try {
-    const r = unpackRom(new Uint8Array(e.data));
-    const summary: RomSummary = {
-      title: r.header.title,
-      gameCode: r.header.gameCode,
-      arm9: `${hex(r.header.arm9.ramAddress)} (${r.arm9.length} bytes)`,
-      arm9Compressed: r.arm9WasCompressed,
-      overlays: r.overlays.length,
-      files: r.files.length,
-      inventory: r.inventory,
-    };
-    self.postMessage({ ok: true, summary });
+    if (e.data.type === 'load') {
+      rom = unpackRom(new Uint8Array(e.data.rom));
+      post({
+        type: 'loaded',
+        summary: {
+          title: rom.header.title,
+          gameCode: rom.header.gameCode,
+          arm9: `${hex(rom.header.arm9.ramAddress)} (${rom.arm9.length} bytes)`,
+          overlays: rom.overlays.length,
+          files: rom.files.length,
+          maps: listMaps(rom),
+          inventory: rom.inventory,
+        },
+      });
+    } else {
+      if (!rom) throw new Error('No ROM loaded');
+      const bundle = buildMapBundle(rom, e.data.name);
+      const transfer = [bundle.ground.data.buffer, ...Object.values(bundle.units).map((u) => u.data.buffer)];
+      post({ type: 'map', bundle }, transfer as Transferable[]);
+    }
   } catch (err) {
-    self.postMessage({ ok: false, error: String(err) });
+    post({ type: 'error', error: String(err) });
   }
 };
