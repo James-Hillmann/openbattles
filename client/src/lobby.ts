@@ -40,10 +40,18 @@ export interface LobbyHooks {
 
 type LobbyMsg = Extract<ServerMsg, { t: 'lobby' }>;
 
-export function defaultRelayUrl(loc: Location): string {
+/**
+ * `?relay=` wins, then a build-time VITE_RELAY_URL (client hosted apart from the relay).
+ * A production build is served by the relay itself (`npm start`), so it dials its own origin;
+ * `npm run dev` dials the separate relay on :8787.
+ */
+export function defaultRelayUrl(loc: Location, env: { PROD?: boolean; VITE_RELAY_URL?: string } = import.meta.env): string {
   const q = new URLSearchParams(loc.search).get('relay');
   if (q) return q;
-  return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.hostname || 'localhost'}:8787`;
+  if (env.VITE_RELAY_URL) return env.VITE_RELAY_URL;
+  const ws = loc.protocol === 'https:' ? 'wss' : 'ws';
+  if (env.PROD) return `${ws}://${loc.host}/relay`;
+  return `${ws}://${loc.hostname || 'localhost'}:8787`;
 }
 
 export function mountLobby(el: HTMLElement, hooks: LobbyHooks, relayUrl: string): void {
