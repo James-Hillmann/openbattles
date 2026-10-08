@@ -4,6 +4,7 @@ import {
   buildHudBundle,
   buildMapBundle,
   buildUnitBundle,
+  modelClips,
   hex,
   listMaps,
   tryRomFile,
@@ -63,8 +64,11 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
         },
       });
       const r = rom;
-      const units = buildUnitBundle((path) => tryRomFile(r, path), TEAM_BANKS, (pal) =>
-        applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, LOCAL_TEAM),
+      const units = buildUnitBundle(
+        (path) => tryRomFile(r, path),
+        TEAM_BANKS,
+        (pal) => applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, LOCAL_TEAM),
+        (e) => modelClips(r.arm9, r.header.arm9.ramAddress, r.header.gameCode, e.entityIndex),
       );
       portraitIds = [...new Set(units.sprites.map((s) => s.name))];
       post({ type: 'units', units }, units.sprites.map((s) => s.atlas.data.buffer));

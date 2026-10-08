@@ -47,7 +47,7 @@ describe('unit atlases', () => {
   const sheet = (w: number, h: number, v: number) => ({ tilesWide: w / 8, tilesHigh: h / 8, bpp: 4 as const, pixels: new Uint8Array(w * h).fill(v) });
 
   it('packs infantry idle, walk and attack into facing rows', () => {
-    const e: EntityInfo = { index: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
+    const e: EntityInfo = { index: 0, entityIndex: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
     // Idle strip = index 1, walk sheet = 2, attack sheet = 3.
     const files: Record<string, ReturnType<typeof sheet>> = {
       'Sprites/x_mel_0.NCBR': sheet(128, 32, 1),

@@ -2,7 +2,8 @@ import { ascii, u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
 import { parseEntityRecords, unitStats, type UnitStats } from './entities';
-import { buildModelSprites } from './modelSprites';
+import { buildModelUnits, type ModelUnit } from './modelSprites';
+import type { ModelClips } from './modelClips';
 
 /**
  * Entity blueprints (BP/Entities.ebp, after PMOC): `BPNZ`, then 0x7C-byte records,
@@ -15,6 +16,8 @@ const STRINGS = 0xfa08;
 export interface EntityInfo {
   /** Record index in the table. */
   index: number;
+  /** Entity index (+0x04): the key the game's per-entity tables use (combat bonuses, model clips). */
+  entityIndex: number;
   /** Global id (+0x06). */
   id: number;
   name: string;
@@ -35,15 +38,14 @@ export function parseEntities(ebp: Uint8Array): EntityInfo[] {
     if (nameAt >= ebp.length) break;
     const name = ascii(ebp, nameAt, 64);
     if (!name) break;
-    out.push({ index, id: u16(ebp, r + 6), name, asset: ascii(ebp, nameAt + name.length + 1, 64), speed: u16(ebp, r + 0x0c) });
+    out.push({ index, entityIndex: u16(ebp, r + 4), id: u16(ebp, r + 6), name, asset: ascii(ebp, nameAt + name.length + 1, 64), speed: u16(ebp, r + 0x0c) });
   }
   return out;
 }
 
 /**
  * The three sprite layouts units use, by asset suffix. Everything else that moves
- * (siege, flyers, ships, the Giant) is a 3D model under Models/, pre-rendered by
- * modelSprites.ts into the same atlas shape (layout `model`).
+ * (siege, flyers, ships, the Giant) is a 3D model under Models/, drawn by modelSprites.ts.
  *
  * - `hero` (`_hrm`, `_hrf`, also campaign heroes): one file per facing, `_w0..4` walk and `_a0..4`
  *   attack, 6 frames of 24 px in a row. Idle is walk frame 0 (confirmed in the emulator).
@@ -54,9 +56,9 @@ export function parseEntities(ebp: Uint8Array): EntityInfo[] {
  *   per facing; cols 0-2 walk (played 0,1,2,1), 3-7 attack, idle is col 1 (from BP/Animations.abp
  *   set 5; not yet seen in the emulator).
  */
-export type SpriteLayout = 'hero' | 'infantry' | 'mounted' | 'model';
+export type SpriteLayout = 'hero' | 'infantry' | 'mounted';
 
-export function spriteLayout(asset: string): Exclude<SpriteLayout, 'model'> | null {
+export function spriteLayout(asset: string): SpriteLayout | null {
   if (!asset.startsWith('Sprites/')) return null;
   if (asset.endsWith('_bld_mtd')) return 'mounted';
   if (/_(eng|mel|rgd)$/.test(asset)) return 'infantry';
@@ -78,11 +80,7 @@ export interface UnitSprite {
   /** Frame size in px. */
   frameW: number;
   frameH: number;
-  /**
-   * Facing rows. Sprites: 5 (back, back-right, right, front-right, front), left facings mirrored.
-   * Models: `rows` evenly spaced turns, row 0 facing away (up), going counter-clockwise (row
-   * rows/4 faces left), never mirrored.
-   */
+  /** Facing rows: 5 (back, back-right, right, front-right, front); left facings are mirrored. */
   rows: number;
   mirrored: boolean;
   /** Pixel in the frame that sits on the unit's position. */
@@ -106,7 +104,7 @@ interface Cell {
   rowStep: number;
 }
 
-function cells(asset: string, layout: Exclude<SpriteLayout, 'model'>): { frame: number; cols: Cell[]; idle: number; walk: number[]; attack: number[] } {
+function cells(asset: string, layout: SpriteLayout): { frame: number; cols: Cell[]; idle: number; walk: number[]; attack: number[] } {
   const p = asset; // e.g. Sprites/k_mel
   switch (layout) {
     case 'hero': {
@@ -222,8 +220,10 @@ export const FACTIONS = [
 ] as const;
 
 export interface UnitBundle {
-  /** Every unit of the playable factions, sprite or pre-rendered model, for each requested team bank. */
+  /** Sprite units of the playable factions, for each requested team bank. */
   sprites: UnitSprite[];
+  /** Units drawn from 3D models, for each requested team bank. */
+  models: ModelUnit[];
   /** Movers we couldn't draw (model missing or not decodable). */
   missing: EntityInfo[];
   /** Combat and movement stats per entity name, for every sprite unit (see docs/re-notes/combat.md). */
@@ -232,12 +232,14 @@ export interface UnitBundle {
 
 /**
  * Read the entity table and build sprite atlases for the playable factions' units.
- * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`).
+ * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`); `clipsFor` gives a
+ * model unit's animation clips (e.g. `modelClips` from ARM9).
  */
 export function buildUnitBundle(
   file: (path: string) => Uint8Array | undefined,
   banks: readonly number[],
   fixPalette?: (pal: Uint8Array) => void,
+  clipsFor: (e: EntityInfo) => ModelClips | null = () => null,
 ): UnitBundle {
   const need = (p: string) => {
     const d = file(p);
@@ -253,16 +255,15 @@ export function buildUnitBundle(
     return d ? decodeChars(d) : undefined;
   }, palette, banks, playable);
   const modelUnits = entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/'));
-  sprites.push(...buildModelSprites(modelUnits, file, palette, banks));
-  // Keep table order (hero first ... ships last) for the sandbox lineup.
-  const order = new Map(entities.map((e) => [e.name, e.index]));
-  sprites.sort((a, b) => order.get(a.name)! - order.get(b.name)!);
+  // Models take the team colors only; odd ("selected") banks are drawn with an outline instead.
+  const models = buildModelUnits(modelUnits, file, palette, banks.filter((b) => b % 2 === 0), clipsFor);
   const records = parseEntityRecords(need('BP/Entities.ebp'));
   const stats: Record<string, UnitStats> = {};
-  for (const name of new Set(sprites.map((s) => s.name))) {
+  const names = [...sprites, ...models].map((s) => s.name);
+  for (const name of new Set(names)) {
     const rec = records.find((r) => r.name === name);
     if (rec?.kind === 0) stats[name] = unitStats(records, rec);
   }
-  const drawn = new Set(sprites.map((s) => s.name));
-  return { sprites, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
+  const drawn = new Set(names);
+  return { sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

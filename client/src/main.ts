@@ -22,9 +22,10 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FACTIONS, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
-import { animate, attack, facing, modelRow, type AnimState } from './unitAnim';
+import { animate, attack, facing, type AnimState } from './unitAnim';
+import { ModelView, type ModelClipName } from './modelView';
 import { mountRomPanel } from './romPanel';
 import { Selection, type Pickable } from './selection';
 
@@ -93,11 +94,11 @@ function textureFrom(img: Rgba): Texture {
   return t;
 }
 
-/** One unit type in one team color: frames[row][col], rows are facings, cols atlas columns. */
-interface UnitType {
-  sprite: UnitSprite;
-  frames: Texture[][];
-}
+/**
+ * One unit type in one team color. Sprite units: frames[row][col], rows are facings, cols atlas
+ * columns. Model units: poses drawn on demand.
+ */
+type UnitType = { sprite: UnitSprite; frames: Texture[][]; model?: undefined } | { model: ModelView; sprite?: undefined };
 /** By "<entity name>@<bank>". */
 const unitTypes = new Map<string, UnitType>();
 /** Entity names per faction prefix, in table order (heroes, builder, melee, ranged, mounted, siege, ship). */
@@ -115,10 +116,12 @@ function simType(s: UnitStats | undefined): SimUnitType {
 const unitKind = new Map<number, string>();
 const unitSprites = new Map<number, Sprite>();
 /** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
-const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number }>();
+const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number; clip: ModelClipName; clipStart: number }>();
+const bgr = (c: number): [number, number, number] => [((c & 31) * 255) / 31, (((c >> 5) & 31) * 255) / 31, (((c >> 10) & 31) * 255) / 31];
 const factionPick: [string, string] = ['K', 'A'];
 
 function onUnits(u: UnitBundle) {
+  for (const t of unitTypes.values()) t.model?.destroy();
   unitTypes.clear();
   factionUnits = new Map();
   unitStats = u.stats;
@@ -129,6 +132,10 @@ function onUnits(u: UnitBundle) {
       Array.from({ length: cols }, (_, col) => new Texture({ source: tex.source, frame: new Rectangle(col * s.frameW, row * s.frameH, s.frameW, s.frameH) })),
     );
     unitTypes.set(s.key, { sprite: s, frames });
+  }
+  for (const m of u.models) unitTypes.set(m.key, { model: new ModelView(m, textureFrom) });
+  // Table order within each faction: heroes ... mounted (sprites), then siege, flyers, ships (models).
+  for (const s of [...u.sprites, ...u.models]) {
     const prefix = s.name.slice(0, 1);
     const list = factionUnits.get(prefix) ?? [];
     if (!list.includes(s.name)) list.push(s.name);
@@ -159,7 +166,7 @@ function spawnLineups(cx: number, cy: number) {
       const spot = spots[i];
       if (!spot) return;
       const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
-      const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: t?.sprite.speed });
+      const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: (t?.sprite ?? t?.model?.unit)?.speed });
       unitKind.set(u.id, name);
     });
   }
@@ -333,40 +340,50 @@ app.ticker.add((t) => {
     nextDrawn.push({ id: u.id, owner: u.owner, x, y });
     const isSelected = selection.ids.has(u.id);
     const bank = TEAM_BANK[u.owner]! + (isSelected ? 1 : 0);
-    const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`);
+    // Models carry team colors only; a selected one gets an outline instead of the odd bank.
+    const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`) ?? unitTypes.get(`${unitKind.get(u.id)}@${bank & ~1}`);
     if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
       continue;
     }
+    const box = type.sprite ?? type.model.unit;
     let s = unitSprites.get(u.id);
     if (!s) {
-      s = new Sprite(type.frames[0]![type.sprite.idle]!);
-      s.anchor.set(type.sprite.anchorX / type.sprite.frameW, type.sprite.anchorY / type.sprite.frameH);
+      s = new Sprite();
+      s.anchor.set(box.anchorX / box.frameW, box.anchorY / box.frameH);
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
-    const isModel = !type.sprite.mirrored;
-    // Start facing the camera: sprite row 4 (front), model row rows/2 (turned 180 degrees).
-    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: isModel ? type.sprite.rows / 2 : 4, flip: false, swing: u.lastAttack };
-    const face = (dx: number, dy: number) => (isModel ? { row: modelRow(dx, dy, type.sprite.rows), flip: false } : facing(dx, dy));
+    // Start facing the camera: sprite row 4 (front), model row 0.
+    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: type.model ? 0 : 4, flip: false, swing: u.lastAttack, clip: 'idle' as ModelClipName, clipStart: animTime };
+    const face = (dx: number, dy: number) => (type.model ? { row: modelRow(dx, dy, type.model.unit.rows), flip: false } : facing(dx, dy));
     const moving = u.x !== p.x || u.y !== p.y;
     if (moving) Object.assign(a, face(u.x - p.x, u.y - p.y));
+    const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
     if (u.lastAttack !== a.swing) {
       // The sim just attacked: face the target and play one swing.
       a.swing = u.lastAttack;
-      const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
       if (target) Object.assign(a, face(target.x - u.x, target.y - u.y));
       a.state = attack(animTime);
     }
-    const r = animate(type.sprite, a.state, moving, animTime);
-    a.state = r.state;
+    if (type.model) {
+      // The game keeps one controller per clip and switches between idle, move and attack.
+      const clip: ModelClipName = moving ? 'move' : target ? 'attack' : 'idle';
+      if (clip !== a.clip) Object.assign(a, { clip, clipStart: animTime });
+      const outline = isSelected ? bgr(u.owner === LOCAL_PLAYER ? OUTLINE_OWN : OUTLINE_OTHER) : undefined;
+      s.texture = type.model.texture(a.row, clipFrame(type.model.unit.clips[clip], animTime - a.clipStart), outline);
+      s.scale.x = 1;
+    } else {
+      const r = animate(type.sprite, a.state, moving, animTime);
+      a.state = r.state;
+      s.texture = type.frames[a.row]![r.col]!;
+      s.scale.x = a.flip ? -1 : 1;
+    }
     unitAnim.set(u.id, a);
-    s.texture = type.frames[a.row]![r.col]!;
-    s.scale.x = a.flip ? -1 : 1;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.
-    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - type.sprite.anchorX, Math.round(y) - type.sprite.anchorY, u.hp, u.maxHp);
+    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - box.anchorX, Math.round(y) - box.anchorY, u.hp, u.maxHp);
   }
   unitLayer.sortableChildren = true;
   drawn = nextDrawn;

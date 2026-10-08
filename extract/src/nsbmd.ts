@@ -1,4 +1,4 @@
-import { ascii, u16, u32 } from './bytes';
+import { ascii, s16, s32, u16, u32 } from './bytes';
 
 /**
  * Nitro 3D models (`.nsbmd`, magic `BMD0`): the units the game draws as 3D
@@ -10,8 +10,6 @@ import { ascii, u16, u32 } from './bytes';
  * texture coordinates 1.11.4 (value / 16, in texels).
  */
 
-const s16 = (b: Uint8Array, o: number) => (u16(b, o) << 16) >> 16;
-const s32 = (b: Uint8Array, o: number) => u32(b, o) | 0;
 const fx = (v: number) => v / 4096;
 
 /** 3D files (BMD0, BCA0, ...) list their sections in an offset table after the header. */
