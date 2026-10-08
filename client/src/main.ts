@@ -22,7 +22,7 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACTIONS, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FACINGS, FACTIONS, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
@@ -33,6 +33,9 @@ const LOCAL_PLAYER = 0;
 const COLORS = [0xd33b2c, 0x3b6fd3];
 /** Palette bank per player: even banks are team colors (0 red, 2 blue); bank + 1 is the same team selected. */
 const TEAM_BANK = [0, 2];
+/** Hit flash window, in ticks after the tick the damage landed. */
+const HIT_FLASH_FROM = 2.5;
+const HIT_FLASH_TO = 5.5;
 
 let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
@@ -109,8 +112,8 @@ let combatBonus: MeleeBonusTable | null = null;
 
 function simType(s: UnitStats | undefined): SimUnitType {
   if (!s) return {};
-  const { index, speed, hp, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
-  return { kind: index, speed, hp, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
+  return { kind: index, speed, hp, priority, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
 }
 /** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
 const unitKind = new Map<number, string>();
@@ -342,6 +345,9 @@ app.ticker.add((t) => {
     const bank = TEAM_BANK[u.owner]! + (isSelected ? 1 : 0);
     // Models carry team colors only; a selected one gets an outline instead of the odd bank.
     const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`) ?? unitTypes.get(`${unitKind.get(u.id)}@${bank & ~1}`);
+    // Hit flash: drawn in the grey bank from 2.5 to 5.5 ticks after the damage tick (emulator).
+    const sinceHit = world.tick - 1 - u.lastHit + alpha;
+    const flash = sinceHit >= HIT_FLASH_FROM && sinceHit < HIT_FLASH_TO ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
     if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
       continue;
@@ -376,7 +382,7 @@ app.ticker.add((t) => {
     } else {
       const r = animate(type.sprite, a.state, moving, animTime);
       a.state = r.state;
-      s.texture = type.frames[a.row]![r.col]!;
+      s.texture = (flash && !flash.model ? flash : type).frames[a.row]![r.col]!;
       s.scale.x = a.flip ? -1 : 1;
     }
     unitAnim.set(u.id, a);

@@ -7,13 +7,15 @@
 | What `Factions.fbp` holds per entry | names like `KCM01_User` / `KCM01_Enemy` suggest per-mission starting forces | open |
 | Map sections `EVNT`, `TRIG`, `MARK` | `MINE` is done (mine sites). EVNT looks like starting units and buildings per player; MARK points are unknown. Watch them in the emulator | open (M2) |
 | Terrain codes: which ones block walking and building | walking answered (formats.md): 0 and 2 walkable; 1, 3, 5 block. Building placement still open | walking **answered**, building open |
-| How units avoid each other while walking | group orders get one cell per unit; the game's mid-walk avoidance not studied yet | open (M4) |
+| How units avoid each other while walking | one unit per cell, wait 2 s for walkers, sidestep, short A*: see movement.md | answered (likely; key cases confirmed) |
+| How a group order picks each unit's goal cell | we spread units over nearby cells (our rule) | open |
 | Object layer (trees, rocks) | trees are metatiles baked at load (formats.md "Trees"); rocks/cliffs are plain ground tiles | **answered** |
 | How chopping a tree changes its tiles | mp03 in the emulator showed a half-chopped tree as metatile 186; watch `Map_setTerrain` writes while a builder chops | open (M4) |
 | Original sim tick rate | no fixed tick: the main loop aims for 30 Hz but sometimes updates 1 VBlank apart, depending on frame cost (formats.md "Movement speed and update rate") | **answered** |
 | Does combat use randomness? | yes: melee adds `rand(+0x6A)`, projectiles roll `min + rand(max-min)`; RNG is SDK `MATH_Rand32` (combat.md) | **answered** |
-| Auto-targeting: how idle units pick enemies, and what +0x71 is | watch an idle unit acquire a target; find who reads +0x71 | open |
-| Projectile flight: homing or fixed aim point, splash (+0x6B) | trace `0x02050C5C` and `0x0206E5EC` | open |
+| Auto-targeting: how idle units pick enemies, and what +0x71 is | scan every 30 ticks within sight (+0x71), in-range first, then priority +0x70 (combat.md) | **answered** |
+| Auto-targeting tie order, and which AI states move/attack orders use | trace how the search queue fills its candidate list; watch AI state at unit +0x2A0 under orders | open |
+| Projectile flight: homing or fixed aim point, splash (+0x6B) | homes, hits on entering the target cell; splash 5x5 at 100/80/60% (combat.md) | **answered** |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | 20.12 for positions (cells), damage and multipliers | **answered** |
 | How to draw the 3D-model units (siege, flyers, ships, Giant) | decoded, camera fitted, clips read from ARM9 (formats.md "3D models") | **answered** |

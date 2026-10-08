@@ -2,7 +2,9 @@ import { CELL_H, CELL_W } from './config';
 import { FX_SHIFT, type Fx } from './fixed';
 import { nextInt } from './rng';
 import type { EntityId, MeleeBonusTable, Projectile, Unit, World } from './state';
-import { cellOf, planUnitPath } from './terrain';
+import { stepBudget, stepToward } from './motion';
+import { cellCenterX, cellCenterY, cellOf } from './terrain';
+import { orderMove, stopMove } from './movement';
 
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
@@ -52,8 +54,9 @@ export function meleeBonus(t: MeleeBonusTable | null, attackerKind: number, defe
  * The multiplier is always 1.0 so far (buffs/upgrades are out of scope), which
  * makes this a plain integer subtraction clamped at 0.
  */
-function applyDamage(t: Unit, dmg: number): void {
+function applyDamage(w: World, t: Unit, dmg: number): void {
   t.hp = t.hp > dmg ? t.hp - dmg : 0;
+  t.lastHit = w.tick;
 }
 
 /** Game: melee branch of 0x02050A40. One RNG draw when damageRand > 0. */
@@ -61,13 +64,55 @@ function meleeHit(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
   const roll = a.damageRand > 0 ? nextInt(w.rng, a.damageRand) : 0;
   const base = Math.max(1, a.damage + meleeBonus(w.bonus, u.kind, t.kind));
-  applyDamage(t, roll + base);
+  applyDamage(w, t, roll + base);
 }
 
 /** Game: 0x0206E950. One RNG draw when maxDamage > minDamage. */
-export function projectileDamage(w: World, p: Projectile): number {
-  const span = p.type.maxDamage - p.type.minDamage;
-  return p.type.minDamage + (span > 0 ? nextInt(w.rng, span) : 0);
+function rollDamage(w: World, min: number, max: number): number {
+  return min + (max > min ? nextInt(w.rng, max - min) : 0);
+}
+
+/** 1.0 - 0.2 * ring in 20.12, as the game computes it (0x333 is 0.2). */
+const SPLASH_FACTOR = [4096, 4096 - 0x333, 4096 - 2 * 0x333];
+
+/**
+ * Game: 0x0206E5EC. Rings 0-2 of cells around the impact (a 5x5 square), skipping the
+ * shooter's side; damage range scaled by 1.0 / 0.8 / 0.6 and truncated, then rolled per unit.
+ * The game holds one unit per cell; here every enemy unit in a cell is hit, in id order.
+ */
+function splash(w: World, p: Projectile, cx: number, cy: number): void {
+  for (const o of w.units) {
+    if (o.owner === p.owner || o.hp === 0) continue;
+    const ring = Math.max(Math.abs(cellX(o.x) - cx), Math.abs(cellY(o.y) - cy));
+    if (ring > 2) continue;
+    const f = SPLASH_FACTOR[ring]!;
+    applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12));
+  }
+}
+
+/**
+ * Projectiles follow their target, moving in cell space at their speed from the tick they are
+ * fired, and hit once they stand in the target's cell (game: 0x0206E2xx). Adjacent targets are
+ * hit on the firing tick. A projectile whose target is gone does nothing (guess).
+ */
+export function stepProjectiles(w: World): void {
+  const keep = [];
+  for (const p of w.projectiles) {
+    const t = findById(w.units, p.target);
+    if (!t || t.hp === 0) continue;
+    const n = stepToward(p.x, p.y, t.x, t.y, stepBudget(p.type.speed));
+    p.x = n.x;
+    p.y = n.y;
+    const cx = cellX(t.x);
+    const cy = cellY(t.y);
+    if (cellX(p.x) !== cx || cellY(p.y) !== cy) {
+      keep.push(p);
+      continue;
+    }
+    if (p.type.splash) splash(w, p, cx, cy);
+    else applyDamage(w, t, rollDamage(w, p.type.minDamage, p.type.maxDamage));
+  }
+  w.projectiles = keep;
 }
 
 /**
@@ -101,30 +146,56 @@ function chase(w: World, u: Unit, t: Unit): void {
     u.path = [];
     return;
   }
-  if (u.tx !== null && u.ty !== null && cellOf(u.tx, u.ty).join() === cellOf(gx, gy).join()) return;
-  planUnitPath(w.grid, u, gx, gy);
+  const [cx, cy] = cellOf(gx, gy);
+  const goal = Math.min(Math.max(cy, 0), w.grid.height - 1) * w.grid.width + Math.min(Math.max(cx, 0), w.grid.width - 1);
+  // Keep the plotters' state when only the goal moves, like the game's follow-a-unit move (0x02054710).
+  if (!u.mv) orderMove(w, u, goal);
+  u.mv!.goal = goal;
+  u.tx = cellCenterX(goal % w.grid.width);
+  u.ty = cellCenterY(Math.floor(goal / w.grid.width));
 }
 
-function nearestEnemyInSight(w: World, u: Unit): Unit | undefined {
-  const r2 = u.attack!.sight * u.attack!.sight;
+/** Units scan for targets once a second (game: AI counter, `(age + 28) % 30 == 0`). */
+const SCAN_PERIOD = 30;
+const SCAN_PHASE = 2;
+
+/**
+ * Game: 0x020638A8. Enemies within sight, and between min range and sight + max range, are
+ * candidates. One in attack range beats one that isn't; then higher priority (+0x70) wins.
+ * The game's tie order is unknown; here nearer, then lower id, wins (guess).
+ */
+function pickTarget(w: World, u: Unit): Unit | undefined {
+  const a = u.attack!;
+  const sight2 = a.sight * a.sight;
+  const min2 = a.minRange * a.minRange;
+  const far = a.sight + a.maxRange;
   let best: Unit | undefined;
+  let bestIn = false;
   let bestD = 0;
   for (const o of w.units) {
     if (o.owner === u.owner || o.hp === 0) continue;
     const d = cellDist2(u, o);
-    // Ties go to the lower id because we scan in id order and need strictly closer.
-    if (d <= r2 && (!best || d < bestD)) {
-      best = o;
-      bestD = d;
+    if (d > sight2 || d < min2 || d > far * far) continue;
+    const isIn = d <= a.maxRange * a.maxRange;
+    if (best) {
+      if (bestIn !== isIn) {
+        if (bestIn) continue;
+      } else if (o.priority !== best.priority) {
+        if (o.priority < best.priority) continue;
+      } else if (d >= bestD) continue;
     }
+    best = o;
+    bestIn = isIn;
+    bestD = d;
   }
   return best;
 }
 
 /**
- * Per-tick combat for one unit, run before it moves: drop dead targets, pick
- * up an enemy in sight when idle, chase until in range, then attack whenever
- * the cooldown has run out (game: 0x02050A40, cooldown check against +0x19C).
+ * Per-tick combat for one unit, run before it moves: drop dead targets, scan
+ * for a better target once a second unless walking or obeying an attack order,
+ * chase until in range, then attack whenever the cooldown has run out
+ * (game: 0x02050A40, cooldown check against +0x19C).
  */
 export function combatStep(w: World, u: Unit): void {
   if (!u.attack || u.hp === 0) return;
@@ -132,21 +203,24 @@ export function combatStep(w: World, u: Unit): void {
   if (u.target !== null && (!t || t.hp === 0)) {
     // Target died or vanished: stop where we are.
     u.target = null;
-    u.tx = u.ty = null;
-    u.path = [];
+    u.ordered = false;
+    stopMove(u);
     t = undefined;
   }
-  if (!t && u.tx === null) {
-    t = nearestEnemyInSight(w, u);
-    if (t) u.target = t.id;
+  const scanning = t ? !u.ordered : u.tx === null;
+  if (scanning && (w.tick - u.born) % SCAN_PERIOD === SCAN_PHASE) {
+    const pick = pickTarget(w, u);
+    if (pick) {
+      t = pick;
+      u.target = t.id;
+    }
   }
   if (!t) return;
   if (!inRange(u, t)) {
     chase(w, u, t);
     return;
   }
-  u.tx = u.ty = null;
-  u.path = [];
+  stopMove(u);
   if (w.tick < u.lastAttack + u.attack.cooldown) return;
   u.lastAttack = w.tick;
   if (u.attack.projectile) {

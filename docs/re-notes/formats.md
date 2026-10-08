@@ -126,8 +126,8 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
   and into the lake. Each time he stopped on the nearest open cell next to it (forest edge, the
   plateau's near side, the shore). He walks on 0 and 2. So 1, 3 and 5 block walking. When the
   target can't be reached, the unit goes to the closest reachable spot instead of refusing.
-  Building placement rules are still open. How the game picks its path is not decoded; the sim
-  uses its own A* (`sim/src/terrain.ts`), which matches the stopping behaviour above.
+  Building placement rules are still open. How the game walks and paths is in
+  [movement.md](movement.md) (straight segments, a short A* only when stuck).
 - Ground ids >= 440 are **per-map detail metatiles**: id N reads entry N-440 of
   `BP/DetailTiles_<map>.tbp` (confirmed: with this rule mp01 and mp12 render with zero transparent
   pixels, and seams line up). In the tileset table, entries from 440 up are transparent filler.

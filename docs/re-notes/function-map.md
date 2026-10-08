@@ -32,7 +32,13 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x0205E63C` | ARM | `Unit_inRange` | Range check with +0x6E/+0x6F, or an override range | confirmed | |
 | `0x0207F640` | ARM | `Range_check` | Squared cell distance between footprints vs min^2/max^2 | confirmed | |
 | `0x0206E950` | ARM | `Projectile_hit` | `min + rand(max - min)` from projectile +0x70/+0x72, times defender multiplier | confirmed | |
-| `0x0206E5EC` | ARM | `Projectile_splash?` | Area-damage path when projectile +0x6B is set | guess | |
+| `0x0206E5EC` | ARM | `Projectile_splash` | Rings 0-2 around the impact cell, skips allies, scales min/max by 1.0/0.8/0.6, calls `Projectile_hit` per cell | confirmed | |
+| `0x0206E2xx` | ARM | `Projectile_update` (tail) | After moving: impact when the projectile's cell is inside the target's footprint | confirmed | |
+| `0x0205571C` | ARM | `Mover_step` | Shared unit/projectile movement: step toward goal, snap when the step covers the rest | likely | |
+| `0x0207EC24` | ARM | `Map_cellsInSquare` | Cells within r of a cell (Chebyshev), clipped to the map | confirmed | |
+| `0x0207ECFC` | ARM | `Rect_containsCell` | Cell inside an origin + size footprint | confirmed | |
+| `0x020638A8` | ARM | `Ai_pickTarget` | Picks from search results: in-range first, then priority +0x70 | confirmed | |
+| `0x0205E7D4` | ARM | `Unit_setHp` | Writes HP, damage time +0x1A4, under-attack alert, damaged event 0x2C | likely | |
 | `0x020F1108` | ARM | `Math_rand32` | Nitro SDK `MATH_Rand32` 64-bit LCG | confirmed | Game RNG context at `0x021552F4` +0xC |
 | `0x020832EC` | ARM | `Game_get` | Returns the game object; +0x8B4 is the 30 Hz time counter | confirmed | |
 | `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |
@@ -67,3 +73,23 @@ When a function's logic gets ported to `/sim`, add a section:
 - **Fixed-point:** which format (20.12? 16.16?), any rounding detail that matters.
 - **RNG:** does it draw from the game's RNG? How many times per call?
 - **Open questions:**
+| `0x02053C44` | ARM | `MoveAction_update` | Per-tick move: plotter, seeker, blocked handling, then align to the cell | likely | movement.md |
+| `0x0205571C` | ARM | `Seeker_step` | Move toward target cell centre; reserve each new cell; status 0 moving, 1 new cell, 2 blocked, 3 arrived | likely | movement.md |
+| `0x020559CC` | ARM | `Seeker_isAtTarget` | In target cell; with align flag also inside the 6-17 x 6-9 px window | confirmed | King replay |
+| `0x02059C40` | ARM | `Unit_reserveCell` | Release old reservation, check terrain, occupy the footprint as state 2 | likely | |
+| `0x0207D9E8` | ARM | `Occupancy_reserve` | Per cell/layer: free -> state 2 with the unit's handle; fails if another unit holds it | likely | |
+| `0x0207DEB0` | ARM | `Occupancy_stand` | Cell state 1 (or own reservation 2 -> 1) | likely | |
+| `0x0207E08C` | ARM | `Occupancy_vacate` | Own state-1 cell -> 0 | likely | |
+| `0x02056994` | ARM | `SegmentedPlotter_update` | Waypoint ~5 cells toward the goal, nudged by a ring search | likely | |
+| `0x02080430` | ARM | `Occupancy_ringSearch` | Rings 0..r-1 around a cell, calls a match function; axis points skip (+-r, 0) | confirmed | forest test |
+| `0x020574A4` | ARM | `WaitPlotter_onBlocked` | Wait (60 ticks) only for a walking blocker not waiting on us | likely | |
+| `0x02057568` | ARM | `WaitPlotter_findBlocker` | Who is in the bumped cell, and whether to wait for it | likely | |
+| `0x02056DB0` | ARM | `SidestepPlotter_onBlocked` | Start or advance sidestepping | likely | |
+| `0x02057104` | ARM | `SidestepPlotter_step` | Try straight / CCW 45 / CW 45 neighbour cells | likely | tables 0x021490D8.. |
+| `0x02056074` | ARM | `AstarPlotter_update` | States: off, search to segment point, follow path, skipped step, failed | likely | |
+| `0x02055F18` | ARM | `AstarPlotter_onBlocked` | | likely | |
+| `0x02082BC4` | ARM | `Path_cellCost` | 1 free, 3 walking unit, 150 standing unit, 200 wall | likely | |
+| `0x020820F4` | ARM | `Path_expand` | 8 neighbours in fixed order, no corner rule | likely | |
+| `0x020826E4` | ARM | `Path_poll` | Runs the job a few rounds; fails if another unit is in the end cell | confirmed | builder case |
+| `0x0205A088` | ARM | `Unit_isMoving` | Has a MoveUnitAction (action type 8) | likely | |
+| `0x020F2548` | ARM | `Time_secondsToTicks` | n * 30 | likely | |

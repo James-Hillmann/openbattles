@@ -1,17 +1,9 @@
-import { ascii, u16 } from './bytes';
+import { u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
-import { parseEntityRecords, unitStats, type UnitStats } from './entities';
+import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
 import { buildModelUnits, type ModelUnit } from './modelSprites';
 import type { ModelClips } from './modelClips';
-
-/**
- * Entity blueprints (BP/Entities.ebp, after PMOC): `BPNZ`, then 0x7C-byte records,
- * then a string table at STRINGS holding each entity's name followed by its asset path.
- * See docs/re-notes/formats.md "BPNZ".
- */
-const RECORD = 0x7c;
-const STRINGS = 0xfa08;
 
 export interface EntityInfo {
   /** Record index in the table. */
@@ -27,20 +19,15 @@ export interface EntityInfo {
   speed: number;
 }
 
-export function parseEntities(ebp: Uint8Array): EntityInfo[] {
-  if (ascii(ebp, 0, 4) !== 'BPNZ') throw new Error('Not an entity table (BPNZ)');
-  const out: EntityInfo[] = [];
-  for (let index = 0; 4 + (index + 1) * RECORD <= STRINGS; index++) {
-    const r = 4 + index * RECORD;
-    // Only record 0 has its name at offset 0; past the last entity the offsets read 0 again.
-    if (index > 0 && u16(ebp, r) === 0) break;
-    const nameAt = STRINGS + u16(ebp, r);
-    if (nameAt >= ebp.length) break;
-    const name = ascii(ebp, nameAt, 64);
-    if (!name) break;
-    out.push({ index, entityIndex: u16(ebp, r + 4), id: u16(ebp, r + 6), name, asset: ascii(ebp, nameAt + name.length + 1, 64), speed: u16(ebp, r + 0x0c) });
-  }
-  return out;
+/**
+ * Units and buildings (kind-0 records) of BP/Entities.ebp, for sprites. Records vary in size by
+ * kind, so this walks them with `parseEntityRecords` (see docs/re-notes/formats.md "BPNZ").
+ */
+export function parseEntities(ebp: Uint8Array | readonly EntityRecord[]): EntityInfo[] {
+  const recs = ebp instanceof Uint8Array ? parseEntityRecords(ebp) : ebp;
+  return recs
+    .filter((r) => r.kind === 0)
+    .map((r) => ({ index: r.index, entityIndex: u16(r.raw, 4), id: u16(r.raw, 6), name: r.name, asset: r.sprite, speed: u16(r.raw, 0x0c) }));
 }
 
 /**
@@ -208,6 +195,11 @@ export function buildUnitSprites(
 
 /** Units share one palette file; its 16-color banks are team colors (see formats.md). */
 export const UNIT_PALETTE = 'KingFaction.NCLR';
+/**
+ * Bank of light greys every unit is drawn with for a moment after taking damage (the white hit
+ * flash). Matched pixel for pixel in the emulator; see docs/re-notes/combat.md.
+ */
+export const FLASH_BANK = 12;
 
 /** The six playable factions, by entity name prefix. */
 export const FACTIONS = [
@@ -246,7 +238,8 @@ export function buildUnitBundle(
     if (!d) throw new Error(`File not in ROM: ${p}`);
     return d;
   };
-  const entities = parseEntities(need('BP/Entities.ebp'));
+  const records = parseEntityRecords(need('BP/Entities.ebp'));
+  const entities = parseEntities(records);
   const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name);
   const palette = decodePalette(need(UNIT_PALETTE));
   fixPalette?.(palette);
@@ -257,7 +250,6 @@ export function buildUnitBundle(
   const modelUnits = entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/'));
   // Models take the team colors only; odd ("selected") banks are drawn with an outline instead.
   const models = buildModelUnits(modelUnits, file, palette, banks.filter((b) => b % 2 === 0), clipsFor);
-  const records = parseEntityRecords(need('BP/Entities.ebp'));
   const stats: Record<string, UnitStats> = {};
   const names = [...sprites, ...models].map((s) => s.name);
   for (const name of new Set(names)) {
