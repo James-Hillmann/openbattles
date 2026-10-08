@@ -2,7 +2,7 @@
 
 | question | leads | status |
 |---|---|---|
-| Entity record fields (HP, cost, damage, range, speed, build time) | combat fields done (combat.md); build time and +0x70 still guesses | **mostly answered** |
+| Entity record fields (HP, cost, damage, range, speed, build time) | combat fields done (combat.md); build time +0x60, footprint +0x1D, mine yield +0x6C in economy.md | **mostly answered** |
 | How entity records reference the name/sprite string table | look for offsets into the tail of `Entities.ebp` | open |
 | What `Factions.fbp` holds per entry | names like `KCM01_User` / `KCM01_Enemy` suggest per-mission starting forces | open |
 | Map sections `EVNT`, `TRIG`, `MARK` | `MINE` done; `EVNT` = start spawns + pickups (skirmish.md); TRIG empty on skirmish maps; MARK points unknown | EVNT **answered**, MARK open |
@@ -25,11 +25,16 @@
 | Off-by-one start tiles in `Animations.abp` sets 2 and 4 | see formats.md "Animations" | open |
 | Entity record size: fixed 0x7C (units.ts) or per kind 0x7C/0x74/0x70 (entities.ts)? | both parsers pass their tests and agree on the sprite units; reconcile into one parser | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
+| Do several Builders build faster? | watch two Builders on one Farm | open |
+| Mine payout seen in the emulator | find a reachable mine site on The Pond and build one with poked bricks | open (code read only) |
+| Where a Builder goes after delivering a load | trace `HarvestEngineerEntityCommand` (vtable `0x02149C2C`) | open (sim guesses) |
+| Building placement rules | which terrain codes allow a footprint; units in the way | open |
+| Which buildings train which units, queue length | castle trains hero + builder (HUD); others not checked | open |
 | Minimap: other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
-| What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
+| What the HUD's red-star counter ("0/0") counts | transports + siege units, capped by finished Farms (economy.md) | **answered** (likely) |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
 | Fog of war: visibility grid, reveal radius, does it re-fog | `User::FogCircle`; BG2 + `FoWTileset.NCGR`; see skirmish.md | open |
 | Hero defeat in the emulator | heroes regenerate; needs a real fight to watch `Rules_onUnitDestroyed` | open |
-| Building footprints | not in record +0x10..+0x13 (0xFF); `0x02001170` returns w/h per entity | open |
+| Building footprints | `0x02001170` maps record +0x1D to a w x h table: 1x1, 2x2, 3x3, 2x3, 2x6, 2x9, 3x2, 6x2, 9x2, 1x4, 4x1 (economy.md) | **answered** (code) |
 | What pickups (`CollectableItem`, blueprint 8) give | 10 per skirmish map from EVNT | open |
 | Fog: main-view texture and edge tiles, minimap fog, which units set the circle widen flags, whether enemies are hidden outside vision | see fog.md | open |

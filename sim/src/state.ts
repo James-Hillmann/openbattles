@@ -50,6 +50,50 @@ export interface Unit {
   role: number;
   /** Active move order on a map (game: MoveUnitAction), or null. */
   mv: Mover | null;
+  // Economy (sim/src/economy.ts, docs/re-notes/economy.md). Static per type unless noted.
+  /** Footprint shape (+0x1D): 1, 2, 3 are squares of that side; units are 1. */
+  size: number;
+  /** Ticks to build or train this type (+0x60). */
+  buildTime: number;
+  /** Construction ticks done; a building is finished when progress >= buildTime. Units spawn finished. */
+  progress: number;
+  /** Builder's current economy job, or null. */
+  job: Job | null;
+  /** Builder is carrying a load of bricks back. */
+  carrying: boolean;
+  /** Production buildings: entity kinds waiting to be trained, front first. */
+  queue: number[];
+  /** Ticks spent on queue[0]. */
+  prod: number;
+  /** Mines: ticks until the next payout. */
+  payout: number;
+}
+
+/** What a builder is doing. Cells are y * width + x. */
+export type Job =
+  /** Chop the tree at `tree`; `timer` counts the chop down (game: HarvestAction). */
+  | { kind: 'chop'; tree: number; timer: number }
+  /** Carry a load to the nearest finished building; `tree` is where to go back to. */
+  | { kind: 'deliver'; tree: number; drop: EntityId }
+  /** Work on the construction site `site`. */
+  | { kind: 'build'; site: EntityId };
+
+/**
+ * Static per-type data from Entities.ebp, indexed by entity index (+0x04).
+ * Identical on every client, so not hashed.
+ */
+export interface EntityType {
+  kind: number;
+  role: number;
+  speed: number;
+  hp: number;
+  cost: number;
+  buildTime: number;
+  size: number;
+  /** +0x6C: bricks per payout for mines (25), 0 otherwise. */
+  yield: number;
+  priority: number;
+  attack: AttackStats | null;
 }
 
 /**
@@ -145,6 +189,10 @@ export interface World {
   players: Player[];
   /** Skirmish win condition, or null for a sandbox world. */
   rules: GameRules | null;
+  /** Entity types by entity index (sparse), for build and train orders. Static game data, not hashed. */
+  types: (EntityType | undefined)[];
+  /** Map cells (y * width + x) where a Mine may stand: the top-left of its footprint. Static map data. */
+  mineSites: number[];
 }
 
 /** The game's occupancy layers (OccupationGrid): ground, air, bridges. */
@@ -165,6 +213,9 @@ export interface Player {
   status: number;
   /** Cell the camera starts on: the hero's start record (game: map +0x234). -1 if none. */
   start: number;
+  /** Population and star slots taken by units still in a production queue (team +0xEE / +0xEF). */
+  reservedPop: number;
+  reservedStars: number;
 }
 
 /**

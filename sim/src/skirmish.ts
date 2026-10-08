@@ -1,6 +1,6 @@
 import { PLAYING, type GameRules, type Player, type PlayerId, type World } from './state';
 import { cellCenterX, cellCenterY } from './terrain';
-import { createWorld, spawnUnit, type UnitType, type WorldInit } from './world';
+import { createWorld, placeBuilding, spawnUnit, type UnitType, type WorldInit } from './world';
 
 /**
  * One starting unit or building from a map's EVNT section (read by
@@ -57,7 +57,7 @@ export function startSpawns(records: readonly StartSpawn[], slots: readonly numb
 
 /** A new skirmish world: players, rules and each player's starting units and buildings. */
 export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, records: readonly StartSpawn[], opts: SkirmishOptions): World {
-  const players: Player[] = opts.slots.map((_, id) => ({ id, team: id, bricks: opts.bricks, status: PLAYING, start: -1 }));
+  const players: Player[] = opts.slots.map((_, id) => ({ id, team: id, bricks: opts.bricks, status: PLAYING, start: -1, reservedPop: 0, reservedStars: 0 }));
   const w = createWorld({ ...init, players, rules: opts.rules });
   const width = init.grid?.width ?? 0;
   for (const s of startSpawns(records, opts.slots, opts.prebuilt)) {
@@ -65,7 +65,10 @@ export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, recor
     const p = players[s.player]!;
     if (s.role === 0 && p.start < 0) p.start = s.y * width + s.x;
     const type = opts.typeFor(s.player, s.role, s.index);
-    if (type) spawnUnit(w, s.player, cellCenterX(s.x), cellCenterY(s.y), { ...type, role: s.role });
+    if (!type) continue;
+    // Buildings block their footprint. That the record is the footprint's top-left cell is a guess.
+    if (s.role >= 7 && init.grid) placeBuilding(w, s.player, { ...type, role: s.role }, s.x, s.y);
+    else spawnUnit(w, s.player, cellCenterX(s.x), cellCenterY(s.y), { ...type, role: s.role });
   }
   return w;
 }

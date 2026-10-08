@@ -58,6 +58,30 @@ export function hashWorld(w: World): number {
     mix(p.y);
     mix(p.target);
   }
+  // Economy state. Mixed only when the world has entity types (the economy is
+  // on), so worlds without it keep the hashes they had before it existed.
+  if (w.types.length > 0) {
+    for (const p of w.players) {
+      mix(p.reservedPop);
+      mix(p.reservedStars);
+    }
+    for (const u of w.units) {
+      mix(u.role);
+      mix(u.size);
+      mix(u.buildTime);
+      mix(u.progress);
+      mix(u.carrying ? 1 : 0);
+      mix(u.prod);
+      mix(u.payout);
+      mix(u.queue.length);
+      for (const k of u.queue) mix(k);
+      const j = u.job;
+      if (!j) mix(0);
+      else if (j.kind === 'chop') (mix(1), mix(j.tree), mix(j.timer));
+      else if (j.kind === 'deliver') (mix(2), mix(j.tree), mix(j.drop));
+      else (mix(3), mix(j.site));
+    }
+  }
   if (w.grid) {
     mix(w.grid.width);
     mix(w.grid.height);
