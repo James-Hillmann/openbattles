@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createWorld, fx, hashWorld, replay, spawnUnit, type InputLog, type World } from '@lbw/sim';
+import { createWorld, fx, fxToFloat, hashWorld, replay, spawnUnit, step, type InputLog, type World } from '@lbw/sim';
 
 function setup(seed: number): World {
   const w = createWorld({ seed });
@@ -38,7 +38,21 @@ describe('determinism', () => {
   it('final state hash is pinned (update deliberately when sim rules change)', () => {
     const w = setup(log.seed);
     replay(w, log);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"230c69f2"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"eb3ab02a"`);
+  });
+
+  it('moves the same number of cells per tick in every direction', () => {
+    // Speed 410 = 410/4096 cell per tick, so 30 ticks (1 s) is ~3 cells:
+    // 72 px sideways (24 px cells) but only 48 px down (16 px cells).
+    const w = createWorld({ seed: 1 });
+    spawnUnit(w, 0, fx(0), fx(0));
+    spawnUnit(w, 0, fx(0), fx(0));
+    const far = fx(1000);
+    w.units[0]!.tx = far; w.units[0]!.ty = fx(0);
+    w.units[1]!.tx = fx(0); w.units[1]!.ty = far;
+    for (let i = 0; i < 30; i++) step(w, []);
+    expect(Math.round(fxToFloat(w.units[0]!.x))).toBe(72);
+    expect(Math.round(fxToFloat(w.units[1]!.y))).toBe(48);
   });
 
   it('units actually arrive', () => {

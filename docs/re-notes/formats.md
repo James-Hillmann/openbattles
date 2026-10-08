@@ -63,6 +63,10 @@ The unit and building table. 75,195 bytes decompressed.
   in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed the same way.
   +0x60 u16 maybe build time (600, 150, 270). +0x66 u16 projectile id (0xFFFF = melee). guess.
 - +0x6F u8 attack range in cells? (1 melee, 5 Archer, 7 Ballista). +0x70 u8 damage? guess.
+- +0x14 u8 looks like a unit class (guess): 2 builder, 3 melee and heroes, 4 ranged, 5 siege/flying,
+  6 transport ship, 7 production buildings, 4 towers, 8 mine. +0x15 u8 is 3 for melee, 2 ranged,
+  1 builder, 4 siege; 0 for buildings. Neither selects the animation set (below).
+- The sim now uses +0x0C directly as `Unit.speed` (see `sim/src/world.ts`).
 
 ### Factions found in the name table
 
@@ -183,12 +187,29 @@ PMOC > 2580 bytes of back-to-back records, no header. Parses exactly to 180 reco
 | 5 | 1 | always `0xA1` | confirmed |
 | 6 | 2n | per frame: u16 start tile in the sheet (8x8 tiles, row-major). Bits 14/15 look like a frame-size class (0x8000 frames step 4 tiles = 32 px; others step 3 = 24 px) | guess |
 
+### Which animation set a unit uses (likely)
+
+No entity field picks the set; it follows from the sprite kind. The six base sets match the six
+sprite layouts:
+
+| set | frames | layout | used by (sprite path suffix) |
+|---|---|---|---|
+| 0, 1 | idle 1, walk 6, attack 6 | one file per facing, 6 frames of 24 px in a row | heroes (`_hrm`, `_hrf`) |
+| 2, 3, 4 | idle 1, walk 5+1, attack 5+1 | `_0` idle row, `_1` walk sheet, `_2` attack sheet | builder, melee, ranged (`_eng`, `_mel`, `_rgd`); which is which is a guess, they differ only in VRAM position |
+| 5 | idle 1, walk 3 ping-pong, attack 5+1 | 32 px frames (`0x8000` flag) | mounted unit |
+
+"5+1" means the 5 sheet frames followed by the idle pose as a 6th frame. In sets 2-4 the walk frames
+carry bit `0x4000` and the trailing idle frame doesn't, which fits "bit 14 = walk/attack sheet,
+clear = idle sheet". The client plays walk as frames 0-4 then the idle pose, looped.
+
 ## Timing seen in the emulator (likely)
 
 - The battlefield redraws every 2nd VBlank: 30 updates per second.
 - A walking unit changes animation frame every 4 VBlanks (15 fps). The King hero's 6-frame walk
   loops in about 24 VBlanks (0.4 s).
 - The King hero walks about 66 px/s (132 px in 120 VBlanks), about 2.2 px per update.
+- The sim runs at this 30 Hz rate (`TICK_HZ`), and units move speed/4096 cells per tick, measured
+  as a straight line in cell units (so 24 px across counts the same as 16 px down).
 - Units and buildings are drawn by the 3D engine (main BG0); fog of war is main BG2.
 
 ## Template for new sections

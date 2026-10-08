@@ -12,8 +12,11 @@ export interface Unit {
   /** Movement target, or null when idle. */
   tx: Fx | null;
   ty: Fx | null;
-  /** Distance per tick. */
-  speed: Fx;
+  /**
+   * Game speed value from Entities.ebp (+0x0C): 1/4096 of a map cell per tick.
+   * Plain integer, not Fx.
+   */
+  speed: number;
 }
 
 export interface World {
