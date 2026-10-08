@@ -45,8 +45,8 @@ the mounted unit's frames from y 96). Each building's entity record says where:
 Units have the same fields (Builder: 3x3 tiles at tile 0 of its own sheet).
 
 Our placement of the picture on its footprint (bottom centre on the footprint's bottom centre) is a
-**guess** that looks right next to the emulator but hasn't been lined up pixel for pixel. How the game
-draws a site under construction is **not traced**: we draw the finished picture see-through until done.
+**guess** that looks right next to the emulator but hasn't been lined up pixel for pixel. Sites under
+construction: see "Construction effect" below.
 
 ## Ours
 
@@ -65,7 +65,7 @@ draws a site under construction is **not traced**: we draw the finished picture 
 - Where the game keeps each entity's icon number (other factions); the top-screen cost panel; the strip's
   end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
 - Stables and Shipyard lists; Wall and Bridge placement; the blue order strip; hero spells.
-- Construction-site look; the game's placement rules beyond "walkable and free".
+- The game's placement rules beyond "walkable and free"; the yellow outline under a site.
 
 ## Builder at work (emulator, 2026-10-08)
 
@@ -76,4 +76,60 @@ draws a site under construction is **not traced**: we draw the finished picture 
   the King Builder has only `_eng_0/1/2`).
 - **Building**: the site is a cloud of dust with LEGO bricks flying out, under a progress bar, not the
   building itself. The Builder's pose inside the cloud couldn't be seen; ours plays the same swing as
-  chopping (guess). The dust cloud isn't built yet (ours draws the building see-through).
+  chopping (guess). The cloud is below.
+
+## Construction effect (dust cloud + flying studs), traced 2026-10-08
+
+Watched on a Farm in a King skirmish (DeSmuME exec hooks on `0x0202918C` and `0x02052D9C`, and reading the
+effect objects every VBlank). Scratch scripts: `out/hps.ts`, `out/pw3.py`.
+
+**`.hps` files** (`Particles/*.hps`) are pre-baked particle animations, not emitters. confirmed (all 10 files parse exactly)
+
+| field | meaning | confidence |
+|---|---|---|
+| u32 | frame count (50 for both construction files) | confirmed |
+| u32 | 0x28000 here (0x32000 SmallStudDestroy, 0x50000 spells). Meaning unknown | guess: a duration or radius in fixed point |
+| per frame: u32 n, then n x 16 bytes | the particles alive in that frame | confirmed |
+| s16 x, s16 y | pixels from the effect's anchor; +y is down the screen | confirmed (lines up with the emulator) |
+| u16 size | quad side in pixels (studs 16 = their 16x16 sprite at 1:1; dust 10 to 24) | likely |
+| u16 rot | angle, 65536 = full turn (dust spins steadily; studs flip between 0 and 0x3FFF) | likely; direction not settled |
+| u8 r, g, b, a | 0-31 DS colour and alpha. a = 0 on a puff's first frame (not drawn) | likely |
+| u32 sprite | hash looked up in `UI/Game/UIMgrData.bin`: records of u32 hash, u16 x, y, w, h in the faction's `UI/AllInOne/<Castle/Mars/Pirate>Effects` sheet (a 256x256 4bpp linear bitmap, palette bank 0) | confirmed (hashes found there; rectangles hold the dust puff and studs) |
+
+Sprites: dust `B610395A` = (0,0,32,32); studs (16x16 at y 48): `6E812EFD` grey x 0, `6E812EFC` blue x 16,
+`6E812EFF` red x 32, `6E812EFE` green x 48, `6E812EF9` yellow x 64. Effect ids (table at `0x02126AC8`, 8 bytes each):
+1 = DustConstruction, 20 = LegoStudConstruction, 21 = LegoStudDestroy, 23 = LegoSmallStudDestroy. confirmed
+
+**Playback.** The frame number is the effect object's +0x0C. It goes up by 1 per game tick (every 2nd VBlank, now
+and then 3), then the object frees itself after the last frame. One-shot, no looping. confirmed
+
+**On a site** (`0x02052A90` → `0x02052BFC`), while percent done (unit +0x22E) is under 95:
+- The box: left = building x (unit +0xEC), W = floor(picW*8/24)*24 px; top = building y (+0xF0) + footprint
+  rows*16 - picH*8; H = floor(picH*8/16)*16. A Farm is 48x32. confirmed (code + logged positions)
+- Anchor y = top + H*(1 - percent/100), so the cloud climbs up the picture as the work goes on. The dust follows
+  it while alive; the studs keep the y they started at. confirmed
+- **Three dust slots** at x = left + 0.2W, 0.5W, 0.9W (literals 0x333, 0x800, 0xE66). Each starts at a random frame
+  from 10 to 14 (`rand(5)+10`). When a slot's effect gets near its end (about frame 45 of 50), a new one starts in
+  that slot, so they overlap and the cloud never gaps. confirmed for positions; the threshold is likely
+- **One stud effect** at x = left + 0.5W starting at frame 0, only while unit flag +0x24 bit 0x10 is set and the last
+  one has finished. Seen every ~130 VBlanks (about a 30-VBlank wait after the 100-VBlank effect). likely
+- Drawn as DS translucent quads that don't stack on top of each other (the same polygon ID), so the whole cloud
+  shows as one see-through layer, not a white blob. likely: rendering it that way matches the emulator best
+- The yellow dotted outline under the cloud and the progress bar are drawn separately. Not traced.
+
+Check: `out/hps.ts --emu <vblank>` puts the logged effects over a frame taken before the cloud appears, using
+world→screen (-134, -143) for this savestate. The cloud's outline and size line up. Mean |dRGB| in the site box
+is 13.6 against 16.7 with no effect drawn; the rest is the order puffs are drawn in and the builder. Open: rotation
+direction, draw order, the header word.
+
+**The building under the cloud** (emulator, Farm, a screenshot every 150 VBlanks from placement to done): only the part
+of the picture below the cloud's line shows, so the building rises out of the bottom of the cloud as the work goes on,
+and it looks see-through until finished. likely (the cut follows the anchor by eye; how see-through is a guess). The
+three factions' effect sheets hold the same dust and stud pictures at the same spots (compared by eye), so we use
+`CastleEffects` for everyone.
+
+**Ours** (`extract/src/effects.ts`, `client/src/siteFx.ts`): decodes both `.hps` files and the sprites, and plays the
+three dust slots and the studs per site as above, drawn in software so the first puff to touch a pixel wins. The studs
+fly while a Builder stands working the site (our reading of flag +0x24 bit 0x10: guess). Random start frames come from
+the client, never the sim. The box's left edge is our picture's left edge (the game's building x relative to the
+footprint isn't pinned down: guess).

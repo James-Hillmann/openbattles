@@ -4,6 +4,7 @@ import { entityLabels, parseLang, type EntityLabel } from './lang';
 import { decodeCells, decodeChars, decodePalette, decodeScreen, type CharData } from './nitro';
 import { blitTile, renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
+import { buildParticleFx, type ParticleFx } from './effects';
 
 /**
  * The in-game top screen (256x192): red brick frame, name / portrait / minimap
@@ -24,6 +25,8 @@ export interface HudBundle {
   nameFont: Font;
   /** 24x24 build/train strip icons by entity name, for the entities whose icon number is known (COMMAND_ICONS). */
   commandIcons: Record<string, Rgba>;
+  /** The dust cloud and flying studs over building sites (docs/re-notes/build-ui.md). */
+  particles?: ParticleFx;
 }
 
 /**
@@ -147,7 +150,7 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const hc = decodeChars(heads);
     for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons };
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom) };
 }
 
 /** What the top screen shows this frame. */
