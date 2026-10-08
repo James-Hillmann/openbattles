@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LEGO Battles Web</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; background: #111; color: #ddd; display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
+      #stage { position: relative; overflow: hidden; }
+      #side { border-left: 1px solid #333; padding: 12px; overflow: auto; font-size: 13px; }
+      #side h2 { font-size: 14px; margin: 0 0 8px; }
+      table { border-collapse: collapse; width: 100%; }
+      td, th { border-bottom: 1px solid #2a2a2a; padding: 2px 4px; text-align: left; }
+      code { color: #9cf; }
+      .muted { color: #888; }
+    </style>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <aside id="side">
+      <h2>Sandbox</h2>
+      <p class="muted">Right-click to move your units (blue). Tick <code id="tick">0</code>, hash <code id="hash">-</code></p>
+      <h2>Your ROM</h2>
+      <p class="muted">Pick your own LEGO Battles dump. It is read locally in a worker and never uploaded.</p>
+      <input id="rom" type="file" accept=".nds" />
+      <div id="rominfo"></div>
+    </aside>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

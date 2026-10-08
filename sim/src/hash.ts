@@ -1,0 +1,31 @@
+import type { World } from './state';
+
+/**
+ * FNV-1a over every sim field in a fixed order. Clients compare this every
+ * HASH_INTERVAL_TICKS; a mismatch means a desync. Add new state fields here.
+ */
+export function hashWorld(w: World): number {
+  let h = 0x811c9dc5;
+  const mix = (v: number | null) => {
+    let x = v === null ? 0x7fffffff : v | 0;
+    for (let i = 0; i < 4; i++) {
+      h ^= x & 0xff;
+      h = Math.imul(h, 0x01000193);
+      x >>>= 8;
+    }
+  };
+  mix(w.tick);
+  mix(w.rng.s);
+  mix(w.nextId);
+  mix(w.units.length);
+  for (const u of w.units) {
+    mix(u.id);
+    mix(u.owner);
+    mix(u.x);
+    mix(u.y);
+    mix(u.tx);
+    mix(u.ty);
+    mix(u.speed);
+  }
+  return h >>> 0;
+}
