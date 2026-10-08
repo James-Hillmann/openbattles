@@ -38,3 +38,5 @@
 | Building footprints | `0x02001170` maps record +0x1D to a w x h table: 1x1, 2x2, 3x3, 2x3, 2x6, 2x9, 3x2, 6x2, 9x2, 1x4, 4x1 (economy.md) | **answered** (code) |
 | What pickups (`CollectableItem`, blueprint 8) give | 10 per skirmish map from EVNT | open |
 | Fog: main-view texture and edge tiles, minimap fog, which units set the circle widen flags, whether enemies are hidden outside vision | see fog.md | open |
+| Does a Builder auto-engage enemies while chopping or building? | Builders have 5 melee damage and sight 5; the scan runs in AI states 1-4 (combat.md), but which state a harvest/construct action is in isn't traced. The sim lets combat take over the Builder (the job stalls until the fight ends). Check on mp01: a chopping Builder as the Wizard's swordsmen arrive | open |
+| Start records on blocked cells (mp29 slot 0) | the sim moves the unit to the nearest free cell (skirmish.md); the map is locked on a fresh profile | open |
