@@ -171,7 +171,7 @@ let combatBonus: MeleeBonusTable | null = null;
 function simType(s: UnitStats): EntityType & SimUnitType {
   const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role, cost, buildTime, size } = s;
   return {
-    kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield,
+    kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield, faction: s.name.slice(0, s.name.indexOf('_')),
     attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile },
   };
 }

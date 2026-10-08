@@ -167,6 +167,24 @@ describe('economy', () => {
     expect(bricks(w)).toBe(5000);
   });
 
+  it("a building only makes its own faction's entities (the strip lists one faction)", () => {
+    const w = world(5000);
+    w.types[CASTLE.kind] = { ...CASTLE, faction: 'K' }; // the faction is read off the building's type
+    const castle = placeBuilding(w, 0, CASTLE, 10, 10);
+    const P_BUILDER = t(22, 1, 150, 45, 150, 1, { faction: 'P' });
+    const K_BUILDER = t(23, 1, 150, 50, 150, 1, { faction: 'K' });
+    const P_FARM = t(24, 10, 350, 75, 360, 2, { faction: 'P' });
+    for (const x of [P_BUILDER, K_BUILDER, P_FARM]) w.types[x.kind] = x;
+    const builder = spawnUnit(w, 0, cellCenterX(15), cellCenterY(15), K_BUILDER);
+    run(w, 1, [
+      { kind: 'train', building: castle.id, type: P_BUILDER.kind },
+      { kind: 'train', building: castle.id, type: K_BUILDER.kind },
+      { kind: 'build', unitIds: [builder.id], type: P_FARM.kind, cx: 18, cy: 18 },
+    ]);
+    expect(castle.queue).toEqual([K_BUILDER.kind]);
+    expect(bricks(w)).toBe(4950);
+  });
+
   it('cannot train past the population cap', () => {
     const w = world(5000);
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);

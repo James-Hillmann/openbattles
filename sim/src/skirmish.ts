@@ -1,6 +1,8 @@
 import { PLAYING, type GameRules, type Player, type PlayerId, type World } from './state';
 import { cellCenterX, cellCenterY } from './terrain';
 import { createWorld, placeBuilding, spawnUnit, type UnitType, type WorldInit } from './world';
+import { freeCellNear } from './economy';
+import { placeUnit } from './movement';
 
 /**
  * One starting unit or building from a map's EVNT section (read by
@@ -68,7 +70,19 @@ export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, recor
     if (!type) continue;
     // Buildings block their footprint. That the record is the footprint's top-left cell is a guess.
     if (s.role >= 7 && init.grid) placeBuilding(w, s.player, { ...type, role: s.role }, s.x, s.y);
-    else spawnUnit(w, s.player, cellCenterX(s.x), cellCenterY(s.y), { ...type, role: s.role });
+    else {
+      const u = spawnUnit(w, s.player, cellCenterX(s.x), cellCenterY(s.y), { ...type, role: s.role });
+      // mp29's second slot-0 builder record sits inside its castle's footprint. Guess: the game
+      // puts such a unit on the nearest free cell (we can't reach that map in the emulator yet).
+      if (init.grid && u.cell < 0) {
+        const c = freeCellNear(w, s.x, s.y, 7);
+        if (c >= 0) {
+          u.x = cellCenterX(c % width);
+          u.y = cellCenterY(Math.floor(c / width));
+          placeUnit(w, u);
+        }
+      }
+    }
   }
   return w;
 }

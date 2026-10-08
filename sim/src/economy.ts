@@ -241,11 +241,17 @@ export function canPlace(w: World, t: EntityType, cx: number, cy: number): boole
 export type SpawnFn = (w: World, owner: PlayerId, t: EntityType, cell: number) => Unit;
 export type PlaceFn = (w: World, owner: PlayerId, t: EntityType, cx: number, cy: number, finished: boolean) => Unit;
 
+/** A faction's strip only lists its own entities (build-ui.md); types without a faction are unrestricted. */
+const sameFaction = (w: World, by: Unit, t: EntityType): boolean => {
+  const f = w.types[by.kind]?.faction;
+  return f === undefined || t.faction === undefined || f === t.faction;
+};
+
 export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[], type: number, cx: number, cy: number, place: PlaceFn): void {
   const t = w.types[type];
   const p = getPlayer(w, player);
   const builders = ownBuilders(w, player, ids);
-  if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !canPlace(w, t, cx, cy)) return;
+  if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !sameFaction(w, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
   for (const u of builders) setBuildJob(w, u, site);
@@ -268,7 +274,7 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const t = w.types[type];
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
-  if (!(TRAINS[b.role] ?? []).includes(t.role) || b.queue.length >= QUEUE_MAX) return;
+  if (!(TRAINS[b.role] ?? []).includes(t.role) || !sameFaction(w, b, t) || b.queue.length >= QUEUE_MAX) return;
   // One hero at a time: the Castle only offers it while the hero is down. guess
   if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
   if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;
@@ -353,13 +359,19 @@ function stepConstruction(w: World, s: Unit): void {
 }
 
 /** First free walkable cell around the spot below a building's bottom row, by Chebyshev rings. */
+/** Nearest free, walkable ground cell to (cx, cy) by Chebyshev rings, or -1 within `radius`. */
+export function freeCellNear(w: World, cx: number, cy: number, radius: number): number {
+  const g = w.grid!;
+  for (let r = 0; r <= radius; r++) for (const c of ring(g, cx, cy, r)) if (freeFor(w, c, null)) return c;
+  return -1;
+}
+
 function exitCell(w: World, b: Unit): number {
   const g = w.grid!;
   const o = originCell(w, b);
   const cx = cellX(g, o) + (b.size >> 1);
   const cy = cellY(g, o) + b.size;
-  for (let r = 0; r < 8; r++) for (const c of ring(g, cx, cy, r)) if (freeFor(w, c, null)) return c;
-  return -1;
+  return freeCellNear(w, cx, cy, 7);
 }
 
 function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {

@@ -64,6 +64,9 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 - The new unit stands on the first free cell below the building's middle column: Castle at (10,10)
   put the Builder at (11,13). confirmed for one case; the search order beyond that is a guess.
 - Queue length 5: **guess**.
+- A building only trains, and a Builder only builds, its own faction's entities: the strips list one
+  faction (build-ui.md, confirmed). The sim enforces it from the entity name prefix (`EntityType.faction`)
+  so a doctored client cannot queue another faction's units over the wire.
 
 ## Population and stars (top-screen HUD counters)
 
