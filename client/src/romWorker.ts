@@ -5,6 +5,7 @@ import {
   buildMapBundle,
   FLASH_BANK,
   buildUnitBundle,
+  modelClips,
   hex,
   listMaps,
   tryRomFile,
@@ -27,8 +28,11 @@ const LOCAL_TEAM = 0;
 /** Units in the given team colors; `localTeam` gets the yellow selection outline. */
 function units(r: UnpackedRom, teams: readonly number[], localTeam: number): UnitBundle {
   const banks = [...teams.flatMap((t) => [2 * t, 2 * t + 1]), FLASH_BANK];
-  return buildUnitBundle((path) => tryRomFile(r, path), banks, (pal) =>
-    applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, localTeam),
+  return buildUnitBundle(
+    (path) => tryRomFile(r, path),
+    banks,
+    (pal) => applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, localTeam),
+    (e) => modelClips(r.arm9, r.header.arm9.ramAddress, r.header.gameCode, e.entityIndex),
   );
 }
 

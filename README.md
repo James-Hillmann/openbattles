@@ -48,7 +48,7 @@ npm run m0 -- path/to/your.nds   # M0 recon: unpack into ./out (gitignored)
 ## Milestones
 
 - **M0 Recon** (done): see [docs/re-notes/m0-recon.md](docs/re-notes/m0-recon.md) and [formats.md](docs/re-notes/formats.md)
-- **M1 Assets** (in progress): load your ROM in the sidebar, pick a map and two factions, and all 36 sprite units walk on it. Still missing: 3D-model units (siege, flyers, ships)
+- **M1 Assets** (in progress): load your ROM in the sidebar, pick a map and two factions, and every unit of both factions walks on it: 36 sprite units plus 24 drawn from the game's 3D models (siege, flyers, ships, the Giant). Ships still walk on land until the sim knows water
 - M2 Sandbox: gather, build, train, move, attack
 - **M3 Lockstep** (done): Host or join a room by code, pick team color and army, ready up,
   launch; both browsers run the same match. See [docs/re-notes/multiplayer.md](docs/re-notes/multiplayer.md).

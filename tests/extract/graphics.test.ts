@@ -41,7 +41,7 @@ describe('maps', () => {
     const regions = [0, 0];
     const treeRuns = [...u16le(2), 1, 1]; // 1 open cell, then 1 tree
     const ground = [...u16le(1), ...u16le(0)];
-    return new Uint8Array([...bytes('MAPTERR'), 2, 1, 3, 2, ...name, ...terrain, ...edges, ...regions, ...treeRuns, ...ground, ...bytes('RRET'), ...bytes('MINE'), 0x4c, 0, 0x4c, 1, 5, 7, 0x4c, 0, 0x4c, 0, ...bytes('!PAM')]);
+    return new Uint8Array([...bytes('MAPTERR'), 2, 1, 3, 2, ...name, ...terrain, ...edges, ...regions, ...treeRuns, ...ground, ...bytes('RRET'), ...bytes('EVNT'), 0x4c, 0, 0, 0, 1, 1, 0, 0, 7, 0, 100, 1, 1, 1, 1, 0, 0, 0, 0x14, 8, 0xff, 2, 1, 0, 0x21, ...bytes('MINE'), 0x4c, 0, 0x4c, 1, 5, 7, 0x4c, 0, 0x4c, 0, ...bytes('!PAM')]);
   }
 
   it('parses size, tileset, terrain and the ground layer', () => {
@@ -51,6 +51,8 @@ describe('maps', () => {
     expect([...m.ground]).toEqual([1, 0]);
     expect([...m.trees]).toEqual([0, 1]);
     expect(m.mineSites).toEqual([{ x: 5, y: 7 }]);
+    expect(m.starts).toEqual([{ x: 1, y: 0, slot: 0, role: 7, index: 0, extra: [100, 1, 1, 1] }]);
+    expect(m.pickups).toEqual([{ x: 0, y: 0, item: 8 }]);
     expect(metatilePath(m.tileset)).toBe('BP/KingTiles.tbp');
   });
 
@@ -100,7 +102,7 @@ describe('trees', () => {
   const map: GameMap = {
     width: 3, height: 3, tileset: 'KingTileset',
     terrain: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), edges: new Uint8Array(9), regions: new Uint8Array(9),
-    trees: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), ground: new Uint16Array(9).fill(116), mineSites: [],
+    trees: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), ground: new Uint16Array(9).fill(116), mineSites: [], starts: [], pickups: [],
   };
 
   it('keys a cell by its 3x3 neighbourhood, 2 bits per cell, off-map counts as tree', () => {

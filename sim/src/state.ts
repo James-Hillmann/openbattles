@@ -1,6 +1,6 @@
 import type { Fx } from './fixed';
 import type { Rng } from './rng';
-import type { TerrainGrid } from './terrain';
+import type { TerrainGrid, TerrainMask } from './terrain';
 
 export type PlayerId = number;
 export type EntityId = number;
@@ -40,6 +40,12 @@ export interface Unit {
   priority: number;
   /** Map cell this unit holds in World.occ (y * width + x), or -1. */
   cell: number;
+  /** Terrain codes the unit may enter (entity +0x16..+0x19); see terrain.ts. Static per unit type. */
+  moves: TerrainMask;
+  /** Occupancy layer: 0 ground, 1 air, 2 bridges/gates (entity +0x1A/+0x1B/+0x1C). Static per unit type. */
+  layer: number;
+  /** Role (entity +0x5C): 0 hero, 1 builder, 2-6 other units, 7-16 buildings, -1 unknown. Static per unit type. */
+  role: number;
   /** Active move order on a map (game: MoveUnitAction), or null. */
   mv: Mover | null;
 }
@@ -128,6 +134,43 @@ export interface World {
   bonus: MeleeBonusTable | null;
   /** Map walkability; null for a bare test world, where units move in straight lines. */
   grid: TerrainGrid | null;
-  /** Unit id holding each map cell, 0 = free. Null without a grid. */
+  /**
+   * Unit id holding each map cell, 0 = free: one width * height plane per
+   * occupancy layer (OCC_LAYERS), indexed layer * width * height + cell. Null without a grid.
+   */
   occ: Int32Array | null;
+  /** Players, sorted by id. Empty in sandbox worlds, which never end. */
+  players: Player[];
+  /** Skirmish win condition, or null for a sandbox world. */
+  rules: GameRules | null;
+}
+
+/** The game's occupancy layers (OccupationGrid): ground, air, bridges. */
+export const OCC_LAYERS = 3;
+
+/** Player status (game: team +0x9C). */
+export const PLAYING = 0;
+export const DEFEATED = 1;
+export const WON = 2;
+export const LOST = 3;
+
+export interface Player {
+  id: PlayerId;
+  /** Players on the same team are allies. 1v1: each player its own team. */
+  team: number;
+  /** LEGO bricks (game: team +0x90). */
+  bricks: number;
+  status: number;
+  /** Cell the camera starts on: the hero's start record (game: map +0x234). -1 if none. */
+  start: number;
+}
+
+/**
+ * Skirmish win conditions, as picked on the game's options screen (game:
+ * GameRuleManager +4): 0 "Defeat the enemy's Hero", 1 "Defeat all enemy units",
+ * 2 "Collect 10000 LEGO Bricks". See docs/re-notes/skirmish.md.
+ */
+export type WinMode = 0 | 1 | 2;
+export interface GameRules {
+  mode: WinMode;
 }
