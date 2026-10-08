@@ -31,6 +31,8 @@ export function hashWorld(w: World): number {
     mix(u.maxHp);
     mix(u.target);
     mix(u.lastAttack);
+    mix(u.path.length);
+    for (const c of u.path) mix(c);
   }
   mix(w.projectiles.length);
   for (const p of w.projectiles) {
@@ -39,6 +41,11 @@ export function hashWorld(w: World): number {
     mix(p.x);
     mix(p.y);
     mix(p.target);
+  }
+  if (w.grid) {
+    mix(w.grid.width);
+    mix(w.grid.height);
+    for (const c of w.grid.cells) mix(c);
   }
   return h >>> 0;
 }

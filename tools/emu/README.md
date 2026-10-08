@@ -33,3 +33,19 @@ On The Pond (default map) with the default CPU, the Wizard's swordsmen reach you
 - Combat: melee damage, random rolls and cooldowns logged with exec hooks on `0x02050B70` and
   `0x02050BC4` (`desmume.memory.register_exec`) match `sim/src/combat.ts` (see docs/re-notes/combat.md).
 - The map renderer is pixel-exact against the bottom screen, apart from sprites and fog of war.
+- HUD: the top screen we compose (frame, icons, counters, portrait, name, HP) matches the emulator pixel for
+  pixel with the King and with the Builder selected. Tap a unit at its bottom-screen position (y - 192 in the
+  256x384 screenshot) to select it.
+- Bars over units: lowering a unit's HP in RAM (unit +0x1A0, see `docs/re-notes/hud.md`) through
+  `emu.memory` and screenshotting is how the lit-cell rule and color bands were measured.
+- Unit frames: King hero and builder idle, walk and timing match our sheets pixel for pixel
+  (see `docs/re-notes/formats.md`, "Unit animation timing"). To repeat:
+
+  ```sh
+  npx tsx extract/cli/sheets.ts 1 k_eng_0 k_eng_1 k_eng_2    # bank 1 = selected, red
+  out/venv/bin/python tools/emu/burst.py game.nds out/game.dst out/walk 120,68 60,150 120
+  out/venv/bin/python tools/emu/track.py out/walk 24 'out/png1/k_eng_*.png'
+  ```
+
+  With the profile from step 1, `Continue` x3 then `Start` (215,175) on the default map gives a King
+  skirmish with the builder at (120,68) and the hero at (144,100) on the bottom screen.

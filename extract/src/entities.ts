@@ -58,7 +58,7 @@ function cString(b: Uint8Array, o: number): string {
 }
 
 /** Parse a decompressed Entities.ebp. */
-export function parseEntities(ebp: Uint8Array): EntityRecord[] {
+export function parseEntityRecords(ebp: Uint8Array): EntityRecord[] {
   if (cString(ebp, 0).slice(0, 4) !== 'BPNZ') throw new Error('not a BPNZ file');
   const recs: { off: number; kind: number }[] = [];
   let off = 4;

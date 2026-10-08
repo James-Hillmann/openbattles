@@ -3,6 +3,7 @@ export * from './rng';
 export * from './config';
 export * from './state';
 export * from './commands';
+export * from './terrain';
 export * from './world';
 export * from './combat';
 export * from './hash';

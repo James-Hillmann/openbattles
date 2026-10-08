@@ -1,7 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import {
   INPUT_DELAY_TICKS,
-  NEVER,
   TICK_MS,
   cloneWorld,
   createWorld,
@@ -10,34 +9,51 @@ import {
   hashWorld,
   spawnUnit,
   step,
+  CELL_H,
+  CELL_W,
+  cellCenterX,
+  cellCenterY,
+  reachableFrom,
+  spreadCells,
+  type Fx,
   type MeleeBonusTable,
   type ScheduledCommand,
-  type UnitType,
+  type UnitType as SimUnitType,
+  type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FRAME, type MapBundle, type Rgba, type UnitStats } from '@lbw/extract';
+import { FACINGS, FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { HudView, drawUnitBars } from './hud';
+import { animate, attack, facing, type AnimState } from './unitAnim';
 import { mountRomPanel } from './romPanel';
+import { Selection, type Pickable } from './selection';
 
 const LOCAL_PLAYER = 0;
 const COLORS = [0xd33b2c, 0x3b6fd3];
-/** Palette bank per player: even banks are team colors (0 red, 2 blue). */
+/** Palette bank per player: even banks are team colors (0 red, 2 blue); bank + 1 is the same team selected. */
 const TEAM_BANK = [0, 2];
 
 let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
 const pending: ScheduledCommand[] = [];
 
-function unitType(s: UnitStats | undefined): UnitType {
-  if (!s) return {};
-  const { index, speed, hp, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
-  return { kind: index, speed, hp, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
-}
-
-function resetWorld(cx: number, cy: number, type: UnitType = {}, bonus: MeleeBonusTable | null = null) {
-  world = createWorld({ seed: 1234, bonus });
-  // Two squads far enough apart (more than 5 cells, the sight radius) that nobody fights until ordered.
-  for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60), type);
-  for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60), type);
+function resetWorld(cx: number, cy: number, grid: TerrainGrid | null = null) {
+  world = createWorld({ seed: 1234, grid });
+  if (grid) {
+    // Stand each team on walkable cells near a point left/right of centre.
+    // Keep a team on one landmass: spread only over cells reachable from the first one found.
+    const team = (px: number, owner: number) => {
+      const [x, y] = [Math.floor(px / CELL_W), Math.floor(cy / CELL_H)];
+      const first = spreadCells(grid, x, y, 1);
+      for (const c of spreadCells(grid, x, y, 4, reachableFrom(grid, first)))
+        spawnUnit(world, owner, cellCenterX(c % grid.width), cellCenterY(Math.floor(c / grid.width)));
+    };
+    team(cx - 120, 0);
+    team(cx + 120, 1);
+  } else {
+    for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
+    for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+  }
   prev = cloneWorld(world);
   pending.length = 0;
 }
@@ -57,7 +73,13 @@ const unitLayer = new Container();
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
-fallback.zIndex = 1e9; // projectiles and health bars draw over sprites
+/** Health bars and the box-select rectangle draw above units. */
+const overlay = new Graphics();
+camera.addChild(overlay);
+const hudView = new HudView(document.getElementById('side')!);
+const selection = new Selection();
+/** Where each unit was drawn last frame, for picking. */
+let drawn: Pickable[] = [];
 
 // --- Map + sprites from the ROM ---------------------------------------------
 
@@ -71,56 +93,117 @@ function textureFrom(img: Rgba): Texture {
   return t;
 }
 
-/** frames[row][col]: rows are facings (back, back-right, right, front-right, front), cols the walk cycle. */
-type Frames = Texture[][];
-interface UnitTextures {
-  walk: Frames;
-  attack: Frames;
-  /** One frame per facing row. */
-  idle: Texture[];
+/** One unit type in one team color: frames[row][col], rows are facings, cols atlas columns. */
+interface UnitType {
+  sprite: UnitSprite;
+  frames: Texture[][];
 }
-let teamFrames: UnitTextures[] = [];
+/** By "<entity name>@<bank>". */
+const unitTypes = new Map<string, UnitType>();
+/** Entity names per faction prefix, in table order (hero, hero F, builder, melee, ranged, mounted). */
+let factionUnits = new Map<string, string[]>();
+/** Sim stats per entity name, from Entities.ebp. */
+let unitStats: Record<string, UnitStats> = {};
+let combatBonus: MeleeBonusTable | null = null;
+
+function simType(s: UnitStats | undefined): SimUnitType {
+  if (!s) return {};
+  const { index, speed, hp, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
+  return { kind: index, speed, hp, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+}
+/** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
+const unitKind = new Map<number, string>();
 const unitSprites = new Map<number, Sprite>();
-/** Last facing row per unit, so idle units keep looking where they walked. */
-const unitRow = new Map<number, number>();
-/** When each walking unit started walking, so its cycle begins at frame 0 like in the game. */
-const walkStart = new Map<number, number>();
+/** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
+const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number }>();
+const factionPick: [string, string] = ['K', 'A'];
 
-function cutFrames(sheet: Texture, rows: number, cols: number): Frames {
-  return Array.from({ length: rows }, (_, row) =>
-    Array.from({ length: cols }, (_, col) => new Texture({ source: sheet.source, frame: new Rectangle(col * FRAME, row * FRAME, FRAME, FRAME) })),
-  );
+function onUnits(u: UnitBundle) {
+  unitTypes.clear();
+  factionUnits = new Map();
+  unitStats = u.stats;
+  for (const s of u.sprites) {
+    const tex = textureFrom(s.atlas);
+    const cols = s.atlas.width / s.frame;
+    const frames = Array.from({ length: FACINGS }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => new Texture({ source: tex.source, frame: new Rectangle(col * s.frame, row * s.frame, s.frame, s.frame) })),
+    );
+    unitTypes.set(s.key, { sprite: s, frames });
+    const prefix = s.name.slice(0, 1);
+    const list = factionUnits.get(prefix) ?? [];
+    if (!list.includes(s.name)) list.push(s.name);
+    factionUnits.set(prefix, list);
+  }
+  mountFactionPickers(u);
 }
 
-/**
- * The game advances unit animation frames every 4 VBlanks (60/4 = 15 fps),
- * measured in the emulator. Render-side only.
- */
-const ANIM_FRAME_MS = (4 * 1000) / 60;
+/** Walkable cells for `count` units near (px, py), all on one landmass. */
+function spawnCells(grid: TerrainGrid, px: number, py: number, count: number): [Fx, Fx][] {
+  const [x, y] = [Math.floor(px / CELL_W), Math.floor(py / CELL_H)];
+  const first = spreadCells(grid, x, y, 1);
+  return spreadCells(grid, x, y, count, reachableFrom(grid, first)).map((c) => [
+    cellCenterX(c % grid.width),
+    cellCenterY(Math.floor(c / grid.width)),
+  ]);
+}
 
-/**
- * Walk cycle for 24 px units, from BP/Animations.abp: the 5 walk frames, then
- * the idle pose as a 6th frame, looped. -1 means "the idle frame for this facing".
- */
-const WALK_CYCLE = [0, 1, 2, 3, 4, -1];
-/** Attack: same shape, played once from the tick the hit lands (docs/re-notes/combat.md). */
-const ATTACK_CYCLE = [0, 1, 2, 3, 4, -1];
-/** Sim ticks per animation frame: 30 Hz sim, 15 fps animation. */
-const TICKS_PER_FRAME = 2;
-
-function onMap(b: MapBundle) {
-  ground.texture = textureFrom(b.ground);
-  teamFrames = TEAM_BANK.map((bank) => ({
-    walk: cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!), 5, 5),
-    attack: cutFrames(textureFrom(b.units[`k_mel_2@${bank}`]!), 5, 5),
-    idle: cutFrames(textureFrom(b.units[`k_mel_0@${bank}`]!), 1, 5)[0]!,
-  }));
+/** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
+function spawnLineups(cx: number, cy: number) {
+  world = createWorld({ seed: 1234, grid: mapGrid, bonus: combatBonus });
+  unitKind.clear();
+  for (let p = 0; p < 2; p++) {
+    const names = factionUnits.get(factionPick[p]!) ?? [];
+    const py = cy + (p === 0 ? -50 : 50);
+    const spots = mapGrid ? spawnCells(mapGrid, cx, py, names.length) : names.map((_, i) => [fx(cx - 90 + i * 36), fx(py)] as [Fx, Fx]);
+    names.forEach((name, i) => {
+      const spot = spots[i];
+      if (!spot) return;
+      const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
+      const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: t?.sprite.speed });
+      unitKind.set(u.id, name);
+    });
+  }
+  if (!factionUnits.size) resetWorld(cx, cy, mapGrid);
+  prev = cloneWorld(world);
+  pending.length = 0;
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
-  unitRow.clear();
-  walkStart.clear();
-  resetWorld(b.ground.width / 2, b.ground.height / 2, unitType(b.stats['k_mel']), b.combatBonus);
-  centerOn(b.ground.width / 2, b.ground.height / 2);
+  unitAnim.clear();
+  selection.ids.clear();
+}
+
+let mapSize = { w: 600, h: 440 };
+let mapGrid: TerrainGrid | null = null;
+let minimap: Rgba | undefined;
+/** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
+const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
+
+function onMap(b: MapBundle, hud: HudBundle) {
+  ground.texture = textureFrom(b.ground);
+  hudView.setBundle(hud);
+  minimap = b.minimap;
+  combatBonus = b.combatBonus;
+  mapSize = { w: b.ground.width, h: b.ground.height };
+  mapGrid = { width: b.width, height: b.height, cells: b.terrain };
+  spawnLineups(mapSize.w / 2, mapSize.h / 2);
+  centerOn(mapSize.w / 2, mapSize.h / 2);
+}
+
+function mountFactionPickers(u: UnitBundle) {
+  const el = document.getElementById('factions')!;
+  const opts = FACTIONS.map((f) => `<option value="${f.prefix}">${f.name}</option>`).join('');
+  el.innerHTML = `
+    <label>You <select data-p="0">${opts}</select></label>
+    <label>Opponent <select data-p="1">${opts}</select></label>
+    <p class="muted">Not drawn yet (3D models): ${u.models.map((m) => m.name).join(', ')}</p>`;
+  el.querySelectorAll<HTMLSelectElement>('select').forEach((sel) => {
+    const p = Number(sel.dataset.p);
+    sel.value = factionPick[p]!;
+    sel.addEventListener('change', () => {
+      factionPick[p] = sel.value;
+      spawnLineups(mapSize.w / 2, mapSize.h / 2);
+    });
+  });
 }
 
 // --- Camera: drag with left mouse, or arrow keys / WASD ------------------------
@@ -132,13 +215,40 @@ function centerOn(x: number, y: number) {
 camera.scale.set(2);
 centerOn(300, 220);
 
-let drag: { x: number; y: number } | null = null;
+/** Screen point -> world pixel. */
+function toWorld(clientX: number, clientY: number): { x: number; y: number } {
+  const r = app.canvas.getBoundingClientRect();
+  return { x: (clientX - r.left - camera.x) / camera.scale.x, y: (clientY - r.top - camera.y) / camera.scale.y };
+}
+
+// Left button: click selects a unit (shift adds), drag pans, shift+drag box-selects.
+let drag: { x: number; y: number; startX: number; startY: number; moved: boolean; box: boolean } | null = null;
+let boxRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 app.canvas.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) drag = { x: e.clientX - camera.x, y: e.clientY - camera.y };
+  if (e.button !== 0) return;
+  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, box: e.shiftKey };
 });
-window.addEventListener('pointerup', () => (drag = null));
+window.addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  if (!drag.moved) {
+    const w = toWorld(e.clientX, e.clientY);
+    selection.click(drawn, LOCAL_PLAYER, w.x, w.y, e.shiftKey);
+  } else if (boxRect) {
+    selection.box(drawn, LOCAL_PLAYER, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
+  }
+  drag = null;
+  boxRect = null;
+});
 window.addEventListener('pointermove', (e) => {
   if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4) return;
+  drag.moved = true;
+  if (drag.box) {
+    const a = toWorld(drag.startX, drag.startY);
+    const b = toWorld(e.clientX, e.clientY);
+    boxRect = { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
+    return;
+  }
   camera.x = e.clientX - drag.x;
   camera.y = e.clientY - drag.y;
 });
@@ -159,7 +269,7 @@ app.canvas.addEventListener('wheel', (e) => {
   camera.y = Math.round(sy - wy * s);
 });
 
-// --- Input: right-click an enemy to attack it, anywhere else to move ----------
+// --- Input: right-click an enemy to attack it, anywhere else to move ------------
 
 app.canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -167,8 +277,9 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
   const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
-  const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER).map((u) => u.id);
-  // Sprites are 24x24 anchored near the feet, so hit-test that box.
+  const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER && selection.ids.has(u.id)).map((u) => u.id);
+  if (unitIds.length === 0) return;
+  // Sprites are anchored near the feet, so hit-test the box above them.
   const enemy = world.units.find(
     (u) => u.owner !== LOCAL_PLAYER && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
   );
@@ -180,14 +291,6 @@ app.canvas.addEventListener('contextmenu', (e) => {
 
 const tickEl = document.getElementById('tick')!;
 const hashEl = document.getElementById('hash')!;
-
-/** Facing row + mirror from a movement vector (sprites natively face right). */
-function facing(dx: number, dy: number): { row: number; flip: boolean } {
-  const a = Math.atan2(dy, dx); // render-side only; never feeds the sim
-  const oct = Math.round(a / (Math.PI / 4)); // -4..4, 0 = right, 2 = down
-  const rowByOct: Record<number, number> = { [-4]: 2, [-3]: 1, [-2]: 0, [-1]: 1, 0: 2, 1: 3, 2: 4, 3: 3, 4: 2 };
-  return { row: rowByOct[oct] ?? 4, flip: Math.abs(oct) >= 3 };
-}
 
 let acc = 0;
 let animTime = 0;
@@ -212,60 +315,88 @@ app.ticker.add((t) => {
 
   const alpha = acc / TICK_MS;
   fallback.clear();
-  for (const [id, s] of unitSprites) {
+  overlay.clear();
+  // Dead units leave the sim; drop their sprites.
+  for (const [id, sp] of unitSprites) {
     if (world.units.some((u) => u.id === id)) continue;
-    s.destroy();
+    sp.destroy();
     unitSprites.delete(id);
+    unitAnim.delete(id);
   }
-  for (const p of world.projectiles) fallback.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
+  for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
+  selection.prune((id) => world.units.some((u) => u.id === id));
+  const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
-    const frames = teamFrames[u.owner];
-    if (!frames) {
+    nextDrawn.push({ id: u.id, owner: u.owner, x, y });
+    const isSelected = selection.ids.has(u.id);
+    const bank = TEAM_BANK[u.owner]! + (isSelected ? 1 : 0);
+    const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`);
+    if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
       continue;
     }
     let s = unitSprites.get(u.id);
     if (!s) {
-      s = new Sprite(frames.idle[4]!);
-      s.anchor.set(0.5, 0.8);
+      s = new Sprite(type.frames[4]![type.sprite.idle]!);
+      // Feet 5 px above the frame's bottom edge (guess for 32 px frames; 24 px matches the old 0.8 anchor).
+      s.anchor.set(0.5, (type.sprite.frame - 5) / type.sprite.frame);
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
+    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: 4, flip: false, swing: u.lastAttack };
     const moving = u.x !== p.x || u.y !== p.y;
-    const attackFrame = u.lastAttack === NEVER ? -1 : Math.floor((world.tick - 1 - u.lastAttack + alpha) / TICKS_PER_FRAME);
-    const target = u.target === null ? undefined : world.units.find((t) => t.id === u.target);
-    if (attackFrame >= 0 && attackFrame < ATTACK_CYCLE.length) {
-      const f = target ? facing(target.x - u.x, target.y - u.y) : { row: unitRow.get(u.id) ?? 4, flip: s.scale.x < 0 };
-      s.scale.x = f.flip ? -1 : 1;
-      const col = ATTACK_CYCLE[attackFrame]!;
-      s.texture = col < 0 ? frames.idle[f.row]! : frames.attack[f.row]![col]!;
-      unitRow.set(u.id, f.row);
-      walkStart.delete(u.id);
-    } else if (moving) {
-      const f = facing(u.x - p.x, u.y - p.y);
-      s.scale.x = f.flip ? -1 : 1;
-      if (!walkStart.has(u.id)) walkStart.set(u.id, animTime);
-      const frame = Math.floor((animTime - walkStart.get(u.id)!) / ANIM_FRAME_MS);
-      const col = WALK_CYCLE[frame % WALK_CYCLE.length]!;
-      s.texture = col < 0 ? frames.idle[f.row]! : frames.walk[f.row]![col]!;
-      unitRow.set(u.id, f.row);
-    } else {
-      s.texture = frames.idle[unitRow.get(u.id) ?? 4]!;
-      walkStart.delete(u.id);
+    if (moving) Object.assign(a, facing(u.x - p.x, u.y - p.y));
+    if (u.lastAttack !== a.swing) {
+      // The sim just attacked: face the target and play one swing.
+      a.swing = u.lastAttack;
+      const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
+      if (target) Object.assign(a, facing(target.x - u.x, target.y - u.y));
+      a.state = attack(animTime);
     }
+    const r = animate(type.sprite, a.state, moving, animTime);
+    a.state = r.state;
+    unitAnim.set(u.id, a);
+    s.texture = type.frames[a.row]![r.col]!;
+    s.scale.x = a.flip ? -1 : 1;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
-    if (u.hp < u.maxHp) {
-      // Placeholder health bar until the HUD work draws the game's own.
-      const w = 14;
-      fallback.rect(Math.round(x) - w / 2, Math.round(y) - 22, w, 2).fill(0x202020);
-      fallback.rect(Math.round(x) - w / 2, Math.round(y) - 22, Math.max(1, Math.round((w * u.hp) / u.maxHp)), 2).fill(0x5ad35a);
-    }
+    // The game shows a unit's bars while it is selected; we also show them once it is hurt.
+    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - type.sprite.frame / 2, Math.round(y) - (type.sprite.frame - 5), u.hp, u.maxHp);
   }
   unitLayer.sortableChildren = true;
+  drawn = nextDrawn;
+  if (boxRect) {
+    const l = Math.min(boxRect.x0, boxRect.x1);
+    const t = Math.min(boxRect.y0, boxRect.y1);
+    overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).stroke({ color: 0xffff00, width: 1 / camera.scale.x });
+  }
+
+  const mine = world.units.filter((u) => u.owner === LOCAL_PLAYER);
+  const firstSelected = mine.find((u) => selection.ids.has(u.id));
+  const selectedName = firstSelected && unitKind.get(firstSelected.id);
+  const selectedEntity = selectedName ? hudView.entityIndex(selectedName) : -1;
+  hudView.update({
+    // Placeholders until the sim has an economy: the skirmish starting bricks and the population cap seen in the emulator.
+    bricks: 500,
+    minifigs: mine.length,
+    minifigCap: Math.max(4, mine.length),
+    star: [0, 0],
+    selected: selectedEntity >= 0 && firstSelected ? { entity: selectedEntity, hp: firstSelected.hp } : undefined,
+    minimap: minimap && {
+      image: minimap,
+      // World px -> minimap px: 1.5 px per 24x16 cell, i.e. x / 16 and y * 3 / 32.
+      view: {
+        x: Math.floor(-camera.x / camera.scale.x / 16),
+        y: Math.floor((-camera.y / camera.scale.y) * 3 / 32),
+        w: Math.round(app.screen.width / camera.scale.x / 16),
+        h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
+      },
+      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[d.owner] ?? [255, 255, 255] })),
+    },
+  });
 });
 
-mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap);
+mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);

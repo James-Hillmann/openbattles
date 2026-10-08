@@ -69,3 +69,84 @@ export function decodeChars(ncgr: Uint8Array): CharData {
   if (fmt === 4) return { tilesWide, tilesHigh, bpp: 8, pixels: raw.slice() };
   throw new Error(`Unsupported character format ${fmt}`);
 }
+
+export interface ScreenData {
+  /** Size in 8x8 tiles. */
+  tilesWide: number;
+  tilesHigh: number;
+  /** DS BG screen entries, row-major: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank. */
+  entries: Uint16Array;
+}
+
+/** NSCR tile maps: section `NRCS`, +0x08 u16 width px, +0x0A u16 height px, +0x10 u32 data size, +0x14 entries. */
+export function decodeScreen(nscr: Uint8Array): ScreenData {
+  const { offset } = section(nscr, 'NRCS');
+  const width = u16(nscr, offset + 8);
+  const height = u16(nscr, offset + 10);
+  const size = u32(nscr, offset + 0x10);
+  const entries = new Uint16Array(size >> 1);
+  for (let i = 0; i < entries.length; i++) entries[i] = u16(nscr, offset + 0x14 + i * 2);
+  return { tilesWide: width >> 3, tilesHigh: height >> 3, entries };
+}
+
+/** One hardware sprite (OAM entry) inside a cell. */
+export interface CellPart {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Tile number in 32-byte units (an 8bpp tile counts as 2). */
+  tile: number;
+  bpp8: boolean;
+  hflip: boolean;
+  vflip: boolean;
+  bank: number;
+}
+
+/** OAM shape x size -> [w, h] in pixels. */
+const OBJ_SIZES: Record<number, [number, number][]> = {
+  0: [[8, 8], [16, 16], [32, 32], [64, 64]],
+  1: [[16, 8], [32, 8], [32, 16], [64, 32]],
+  2: [[8, 16], [8, 32], [16, 32], [32, 64]],
+};
+
+/**
+ * NCER cell banks (section `KBEC`). Header at section +8: u16 cell count, u16 attr
+ * (1 = 16-byte cell entries with a bounding box, else 8), u32 offset of the cell
+ * table from +8. Each cell entry: u16 OAM count, u16 attr, u32 offset of its OAM
+ * entries from the end of the cell table. OAM entries are the hardware's 3 x u16.
+ */
+export function decodeCells(ncer: Uint8Array): CellPart[][] {
+  const { offset } = section(ncer, 'KBEC');
+  const b = offset + 8;
+  const n = u16(ncer, b);
+  const entrySize = u16(ncer, b + 2) === 1 ? 16 : 8;
+  const table = b + u32(ncer, b + 4);
+  const oamBase = table + n * entrySize;
+  const cells: CellPart[][] = [];
+  for (let i = 0; i < n; i++) {
+    const count = u16(ncer, table + i * entrySize);
+    const at = oamBase + u32(ncer, table + i * entrySize + 4);
+    const parts: CellPart[] = [];
+    for (let k = 0; k < count; k++) {
+      const a0 = u16(ncer, at + k * 6);
+      const a1 = u16(ncer, at + k * 6 + 2);
+      const a2 = u16(ncer, at + k * 6 + 4);
+      const [w, h] = OBJ_SIZES[a0 >> 14]![a1 >> 14]!;
+      const affine = (a0 & 0x100) !== 0;
+      parts.push({
+        x: (a1 & 0x1ff) >= 256 ? (a1 & 0x1ff) - 512 : a1 & 0x1ff,
+        y: (a0 & 0xff) >= 128 ? (a0 & 0xff) - 256 : a0 & 0xff,
+        w,
+        h,
+        tile: a2 & 0x3ff,
+        bpp8: (a0 & 0x2000) !== 0,
+        hflip: !affine && (a1 & 0x1000) !== 0,
+        vflip: !affine && (a1 & 0x2000) !== 0,
+        bank: a2 >> 12,
+      });
+    }
+    cells.push(parts);
+  }
+  return cells;
+}

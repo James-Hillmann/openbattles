@@ -2,6 +2,7 @@ import { CELL_H, CELL_W } from './config';
 import { FX_SHIFT, type Fx } from './fixed';
 import { nextInt } from './rng';
 import type { EntityId, MeleeBonusTable, Projectile, Unit, World } from './state';
+import { cellOf, planUnitPath } from './terrain';
 
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
@@ -73,24 +74,35 @@ export function projectileDamage(w: World, p: Projectile): number {
  * Where to walk to get in range. Ranged units walk at the target until in
  * range. Melee units (and anyone too close) aim for the cell next to the
  * target on the side they come from, so they don't end up in its cell, which
- * is out of range for a minimum range of 1. Pathing will replace this.
+ * is out of range for a minimum range of 1. On a map the unit paths there,
+ * re-planning only when the goal moves to another cell.
  */
-function chase(u: Unit, t: Unit): void {
+function chase(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
+  let gx: Fx;
+  let gy: Fx;
   if (a.maxRange > 1 && cellDist2(u, t) > a.maxRange * a.maxRange) {
-    u.tx = t.x;
-    u.ty = t.y;
+    gx = t.x;
+    gy = t.y;
+  } else {
+    const dcx = cellX(u.x) - cellX(t.x);
+    const dcy = cellY(u.y) - cellY(t.y);
+    let ox = 0;
+    let oy = 0;
+    if (dcx === 0 && dcy === 0) ox = u.x < t.x ? -1 : 1;
+    else if (Math.abs(dcx) >= Math.abs(dcy)) ox = Math.sign(dcx);
+    else oy = Math.sign(dcy);
+    gx = (((cellX(t.x) + ox) * CELL_W + CELL_W / 2) << FX_SHIFT) as Fx;
+    gy = (((cellY(t.y) + oy) * CELL_H + CELL_H / 2) << FX_SHIFT) as Fx;
+  }
+  if (!w.grid) {
+    u.tx = gx;
+    u.ty = gy;
+    u.path = [];
     return;
   }
-  const dcx = cellX(u.x) - cellX(t.x);
-  const dcy = cellY(u.y) - cellY(t.y);
-  let ox = 0;
-  let oy = 0;
-  if (dcx === 0 && dcy === 0) ox = u.x < t.x ? -1 : 1;
-  else if (Math.abs(dcx) >= Math.abs(dcy)) ox = Math.sign(dcx);
-  else oy = Math.sign(dcy);
-  u.tx = (((cellX(t.x) + ox) * CELL_W + CELL_W / 2) << FX_SHIFT) as Fx;
-  u.ty = (((cellY(t.y) + oy) * CELL_H + CELL_H / 2) << FX_SHIFT) as Fx;
+  if (u.tx !== null && u.ty !== null && cellOf(u.tx, u.ty).join() === cellOf(gx, gy).join()) return;
+  planUnitPath(w.grid, u, gx, gy);
 }
 
 function nearestEnemyInSight(w: World, u: Unit): Unit | undefined {
@@ -121,6 +133,7 @@ export function combatStep(w: World, u: Unit): void {
     // Target died or vanished: stop where we are.
     u.target = null;
     u.tx = u.ty = null;
+    u.path = [];
     t = undefined;
   }
   if (!t && u.tx === null) {
@@ -129,10 +142,11 @@ export function combatStep(w: World, u: Unit): void {
   }
   if (!t) return;
   if (!inRange(u, t)) {
-    chase(u, t);
+    chase(w, u, t);
     return;
   }
   u.tx = u.ty = null;
+  u.path = [];
   if (w.tick < u.lastAttack + u.attack.cooldown) return;
   u.lastAttack = w.tick;
   if (u.attack.projectile) {

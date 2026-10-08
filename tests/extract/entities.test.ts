@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findUnitStats, parseEntities, readCombatBonus } from '@lbw/extract';
+import { findUnitStats, parseEntityRecords, readCombatBonus } from '@lbw/extract';
 
 /** A tiny synthetic BPNZ: one melee unit, one ranged unit, one projectile. No game data. */
 function syntheticEbp(): Uint8Array {
@@ -52,7 +52,7 @@ function syntheticEbp(): Uint8Array {
 }
 
 describe('Entities.ebp', () => {
-  const recs = parseEntities(syntheticEbp());
+  const recs = parseEntityRecords(syntheticEbp());
 
   it('walks variable-size records and resolves names and sprite paths', () => {
     expect(recs).toHaveLength(0x227);
