@@ -17,6 +17,12 @@ npm run e2e        # two browser tabs play one online match (OB_ROM=your.nds to 
 npm run m0 -- path/to/your.nds   # M0 recon: unpack into ./out (gitignored)
 ```
 
+## Play online
+
+Host one server that serves the page and the relay, then share the link: see
+[docs/hosting.md](docs/hosting.md) (free Render service, or your own machine through a
+Cloudflare quick tunnel).
+
 ## Layout
 
 | dir | what |

@@ -19,6 +19,8 @@ import { startRelay } from '@lbw/server';
 const RELAY_PORT = 18790;
 const TICKS = 300;
 const ROM = process.env.OB_ROM;
+/** Point at a hosted build (`npm start`, a tunnel or Render) instead of starting the dev server and relay. */
+const HOSTED = process.env.OB_URL;
 /** Not the lobby default, so the map choice has to travel through the relay. */
 const MAP = 'mp02';
 
@@ -35,10 +37,10 @@ interface Ob {
 const ob = <T>(page: Page, f: (o: Ob) => T) => page.evaluate(`(${f.toString()})(window.__ob)`) as Promise<T>;
 
 async function main() {
-  const relay = startRelay({ port: RELAY_PORT });
-  const vite = await createServer({ root: 'client', server: { port: 0, strictPort: false }, logLevel: 'warn' });
-  await vite.listen();
-  const url = `${vite.resolvedUrls!.local[0]}?relay=ws://localhost:${RELAY_PORT}`;
+  const relay = HOSTED ? null : startRelay({ port: RELAY_PORT });
+  const vite = HOSTED ? null : await createServer({ root: 'client', server: { port: 0, strictPort: false }, logLevel: 'warn' });
+  await vite?.listen();
+  const url = HOSTED ?? `${vite!.resolvedUrls!.local[0]}?relay=ws://localhost:${RELAY_PORT}`;
   const browser = await chromium.launch();
   const fail = (msg: string) => {
     throw new Error(msg);
@@ -88,7 +90,7 @@ async function main() {
       await ob(b!, (o) => o.issueMove(150, 120));
       await a!.waitForTimeout(700);
     }
-    await Promise.all([a!, b!].map((p) => p.waitForFunction(`window.__ob.tick() >= ${TICKS}`, null, { timeout: 60000 })));
+    await Promise.all([a!, b!].map((p) => p.waitForFunction(`window.__ob.tick() >= ${TICKS}`, null, { timeout: 60000, polling: 500 })));
 
     mkdirSync('out/e2e', { recursive: true });
     await a!.screenshot({ path: 'out/e2e/host.png' });
@@ -110,9 +112,9 @@ async function main() {
     console.log(`two tabs agree on all ${compared} hashes through tick ${TICKS}`);
   } finally {
     await browser.close();
-    await vite.close();
-    for (const c of relay.clients) c.terminate();
-    relay.close();
+    await vite?.close();
+    for (const c of relay?.clients ?? []) c.terminate();
+    relay?.close();
   }
 }
 

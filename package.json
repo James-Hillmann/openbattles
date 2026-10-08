@@ -12,6 +12,7 @@
     "dev": "npm run dev -w @lbw/client",
     "build": "npm run build -w @lbw/client",
     "server": "npm run start -w @lbw/server",
+    "start": "npm run start -w @lbw/server",
     "m0": "tsx extract/cli/m0.ts",
     "test": "vitest run",
     "test:watch": "vitest",
