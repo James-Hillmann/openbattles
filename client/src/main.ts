@@ -12,13 +12,19 @@ import {
   type ScheduledCommand,
   type World,
 } from '@lbw/sim';
-import { FRAME, type MapBundle, type Rgba } from '@lbw/extract';
+import { FRAME, type HudBundle, type MapBundle, type Rgba } from '@lbw/extract';
+import { HudView, drawUnitBars } from './hud';
 import { mountRomPanel } from './romPanel';
+import { Selection, type Pickable } from './selection';
 
 const LOCAL_PLAYER = 0;
 const COLORS = [0xd33b2c, 0x3b6fd3];
-/** Palette bank per player: even banks are team colors (0 red, 2 blue). */
+/** Palette bank per player: even banks are team colors (0 red, 2 blue); bank + 1 is the same team selected. */
 const TEAM_BANK = [0, 2];
+/** The sandbox spawns Guardsmen (K_Swordsman, sheet k_mel). */
+const SANDBOX_ENTITY = 'K_Swordsman';
+/** Until the sim tracks HP, every unit shows full health: the entity's max HP from Entities.ebp. */
+let sandboxHp = 0;
 
 let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
@@ -47,6 +53,13 @@ const unitLayer = new Container();
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
+/** Health bars and the box-select rectangle draw above units. */
+const overlay = new Graphics();
+camera.addChild(overlay);
+const hudView = new HudView(document.getElementById('side')!);
+const selection = new Selection();
+/** Where each unit was drawn last frame, for picking. */
+let drawn: Pickable[] = [];
 
 // --- Map + sprites from the ROM ---------------------------------------------
 
@@ -67,7 +80,8 @@ interface UnitTextures {
   /** One frame per facing row. */
   idle: Texture[];
 }
-let teamFrames: UnitTextures[] = [];
+/** Per player: normal, and selected (outlined) from the odd palette bank. */
+let teamFrames: { normal: UnitTextures; selected: UnitTextures }[] = [];
 const unitSprites = new Map<number, Sprite>();
 /** Last facing row per unit, so idle units keep looking where they walked. */
 const unitRow = new Map<number, number>();
@@ -92,12 +106,22 @@ const ANIM_FRAME_MS = (4 * 1000) / 60;
  */
 const WALK_CYCLE = [0, 1, 2, 3, 4, -1];
 
-function onMap(b: MapBundle) {
-  ground.texture = textureFrom(b.ground);
-  teamFrames = TEAM_BANK.map((bank) => ({
+function unitTextures(b: MapBundle, bank: number): UnitTextures {
+  return {
     walk: cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!), 5, 5),
     idle: cutFrames(textureFrom(b.units[`k_mel_0@${bank}`]!), 1, 5)[0]!,
-  }));
+  };
+}
+
+let sandboxEntity = -1;
+
+function onMap(b: MapBundle, hud: HudBundle) {
+  ground.texture = textureFrom(b.ground);
+  teamFrames = TEAM_BANK.map((bank) => ({ normal: unitTextures(b, bank), selected: unitTextures(b, bank + 1) }));
+  hudView.setBundle(hud);
+  sandboxEntity = hudView.entityIndex(SANDBOX_ENTITY);
+  sandboxHp = hud.labels[sandboxEntity]?.maxHp ?? 0;
+  selection.ids.clear();
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
   unitRow.clear();
@@ -115,13 +139,40 @@ function centerOn(x: number, y: number) {
 camera.scale.set(2);
 centerOn(300, 220);
 
-let drag: { x: number; y: number } | null = null;
+/** Screen point -> world pixel. */
+function toWorld(clientX: number, clientY: number): { x: number; y: number } {
+  const r = app.canvas.getBoundingClientRect();
+  return { x: (clientX - r.left - camera.x) / camera.scale.x, y: (clientY - r.top - camera.y) / camera.scale.y };
+}
+
+// Left button: click selects a unit (shift adds), drag pans, shift+drag box-selects.
+let drag: { x: number; y: number; startX: number; startY: number; moved: boolean; box: boolean } | null = null;
+let boxRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 app.canvas.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) drag = { x: e.clientX - camera.x, y: e.clientY - camera.y };
+  if (e.button !== 0) return;
+  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, box: e.shiftKey };
 });
-window.addEventListener('pointerup', () => (drag = null));
+window.addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  if (!drag.moved) {
+    const w = toWorld(e.clientX, e.clientY);
+    selection.click(drawn, LOCAL_PLAYER, w.x, w.y, e.shiftKey);
+  } else if (boxRect) {
+    selection.box(drawn, LOCAL_PLAYER, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
+  }
+  drag = null;
+  boxRect = null;
+});
 window.addEventListener('pointermove', (e) => {
   if (!drag) return;
+  if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4) return;
+  drag.moved = true;
+  if (drag.box) {
+    const a = toWorld(drag.startX, drag.startY);
+    const b = toWorld(e.clientX, e.clientY);
+    boxRect = { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
+    return;
+  }
   camera.x = e.clientX - drag.x;
   camera.y = e.clientY - drag.y;
 });
@@ -142,7 +193,7 @@ app.canvas.addEventListener('wheel', (e) => {
   camera.y = Math.round(sy - wy * s);
 });
 
-// --- Input: right-click moves your units ---------------------------------------
+// --- Input: right-click moves your selected units -------------------------------
 
 app.canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -150,7 +201,8 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const x = fx(Math.round((e.clientX - r.left - camera.x) / camera.scale.x));
   const y = fx(Math.round((e.clientY - r.top - camera.y) / camera.scale.y));
-  const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER).map((u) => u.id);
+  const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER && selection.ids.has(u.id)).map((u) => u.id);
+  if (unitIds.length === 0) return;
   pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd: { kind: 'move', unitIds, x, y } });
 });
 
@@ -190,11 +242,17 @@ app.ticker.add((t) => {
 
   const alpha = acc / TICK_MS;
   fallback.clear();
+  overlay.clear();
+  selection.prune((id) => world.units.some((u) => u.id === id));
+  const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
-    const frames = teamFrames[u.owner];
+    nextDrawn.push({ id: u.id, owner: u.owner, x, y });
+    const team = teamFrames[u.owner];
+    const isSelected = selection.ids.has(u.id);
+    const frames = team && (isSelected ? team.selected : team.normal);
     if (!frames) {
       fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
       continue;
@@ -221,8 +279,27 @@ app.ticker.add((t) => {
     }
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
+    // The game shows a unit's bars while it is selected.
+    if (isSelected) drawUnitBars(overlay, Math.round(x) - FRAME / 2, Math.round(y - FRAME * 0.8), sandboxHp, sandboxHp);
   }
   unitLayer.sortableChildren = true;
+  drawn = nextDrawn;
+  if (boxRect) {
+    const l = Math.min(boxRect.x0, boxRect.x1);
+    const t = Math.min(boxRect.y0, boxRect.y1);
+    overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).stroke({ color: 0xffff00, width: 1 / camera.scale.x });
+  }
+
+  const mine = world.units.filter((u) => u.owner === LOCAL_PLAYER);
+  const firstSelected = mine.find((u) => selection.ids.has(u.id));
+  hudView.update({
+    // Placeholders until the sim has an economy: the skirmish starting bricks and the population cap seen in the emulator.
+    bricks: 500,
+    minifigs: mine.length,
+    minifigCap: Math.max(4, mine.length),
+    star: [0, 0],
+    selected: firstSelected && sandboxEntity >= 0 ? { entity: sandboxEntity, hp: sandboxHp } : undefined,
+  });
 });
 
 mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap);

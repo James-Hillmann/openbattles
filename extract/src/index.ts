@@ -11,3 +11,7 @@ export * from './map';
 export * from './render';
 export * from './bundle';
 export * from './trees';
+export * from './lang';
+export * from './hud';
+export * from './font';
+export * from './teams';

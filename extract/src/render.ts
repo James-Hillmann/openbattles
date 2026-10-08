@@ -1,4 +1,4 @@
-import type { CharData } from './nitro';
+import type { CellPart, CharData } from './nitro';
 import { CELL_H, CELL_W, type GameMap } from './map';
 
 export interface Rgba {
@@ -10,9 +10,9 @@ export interface Rgba {
 /**
  * Draw one 8x8 tile from tile-ordered character data. `entry` is a DS BG
  * screen entry: bits 0-9 tile, 10 h-flip, 11 v-flip, 12-15 palette bank
- * (bank only matters for 4bpp). Pixel value 0 is transparent.
+ * (bank only matters for 4bpp). Pixel value 0 is transparent unless `opaque`.
  */
-function blitTile(out: Rgba, chars: CharData, pal: Uint8Array, entry: number, px: number, py: number): void {
+export function blitTile(out: Rgba, chars: CharData, pal: Uint8Array, entry: number, px: number, py: number, opaque = false): void {
   const tile = entry & 0x3ff;
   const hf = (entry >> 10) & 1;
   const vf = (entry >> 11) & 1;
@@ -22,7 +22,7 @@ function blitTile(out: Rgba, chars: CharData, pal: Uint8Array, entry: number, px
   for (let y = 0; y < 8; y++) {
     for (let x = 0; x < 8; x++) {
       const v = chars.pixels[base + (vf ? 7 - y : y) * 8 + (hf ? 7 - x : x)]!;
-      if (v === 0) continue;
+      if (v === 0 && !opaque) continue;
       const o = ((py + y) * out.width + px + x) * 4;
       const c = (bank + v) * 4;
       out.data[o] = pal[c]!;
@@ -69,6 +69,35 @@ export function renderSheet(sheet: CharData, pal: Uint8Array, bank: number): Rgb
     if (v === 0) continue;
     const c = (bank * 16 + v) * 4;
     out.data.set([pal[c]!, pal[c + 1]!, pal[c + 2]!, 255], i * 4);
+  }
+  return out;
+}
+
+/**
+ * Assemble one NCER cell from 1D-mapped sprite tiles (32-byte tile units) into an
+ * image whose top-left is the cell's bounding box. Earlier OAM entries draw on top.
+ */
+export function renderCell(parts: readonly CellPart[], chars: CharData, pal: Uint8Array): Rgba {
+  const x0 = Math.min(...parts.map((p) => p.x));
+  const y0 = Math.min(...parts.map((p) => p.y));
+  const width = Math.max(...parts.map((p) => p.x + p.w)) - x0;
+  const height = Math.max(...parts.map((p) => p.y + p.h)) - y0;
+  const out: Rgba = { width, height, data: new Uint8ClampedArray(width * height * 4) };
+  for (const p of [...parts].reverse()) {
+    // 32-byte units: 64 pixels at 4bpp, 32 at 8bpp. `pixels` holds one byte per pixel.
+    const base = p.tile * (p.bpp8 ? 32 : 64);
+    const tw = p.w / 8;
+    for (let y = 0; y < p.h; y++) {
+      for (let x = 0; x < p.w; x++) {
+        const t = (y >> 3) * tw + (x >> 3);
+        const v = chars.pixels[base + t * 64 + (y & 7) * 8 + (x & 7)] ?? 0;
+        if (v === 0) continue;
+        const c = (p.bpp8 ? v : p.bank * 16 + v) * 4;
+        const dx = p.x - x0 + (p.hflip ? p.w - 1 - x : x);
+        const dy = p.y - y0 + (p.vflip ? p.h - 1 - y : y);
+        out.data.set([pal[c]!, pal[c + 1]!, pal[c + 2]!, 255], (dy * width + dx) * 4);
+      }
+    }
   }
   return out;
 }

@@ -14,3 +14,6 @@
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | look for `>> 12` vs `>> 16` after multiplies | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
+| Minimap: which files, scale, dots | `*mini.NCGR`/`NCBR`, `UI/UI_Minimap.*` | open |
+| What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
+| Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |

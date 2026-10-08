@@ -1,11 +1,11 @@
-import type { MapBundle } from '@lbw/extract';
+import type { HudBundle, MapBundle } from '@lbw/extract';
 import type { WorkerRequest, WorkerResponse } from './romWorker';
 
 /**
  * Sidebar: load the user's ROM in a worker, show what's in it, and let them
  * pick a map. Nothing leaves the browser.
  */
-export function mountRomPanel(input: HTMLInputElement, out: HTMLElement, onMap: (b: MapBundle) => void): void {
+export function mountRomPanel(input: HTMLInputElement, out: HTMLElement, onMap: (b: MapBundle, hud: HudBundle) => void): void {
   const worker = new Worker(new URL('./romWorker.ts', import.meta.url), { type: 'module' });
   const send = (req: WorkerRequest, transfer: Transferable[] = []) => worker.postMessage(req, transfer);
 
@@ -32,7 +32,7 @@ export function mountRomPanel(input: HTMLInputElement, out: HTMLElement, onMap: 
       pick.addEventListener('change', () => send({ type: 'map', name: pick.value }));
       send({ type: 'map', name: pick.value });
     } else {
-      onMap(msg.bundle);
+      onMap(msg.bundle, msg.hud);
     }
   };
 
