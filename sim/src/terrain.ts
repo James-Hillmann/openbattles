@@ -1,6 +1,5 @@
 import { CELL_H, CELL_W } from './config';
 import { fx, fxToInt, type Fx } from './fixed';
-import type { Unit } from './state';
 
 /**
  * The map's walkability, one terrain code per cell (the baked grid from the
@@ -29,141 +28,16 @@ export const cellOf = (x: Fx, y: Fx): [number, number] => [Math.floor(fxToInt(x)
 export const cellCenterX = (cx: number): Fx => fx(cx * CELL_W + CELL_W / 2);
 export const cellCenterY = (cy: number): Fx => fx(cy * CELL_H + CELL_H / 2);
 
-// 8 neighbours in a fixed order. Straight steps cost 10, diagonals 14 (cell space is isotropic).
+// 8 neighbours in a fixed order.
 const DX = [0, 1, 0, -1, 1, 1, -1, -1];
 const DY = [-1, 0, 1, 0, -1, 1, 1, -1];
-const COST = [10, 10, 10, 10, 14, 14, 14, 14];
-
-/** Octile distance in the same units as COST. */
-function heuristic(ax: number, ay: number, bx: number, by: number): number {
-  const dx = Math.abs(ax - bx);
-  const dy = Math.abs(ay - by);
-  return 10 * Math.max(dx, dy) + 4 * Math.min(dx, dy);
-}
-
-/** Binary min-heap of cell indices keyed by (f, h, index): a total order, so ties never depend on insertion. */
-class Heap {
-  private items: number[] = [];
-  constructor(private readonly f: Int32Array, private readonly h: Int32Array) {}
-  get size() {
-    return this.items.length;
-  }
-  private less(a: number, b: number): boolean {
-    const f = this.f, h = this.h;
-    return f[a]! !== f[b]! ? f[a]! < f[b]! : h[a]! !== h[b]! ? h[a]! < h[b]! : a < b;
-  }
-  push(i: number) {
-    const it = this.items;
-    it.push(i);
-    let k = it.length - 1;
-    while (k > 0) {
-      const p = (k - 1) >> 1;
-      if (!this.less(it[k]!, it[p]!)) break;
-      [it[k], it[p]] = [it[p]!, it[k]!];
-      k = p;
-    }
-  }
-  pop(): number {
-    const it = this.items;
-    const top = it[0]!;
-    const last = it.pop()!;
-    if (it.length > 0) {
-      it[0] = last;
-      let k = 0;
-      for (;;) {
-        const l = 2 * k + 1, r = l + 1;
-        let m = k;
-        if (l < it.length && this.less(it[l]!, it[m]!)) m = l;
-        if (r < it.length && this.less(it[r]!, it[m]!)) m = r;
-        if (m === k) break;
-        [it[k], it[m]] = [it[m]!, it[k]!];
-        k = m;
-      }
-    }
-    return top;
-  }
-}
 
 /**
- * A* from one cell to another over walkable cells, 8-way, never cutting a
- * blocked corner. If the goal can't be reached (blocked or walled off), the
- * path ends at the reachable cell closest to it, which is what the game does
- * (a hero sent into a forest stops at its edge).
- *
- * Returns the cells to visit after `from`, ending with the cell it stops in;
- * empty when it is already there. Fully deterministic: integer costs and a
- * total order on the open set.
+ * Can a unit step from cell (x, y) in direction d? Diagonals may pass between
+ * two blocked cells, as in the game's path search (0x02082078 has no corner check).
  */
-export function findPath(g: TerrainGrid, fromX: number, fromY: number, toX: number, toY: number): number[] {
-  const n = g.width * g.height;
-  const gCost = new Int32Array(n).fill(-1);
-  const f = new Int32Array(n);
-  const h = new Int32Array(n);
-  const parent = new Int32Array(n).fill(-1);
-  const closed = new Uint8Array(n);
-  const open = new Heap(f, h);
-  const start = fromY * g.width + fromX;
-  gCost[start] = 0;
-  h[start] = heuristic(fromX, fromY, toX, toY);
-  f[start] = h[start]!;
-  open.push(start);
-  let best = start; // closest-to-goal cell reached so far
-  const goal = toY * g.width + toX;
-  while (open.size > 0) {
-    const cur = open.pop();
-    if (closed[cur]) continue;
-    closed[cur] = 1;
-    if (h[cur]! < h[best]! || (h[cur] === h[best] && gCost[cur]! < gCost[best]!)) best = cur;
-    if (cur === goal) break;
-    const cx = cur % g.width;
-    const cy = (cur - cx) / g.width;
-    for (let d = 0; d < 8; d++) {
-      const nx = cx + DX[d]!;
-      const ny = cy + DY[d]!;
-      if (!isWalkable(g, nx, ny)) continue;
-      // No squeezing diagonally between two blocked cells or past a blocked corner.
-      if (d >= 4 && (!isWalkable(g, cx + DX[d]!, cy) || !isWalkable(g, cx, cy + DY[d]!))) continue;
-      const ni = ny * g.width + nx;
-      if (closed[ni]) continue;
-      const ng = gCost[cur]! + COST[d]!;
-      if (gCost[ni] !== -1 && ng >= gCost[ni]!) continue;
-      gCost[ni] = ng;
-      h[ni] = heuristic(nx, ny, toX, toY);
-      f[ni] = ng + h[ni]!;
-      parent[ni] = cur;
-      open.push(ni);
-    }
-  }
-  const path: number[] = [];
-  for (let c = best; c !== start; c = parent[c]!) path.push(c);
-  return path.reverse();
-}
-
-/** Drop waypoints in the middle of straight runs, so units walk each leg in one line. */
-export function simplifyPath(g: TerrainGrid, from: number, path: readonly number[]): number[] {
-  const out: number[] = [];
-  let prev = from;
-  for (let i = 0; i < path.length; i++) {
-    const cur = path[i]!;
-    const next = path[i + 1];
-    if (next !== undefined) {
-      const d1 = cur - prev;
-      const d2 = next - cur;
-      if (d1 === d2 && Math.abs(d1) <= g.width + 1) {
-        prev = cur;
-        continue;
-      }
-    }
-    out.push(cur);
-    prev = cur;
-  }
-  return out;
-}
-
-/** Can a unit step from cell (x, y) in direction d? Same rule as findPath. */
 function canStep(g: TerrainGrid, x: number, y: number, d: number): boolean {
-  if (!isWalkable(g, x + DX[d]!, y + DY[d]!)) return false;
-  return d < 4 || (isWalkable(g, x + DX[d]!, y) && isWalkable(g, x, y + DY[d]!));
+  return isWalkable(g, x + DX[d]!, y + DY[d]!);
 }
 
 /** Every cell a unit standing in one of `starts` can walk to (1 = reachable). */
@@ -216,20 +90,4 @@ export function spreadCells(g: TerrainGrid, cx: number, cy: number, count: numbe
     }
   }
   return out;
-}
-
-/**
- * Send one unit to (x, y) along a path: to the exact point when its cell is
- * reachable, else to the centre of the closest reachable cell.
- */
-export function planUnitPath(g: TerrainGrid, u: Unit, x: Fx, y: Fx): void {
-  const [ux, uy] = cellOf(u.x, u.y);
-  const [gx, gy] = cellOf(x, y);
-  const start = uy * g.width + ux;
-  const raw = findPath(g, ux, uy, gx, gy);
-  const end = raw.length > 0 ? raw[raw.length - 1]! : start;
-  const exact = end === gy * g.width + gx;
-  u.tx = exact ? x : cellCenterX(end % g.width);
-  u.ty = exact ? y : cellCenterY(Math.floor(end / g.width));
-  u.path = simplifyPath(g, start, raw).slice(0, -1);
 }

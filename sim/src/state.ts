@@ -10,10 +10,10 @@ export interface Unit {
   owner: PlayerId;
   x: Fx;
   y: Fx;
-  /** Final movement target, or null when idle. */
+  /** Final movement target (on a map: the goal cell's centre), or null when idle. */
   tx: Fx | null;
   ty: Fx | null;
-  /** Cells (y * width + x) to pass through, in order, before heading to (tx, ty). */
+  /** On a map: the short A* path the move plotter is following, if any (cells, y * width + x). */
   path: number[];
   /**
    * Game speed value from Entities.ebp (+0x0C): 1/4096 of a map cell per tick.
@@ -38,6 +38,35 @@ export interface Unit {
   born: number;
   /** Target priority (+0x70): enemies scanning for a target prefer higher. Static per unit type. */
   priority: number;
+  /** Map cell this unit holds in World.occ (y * width + x), or -1. */
+  cell: number;
+  /** Active move order on a map (game: MoveUnitAction), or null. */
+  mv: Mover | null;
+}
+
+/**
+ * Per-unit state of the game's move plotters; see sim/src/movement.ts and
+ * docs/re-notes/movement.md. Cells are y * width + x, -1 for none.
+ */
+export interface Mover {
+  goal: number;
+  /** Travel is over; centring on the cell before stopping. */
+  align: boolean;
+  /** Cell the unit is heading for this tick. */
+  wp: number;
+  /** Cell the unit last bumped into. */
+  blocked: number;
+  /** Wait-for-obstacle: 0 off, 1 waiting, 2 gave up. */
+  wait: number;
+  waitLeft: number;
+  /** Sidestep: 0 off, 1 straight, 2 turn left, 3 turn right, 4 out of options. */
+  side: number;
+  sideCell: number;
+  sideReset: boolean;
+  /** A*: 0 off, 1 search, 2 follow path, 3 skipped a blocked step, 4 failed. */
+  astar: number;
+  /** Index into Unit.path while following a path. */
+  pathIdx: number;
 }
 
 /** Combat fields from Entities.ebp; see docs/re-notes/combat.md. Plain integers. */
@@ -99,4 +128,6 @@ export interface World {
   bonus: MeleeBonusTable | null;
   /** Map walkability; null for a bare test world, where units move in straight lines. */
   grid: TerrainGrid | null;
+  /** Unit id holding each map cell, 0 = free. Null without a grid. */
+  occ: Int32Array | null;
 }

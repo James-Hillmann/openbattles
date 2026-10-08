@@ -9,6 +9,7 @@ when they explain something; never paste decompiler output wholesale.
 | [m0-recon.md](m0-recon.md) | Step-by-step M0 setup: unpack, inventory, Ghidra |
 | [function-map.md](function-map.md) | Every function we've named: address, name, purpose, confidence |
 | [formats.md](formats.md) | File formats: layout tables, what's known, what isn't |
+| [movement.md](movement.md) | Walking, cell occupancy, waiting, sidestepping, the path search |
 | [hud.md](hud.md) | Top-screen HUD, selection outline, bars over units |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 
