@@ -42,6 +42,61 @@ export interface Unit {
   cell: number;
   /** Active move order on a map (game: MoveUnitAction), or null. */
   mv: Mover | null;
+  // Economy (sim/src/economy.ts, docs/re-notes/economy.md). Static per type unless noted.
+  /** Role (+0x5C): 0 hero, 1 builder, 2 melee, 3 ranged, 4 mounted, 5 transport, 6 siege, 7+ buildings. */
+  role: number;
+  /** Footprint side in cells (+0x1D): 1 for units, 2 or 3 for buildings. */
+  size: number;
+  /** Ticks to build or train this type (+0x60). */
+  buildTime: number;
+  /** Construction ticks done; a building is finished when progress >= buildTime. Units spawn finished. */
+  progress: number;
+  /** Builder's current economy job, or null. */
+  job: Job | null;
+  /** Builder is carrying a load of bricks back. */
+  carrying: boolean;
+  /** Production buildings: entity kinds waiting to be trained, front first. */
+  queue: number[];
+  /** Ticks spent on queue[0]. */
+  prod: number;
+  /** Mines: ticks until the next payout. */
+  payout: number;
+}
+
+/** What a builder is doing. Cells are y * width + x. */
+export type Job =
+  /** Chop the tree at `tree`; `timer` counts the chop down (game: HarvestAction). */
+  | { kind: 'chop'; tree: number; timer: number }
+  /** Carry a load to the nearest finished building; `tree` is where to go back to. */
+  | { kind: 'deliver'; tree: number; drop: EntityId }
+  /** Work on the construction site `site`. */
+  | { kind: 'build'; site: EntityId };
+
+/** One player's economy. Kept sorted by id in World.players. */
+export interface Player {
+  id: PlayerId;
+  bricks: number;
+  /** Population and star slots taken by units still in a production queue. */
+  reservedPop: number;
+  reservedStars: number;
+}
+
+/**
+ * Static per-type data from Entities.ebp, indexed by entity index (+0x04).
+ * Identical on every client, so not hashed.
+ */
+export interface EntityType {
+  kind: number;
+  role: number;
+  speed: number;
+  hp: number;
+  cost: number;
+  buildTime: number;
+  size: number;
+  /** +0x6C: bricks per payout for mines (25), 0 otherwise. */
+  yield: number;
+  priority: number;
+  attack: AttackStats | null;
 }
 
 /**
@@ -130,4 +185,10 @@ export interface World {
   grid: TerrainGrid | null;
   /** Unit id holding each map cell, 0 = free. Null without a grid. */
   occ: Int32Array | null;
+  /** Players with an economy, sorted by id. Empty in combat-only test worlds. */
+  players: Player[];
+  /** Entity types by entity index (sparse). Static game data, not hashed. */
+  types: (EntityType | undefined)[];
+  /** Map cells (y * width + x) where a Mine may stand: the top-left of its footprint. Static map data. */
+  mineSites: number[];
 }

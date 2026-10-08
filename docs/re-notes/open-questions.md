@@ -2,7 +2,7 @@
 
 | question | leads | status |
 |---|---|---|
-| Entity record fields (HP, cost, damage, range, speed, build time) | combat fields done (combat.md); build time and +0x70 still guesses | **mostly answered** |
+| Entity record fields (HP, cost, damage, range, speed, build time) | combat fields done (combat.md); build time +0x60, footprint +0x1D, mine yield +0x6C in economy.md | **mostly answered** |
 | How entity records reference the name/sprite string table | look for offsets into the tail of `Entities.ebp` | open |
 | What `Factions.fbp` holds per entry | names like `KCM01_User` / `KCM01_Enemy` suggest per-mission starting forces | open |
 | Map sections `EVNT`, `TRIG`, `MARK` | `MINE` is done (mine sites). EVNT looks like starting units and buildings per player; MARK points are unknown. Watch them in the emulator | open (M2) |
@@ -24,5 +24,10 @@
 | Entity record size: fixed 0x7C (units.ts) or per kind 0x7C/0x74/0x70 (entities.ts)? | both parsers pass their tests and agree on the sprite units; reconcile into one parser | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
 | Minimap: fog-of-war reveal radius, other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
-| What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
+| What the HUD's red-star counter ("0/0") counts | transports + siege units, capped by finished Farms (economy.md) | **answered** (likely) |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
+| Do several Builders build faster? | watch two Builders on one Farm | open |
+| Mine payout seen in the emulator | find a reachable mine site on The Pond and build one with poked bricks | open (code read only) |
+| Where a Builder goes after delivering a load | trace `HarvestEngineerEntityCommand` (vtable `0x02149C2C`) | open (sim guesses) |
+| Building placement rules | which terrain codes allow a footprint; units in the way | open |
+| Which buildings train which units, queue length | castle trains hero + builder (HUD); others not checked | open |

@@ -6,6 +6,7 @@ export * from './commands';
 export * from './terrain';
 export * from './world';
 export * from './combat';
+export * from './economy';
 export * from './hash';
 export * from './replay';
 export * from './movement';

@@ -40,6 +40,10 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020638A8` | ARM | `Ai_pickTarget` | Picks from search results: in-range first, then priority +0x70 | confirmed | |
 | `0x0205E7D4` | ARM | `Unit_setHp` | Writes HP, damage time +0x1A4, under-attack alert, damaged event 0x2C | likely | |
 | `0x020F1108` | ARM | `Math_rand32` | Nitro SDK `MATH_Rand32` 64-bit LCG | confirmed | Game RNG context at `0x021552F4` +0xC |
+| `0x020866C0` | ARM | `Player_addBricks` | Adds bricks, clamped to 500,000; player +0x90 | confirmed | See economy.md for the rest of the economy functions |
+| `0x020866F0` | ARM | `Player_spendBricks` | Pays if the player has enough | confirmed | |
+| `0x0205323C` | ARM | `HarvestAction::update` | 150-tick chop, then carry | confirmed | |
+| `0x02052388` | ARM | `ConstructProgressAction` | Build progress from +0x60 | likely | |
 | `0x020832EC` | ARM | `Game_get` | Returns the game object; +0x8B4 is the 30 Hz time counter | confirmed | |
 | `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |
 | `0x020F2558` | ARM | `Os_getMilliseconds` | 64-bit hardware tick count * 64 / 33514 (bus clock in kHz) | likely | |

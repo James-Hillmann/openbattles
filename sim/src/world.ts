@@ -5,19 +5,36 @@ import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
-import type { AttackStats, MeleeBonusTable, PlayerId, Unit, World } from './state';
+import type { AttackStats, EntityType, MeleeBonusTable, PlayerId, Unit, World } from './state';
 import { cellOf, reachableFrom, spreadCells, type TerrainGrid } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
+import {
+  START_BRICKS, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
+  type SpawnFn,
+} from './economy';
 
 export interface WorldInit {
   seed: number;
   grid?: TerrainGrid | null;
   bonus?: MeleeBonusTable | null;
+  /** Players that keep a brick count; each starts with `bricks` (default 500). */
+  players?: { id: PlayerId; bricks?: number }[];
+  /** Entity types by entity index, for build and train orders. */
+  types?: (EntityType | undefined)[];
+  /** Mine sites from the map's MINE section (cells, y * width + x). */
+  mineSites?: number[];
 }
 
-export function createWorld({ seed, grid = null, bonus = null }: WorldInit): World {
+export function createWorld({ seed, grid = null, bonus = null, players = [], types = [], mineSites = [] }: WorldInit): World {
   const occ = grid ? new Int32Array(grid.width * grid.height) : null;
-  return { tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ };
+  return {
+    tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ,
+    players: [...players]
+      .sort((a, b) => a.id - b.id)
+      .map((p) => ({ id: p.id, bricks: p.bricks ?? START_BRICKS, reservedPop: 0, reservedStars: 0 })),
+    types,
+    mineSites: [...mineSites],
+  };
 }
 
 /** Per-type values for spawnUnit. Units without `attack` can't fight back. */
@@ -27,6 +44,10 @@ export interface UnitType {
   hp?: number;
   attack?: AttackStats | null;
   priority?: number;
+  /** Economy fields; see EntityType. Defaults make a plain fighting unit. */
+  role?: number;
+  size?: number;
+  buildTime?: number;
 }
 
 /** HP for units spawned without a type (test fixtures). */
@@ -55,10 +76,40 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     lastHit: NEVER,
     born: w.tick,
     priority: type.priority ?? 0,
+    role: type.role ?? -1,
+    size: type.size ?? 1,
+    buildTime: type.buildTime ?? 0,
+    progress: type.buildTime ?? 0,
+    job: null,
+    carrying: false,
+    queue: [],
+    prod: 0,
+    payout: 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
-  placeUnit(w, u);
+  if (!isBuilding(u)) placeUnit(w, u); // buildings block their footprint in the grid instead
   return u;
+}
+
+/** Spawn an entity of a ROM type in a map cell (production and construction sites). */
+const spawnInCell: SpawnFn = (w, owner, t, cell) => {
+  const { x, y } = cellPos(w.grid!, cell);
+  return spawnUnit(w, owner, x, y, t);
+};
+
+/**
+ * Put a building on the map with its top-left at cell (cx, cy), finished by
+ * default (starting castles). Marks its footprint as blocked.
+ */
+export function placeBuilding(w: World, owner: PlayerId, t: EntityType, cx: number, cy: number, finished = true): Unit {
+  const g = w.grid!;
+  const b = spawnInCell(w, owner, t, cy * g.width + cx);
+  for (let y = cy; y < cy + t.size; y++) for (let x = cx; x < cx + t.size; x++) g.cells[y * g.width + x] = TERRAIN_BUILDING;
+  if (!finished) {
+    b.progress = 0;
+    b.hp = 1;
+  }
+  return b;
 }
 
 function applyCommand(w: World, player: PlayerId, cmd: Command): void {
@@ -68,6 +119,7 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
       for (const u of units) {
         u.target = null;
         u.ordered = false;
+        u.job = null;
       }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
       else
@@ -85,10 +137,23 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
         if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) {
           u.target = t.id;
           u.ordered = true;
+          u.job = null;
         }
       }
       break;
     }
+    case 'harvest':
+      orderHarvest(w, player, cmd.unitIds, cmd.cx, cmd.cy);
+      break;
+    case 'build':
+      orderBuild(w, player, cmd.unitIds, cmd.type, cmd.cx, cmd.cy, placeBuilding);
+      break;
+    case 'construct':
+      orderConstruct(w, player, cmd.unitIds, cmd.site);
+      break;
+    case 'train':
+      orderTrain(w, player, cmd.building, cmd.type);
+      break;
   }
 }
 
@@ -134,7 +199,12 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (w.grid) moveOnMap(w, u);
     else moveUnit(u);
   }
-  for (const u of w.units) if (u.hp === 0) removeUnit(w, u);
+  economyStep(w, spawnInCell);
+  for (const u of w.units) {
+    if (u.hp !== 0) continue;
+    if (isBuilding(u)) clearFootprint(w, u);
+    else removeUnit(w, u);
+  }
   w.units = w.units.filter((u) => u.hp > 0);
   w.tick++;
 }
@@ -144,8 +214,11 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv } })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue] })),
+    players: w.players.map((p) => ({ ...p })),
+    mineSites: [...w.mineSites],
     occ: w.occ && w.occ.slice(),
+    grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     projectiles: w.projectiles.map((p) => ({ ...p })),
   };
 }

@@ -55,6 +55,12 @@ export interface UnitStats {
   priority: number;
   /** Null for melee units. */
   projectile: ProjectileStats | null;
+  /** Ticks to build (buildings) or train (units) (+0x60). Confirmed in the emulator: Farm 360, Builder 150. */
+  buildTime: number;
+  /** Footprint side in cells (+0x1D): 1 units and towers, 2 most buildings, 3 the base. */
+  size: number;
+  /** +0x6C: bricks per Mine payout (25); 0 for everything else. */
+  yield: number;
 }
 
 
@@ -111,6 +117,9 @@ export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): Uni
     role: r[0x5c]!,
     priority: r[0x70]!,
     projectile: proj === MELEE ? null : projectileStats(recs[proj]!),
+    buildTime: u16(r, 0x60),
+    size: r[0x1d]!,
+    yield: r[0x6c]!,
   };
 }
 

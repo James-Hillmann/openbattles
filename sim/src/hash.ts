@@ -55,6 +55,33 @@ export function hashWorld(w: World): number {
     mix(p.y);
     mix(p.target);
   }
+  // Economy state. Mixed only when the world has players, so combat- and
+  // movement-only worlds keep the hashes they had before the economy existed.
+  if (w.players.length > 0) {
+    mix(w.players.length);
+    for (const p of w.players) {
+      mix(p.id);
+      mix(p.bricks);
+      mix(p.reservedPop);
+      mix(p.reservedStars);
+    }
+    for (const u of w.units) {
+      mix(u.role);
+      mix(u.size);
+      mix(u.buildTime);
+      mix(u.progress);
+      mix(u.carrying ? 1 : 0);
+      mix(u.prod);
+      mix(u.payout);
+      mix(u.queue.length);
+      for (const k of u.queue) mix(k);
+      const j = u.job;
+      if (!j) mix(0);
+      else if (j.kind === 'chop') (mix(1), mix(j.tree), mix(j.timer));
+      else if (j.kind === 'deliver') (mix(2), mix(j.tree), mix(j.drop));
+      else (mix(3), mix(j.site));
+    }
+  }
   if (w.grid) {
     mix(w.grid.width);
     mix(w.grid.height);
