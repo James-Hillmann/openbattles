@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Never commit game data. Your ROM and anything extracted from it stay local.
+*.nds
+*.srl
+*.sav
+/out/
+/rom/
+/extracted/
+*.gpr
+*.rep/
