@@ -33,6 +33,15 @@ export function hashWorld(w: World): number {
     mix(u.lastAttack);
     mix(u.path.length);
     for (const c of u.path) mix(c);
+    if (!w.grid) continue; // bare test worlds have no occupancy or plotters
+    mix(u.cell);
+    const m = u.mv;
+    mix(m ? 1 : 0);
+    if (m) {
+      for (const v of [m.goal, m.wp, m.blocked, m.wait, m.waitLeft, m.side, m.sideCell, m.astar, m.pathIdx]) mix(v);
+      mix(m.align ? 1 : 0);
+      mix(m.sideReset ? 1 : 0);
+    }
   }
   mix(w.projectiles.length);
   for (const p of w.projectiles) {
@@ -47,5 +56,6 @@ export function hashWorld(w: World): number {
     mix(w.grid.height);
     for (const c of w.grid.cells) mix(c);
   }
+  if (w.occ) for (const c of w.occ) mix(c);
   return h >>> 0;
 }

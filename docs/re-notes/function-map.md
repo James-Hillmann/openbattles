@@ -67,3 +67,23 @@ When a function's logic gets ported to `/sim`, add a section:
 - **Fixed-point:** which format (20.12? 16.16?), any rounding detail that matters.
 - **RNG:** does it draw from the game's RNG? How many times per call?
 - **Open questions:**
+| `0x02053C44` | ARM | `MoveAction_update` | Per-tick move: plotter, seeker, blocked handling, then align to the cell | likely | movement.md |
+| `0x0205571C` | ARM | `Seeker_step` | Move toward target cell centre; reserve each new cell; status 0 moving, 1 new cell, 2 blocked, 3 arrived | likely | movement.md |
+| `0x020559CC` | ARM | `Seeker_isAtTarget` | In target cell; with align flag also inside the 6-17 x 6-9 px window | confirmed | King replay |
+| `0x02059C40` | ARM | `Unit_reserveCell` | Release old reservation, check terrain, occupy the footprint as state 2 | likely | |
+| `0x0207D9E8` | ARM | `Occupancy_reserve` | Per cell/layer: free -> state 2 with the unit's handle; fails if another unit holds it | likely | |
+| `0x0207DEB0` | ARM | `Occupancy_stand` | Cell state 1 (or own reservation 2 -> 1) | likely | |
+| `0x0207E08C` | ARM | `Occupancy_vacate` | Own state-1 cell -> 0 | likely | |
+| `0x02056994` | ARM | `SegmentedPlotter_update` | Waypoint ~5 cells toward the goal, nudged by a ring search | likely | |
+| `0x02080430` | ARM | `Occupancy_ringSearch` | Rings 0..r-1 around a cell, calls a match function; axis points skip (+-r, 0) | confirmed | forest test |
+| `0x020574A4` | ARM | `WaitPlotter_onBlocked` | Wait (60 ticks) only for a walking blocker not waiting on us | likely | |
+| `0x02057568` | ARM | `WaitPlotter_findBlocker` | Who is in the bumped cell, and whether to wait for it | likely | |
+| `0x02056DB0` | ARM | `SidestepPlotter_onBlocked` | Start or advance sidestepping | likely | |
+| `0x02057104` | ARM | `SidestepPlotter_step` | Try straight / CCW 45 / CW 45 neighbour cells | likely | tables 0x021490D8.. |
+| `0x02056074` | ARM | `AstarPlotter_update` | States: off, search to segment point, follow path, skipped step, failed | likely | |
+| `0x02055F18` | ARM | `AstarPlotter_onBlocked` | | likely | |
+| `0x02082BC4` | ARM | `Path_cellCost` | 1 free, 3 walking unit, 150 standing unit, 200 wall | likely | |
+| `0x020820F4` | ARM | `Path_expand` | 8 neighbours in fixed order, no corner rule | likely | |
+| `0x020826E4` | ARM | `Path_poll` | Runs the job a few rounds; fails if another unit is in the end cell | confirmed | builder case |
+| `0x0205A088` | ARM | `Unit_isMoving` | Has a MoveUnitAction (action type 8) | likely | |
+| `0x020F2548` | ARM | `Time_secondsToTicks` | n * 30 | likely | |

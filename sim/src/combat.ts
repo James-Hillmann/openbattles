@@ -2,7 +2,8 @@ import { CELL_H, CELL_W } from './config';
 import { FX_SHIFT, type Fx } from './fixed';
 import { nextInt } from './rng';
 import type { EntityId, MeleeBonusTable, Projectile, Unit, World } from './state';
-import { cellOf, planUnitPath } from './terrain';
+import { cellCenterX, cellCenterY, cellOf } from './terrain';
+import { orderMove, stopMove } from './movement';
 
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
@@ -101,8 +102,13 @@ function chase(w: World, u: Unit, t: Unit): void {
     u.path = [];
     return;
   }
-  if (u.tx !== null && u.ty !== null && cellOf(u.tx, u.ty).join() === cellOf(gx, gy).join()) return;
-  planUnitPath(w.grid, u, gx, gy);
+  const [cx, cy] = cellOf(gx, gy);
+  const goal = Math.min(Math.max(cy, 0), w.grid.height - 1) * w.grid.width + Math.min(Math.max(cx, 0), w.grid.width - 1);
+  // Keep the plotters' state when only the goal moves, like the game's follow-a-unit move (0x02054710).
+  if (!u.mv) orderMove(w, u, goal);
+  u.mv!.goal = goal;
+  u.tx = cellCenterX(goal % w.grid.width);
+  u.ty = cellCenterY(Math.floor(goal / w.grid.width));
 }
 
 function nearestEnemyInSight(w: World, u: Unit): Unit | undefined {
@@ -132,8 +138,7 @@ export function combatStep(w: World, u: Unit): void {
   if (u.target !== null && (!t || t.hp === 0)) {
     // Target died or vanished: stop where we are.
     u.target = null;
-    u.tx = u.ty = null;
-    u.path = [];
+    stopMove(u);
     t = undefined;
   }
   if (!t && u.tx === null) {
@@ -145,8 +150,7 @@ export function combatStep(w: World, u: Unit): void {
     chase(w, u, t);
     return;
   }
-  u.tx = u.ty = null;
-  u.path = [];
+  stopMove(u);
   if (w.tick < u.lastAttack + u.attack.cooldown) return;
   u.lastAttack = w.tick;
   if (u.attack.projectile) {
