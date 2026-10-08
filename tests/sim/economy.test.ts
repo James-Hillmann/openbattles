@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CHOP_TICKS, TERRAIN_BUILDING, TERRAIN_TREE, cellCenterX, cellCenterY, createWorld, getPlayer, hashWorld, placeBuilding,
+  CHOP_TICKS, MOVES_FLYING, TERRAIN_BUILDING, isWalkable, TERRAIN_TREE, cellCenterX, cellCenterY, createWorld, getPlayer, hashWorld, placeBuilding,
   popCap, popUsed, spawnUnit, starCap, step, type Command, type EntityType, type ScheduledCommand, type TerrainGrid,
   type World,
 } from '@lbw/sim';
@@ -114,6 +114,16 @@ describe('economy', () => {
     expect(bricks(w2)).toBe(500);
   });
 
+  it('buildings block walking and other buildings', () => {
+    const w = world(5000);
+    placeBuilding(w, 0, CASTLE, 10, 10);
+    expect(isWalkable(w.grid!, 11, 11)).toBe(false);
+    expect(isWalkable(w.grid!, 11, 11, MOVES_FLYING)).toBe(false);
+    const b = at(w, 6, 6);
+    run(w, 1, [{ kind: 'build', unitIds: [b.id], type: FARM.kind, cx: 12, cy: 11 }]); // overlaps the castle
+    expect(bricks(w)).toBe(5000);
+  });
+
   it('a Mine only goes on a mine site and pays 25 bricks every 75 ticks once built', () => {
     const w = world(5000, [8 * W + 8]);
     const b = at(w, 7, 7);
@@ -163,6 +173,6 @@ describe('economy', () => {
     ]);
     run(w, 900);
     expect(bricks(w)).toBeGreaterThan(450);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"b759491a"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"26ff7130"`);
   });
 });

@@ -105,11 +105,14 @@ const spawnInCell: SpawnFn = (w, owner, t, cell) => {
  * Put a building on the map with its top-left at cell (cx, cy), finished by
  * default. Marks its footprint as blocked.
  */
-export function placeBuilding(w: World, owner: PlayerId, t: EntityType, cx: number, cy: number, finished = true): Unit {
+export function placeBuilding(w: World, owner: PlayerId, t: UnitType, cx: number, cy: number, finished = true): Unit {
   const g = w.grid!;
-  const b = spawnInCell(w, owner, t, cy * g.width + cx);
+  const { x: px, y: py } = cellPos(g, cy * g.width + cx);
+  const b = spawnUnit(w, owner, px, py, t);
   if (b.cell >= 0) removeUnit(w, b);
-  for (let y = cy; y < cy + t.size; y++) for (let x = cx; x < cx + t.size; x++) g.cells[y * g.width + x] = TERRAIN_BUILDING;
+  const size = t.size ?? 1;
+  for (let y = cy; y < Math.min(g.height, cy + size); y++)
+    for (let x = cx; x < Math.min(g.width, cx + size); x++) g.cells[y * g.width + x] = TERRAIN_BUILDING;
   if (!finished) {
     b.progress = 0;
     b.hp = 1;

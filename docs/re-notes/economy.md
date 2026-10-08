@@ -91,3 +91,10 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 | `0x02085F54` | free stars | |
 | `0x02086524` | pop used | |
 | `0x0205D6C0` | (unit init) | +0x22E = 100, HP from +0x62 |
+
+## How the sim blocks footprints (our choice)
+
+Cells under a building get terrain code 4, which the game's terrain check (`0x02001510`) refuses for
+every unit and no skirmish map uses, so ground units path around buildings. When a building dies its
+cells go back to open ground. Skirmish start buildings use the map record's cell as the footprint's
+top-left: **guess**. Whether flyers cross buildings in the game: open (the sim blocks them).

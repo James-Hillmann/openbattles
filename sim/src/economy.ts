@@ -34,8 +34,13 @@ export const TREE_SEARCH_RADIUS = 10;
 /** Terrain codes the economy writes into the grid. */
 export const TERRAIN_OPEN = 0;
 export const TERRAIN_TREE = 1;
-/** Our own code for cells under a building (blocks walking). Not a game value. */
-export const TERRAIN_BUILDING = 6;
+/**
+ * Our code for cells under a building. 4 is unused in the skirmish maps and the
+ * game's terrain check (0x02001510) refuses it for every unit, so it blocks
+ * ground units and flyers alike. How the game itself blocks footprints (its
+ * occupancy grid?) is not traced; whether flyers cross buildings is open.
+ */
+export const TERRAIN_BUILDING = 4;
 
 export const ROLE_HERO = 0;
 export const ROLE_BUILDER = 1;

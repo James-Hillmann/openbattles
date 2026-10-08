@@ -142,7 +142,7 @@ describe('win and loss', () => {
       return hashWorld(w);
     };
     expect(run()).toBe(run());
-    expect(run().toString(16)).toMatchInlineSnapshot(`"6b09b494"`);
+    expect(run().toString(16)).toMatchInlineSnapshot(`"45553c51"`);
   });
 });
 
