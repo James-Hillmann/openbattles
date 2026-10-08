@@ -32,6 +32,9 @@ function syntheticEbp(): Uint8Array {
   unit(1, (v) => {
     v.setUint16(0x66, 2, true);
     v.setUint8(0x6f, 5);
+    v.setUint16(0x60, 270, true);
+    v.setUint8(0x1d, 2);
+    v.setUint8(0x6c, 25);
   });
   const p = new Uint8Array(0x74);
   const pv = new DataView(p.buffer);
@@ -71,6 +74,10 @@ describe('Entities.ebp', () => {
       index: 0, speed: 410, hp: 350, damage: 10, damageRand: 5, cooldown: 30, minRange: 1, maxRange: 1, sight: 5, role: 2, priority: 15, projectile: null,
     });
     expect(findUnitStats(recs, 'T_Ranged').projectile).toEqual({ speed: 2048, minDamage: 15, maxDamage: 20, splash: true });
+  });
+
+  it('reads the economy fields: build time, footprint and mine yield', () => {
+    expect(findUnitStats(recs, 'T_Ranged')).toMatchObject({ buildTime: 270, size: 2, yield: 25 });
   });
 
   it('returns null bonus tables for unknown game versions', () => {

@@ -211,7 +211,25 @@ export const FACTIONS = [
   { prefix: 'A', name: 'Aliens' },
 ] as const;
 
+/**
+ * A building's picture for one team bank. Buildings sit in the top of their faction's
+ * `_bld_mtd` sheet: entity +0x20 (u16) is the first 8x8 tile (row-major, 32 tiles a row)
+ * and +0x1E/+0x1F the width/height in tiles. likely: every King building lines up.
+ */
+export interface BuildingSprite {
+  key: string;
+  name: string;
+  image: Rgba;
+}
+
+export function buildingRect(raw: Uint8Array, sheetTilesWide: number): { x: number; y: number; w: number; h: number } {
+  const tile = raw[0x20]! | (raw[0x21]! << 8);
+  return { x: (tile % sheetTilesWide) * 8, y: Math.floor(tile / sheetTilesWide) * 8, w: raw[0x1e]! * 8, h: raw[0x1f]! * 8 };
+}
+
 export interface UnitBundle {
+  /** Buildings of the playable factions, for each requested team bank. */
+  buildings: BuildingSprite[];
   /** Sprite units of the playable factions, for each requested team bank. */
   sprites: UnitSprite[];
   /** Units drawn from 3D models, for each requested team bank. */
@@ -256,6 +274,34 @@ export function buildUnitBundle(
     const rec = records.find((r) => r.name === name);
     if (rec?.kind === 0) stats[name] = unitStats(records, rec);
   }
+  const buildings: BuildingSprite[] = [];
+  const sheets = new Map<string, CharData | undefined>();
+  for (const rec of records) {
+    if (rec.kind !== 0 || !/^[KWPIEA]_/.test(rec.name) || !rec.sprite.endsWith('_bld_mtd')) continue;
+    const st = unitStats(records, rec);
+    if (st.speed !== 0xffff) continue;
+    stats[rec.name] = st;
+    if (!sheets.has(rec.sprite)) {
+      const d = file(`${rec.sprite}.NCBR`);
+      sheets.set(rec.sprite, d ? decodeChars(d) : undefined);
+    }
+    const sh = sheets.get(rec.sprite);
+    if (!sh) continue;
+    const r = buildingRect(rec.raw, sh.tilesWide);
+    if (!r.w || !r.h) continue;
+    const sw = sh.tilesWide * 8;
+    for (const bank of banks) {
+      const data = new Uint8ClampedArray(r.w * r.h * 4);
+      for (let y = 0; y < r.h; y++)
+        for (let x = 0; x < r.w; x++) {
+          const v = sh.pixels[(r.y + y) * sw + r.x + x];
+          if (!v) continue;
+          const o = (bank * 16 + v) * 4;
+          data.set([palette[o]!, palette[o + 1]!, palette[o + 2]!, 255], (y * r.w + x) * 4);
+        }
+      buildings.push({ key: `${rec.name}@${bank}`, name: rec.name, image: { width: r.w, height: r.h, data } });
+    }
+  }
   const drawn = new Set(names);
-  return { sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
+  return { buildings, sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

@@ -22,6 +22,38 @@ export interface HudBundle {
   portraits: Record<string, Rgba>;
   /** Font for the unit name panel. */
   nameFont: Font;
+  /** 24x24 build/train strip icons by entity name, for the entities whose icon number is known (COMMAND_ICONS). */
+  commandIcons: Record<string, Rgba>;
+}
+
+/**
+ * Icon number in `UI/MiniHeadsGame.NCGR` (a grid of 24x24 cells, 16 a row) per entity, read off both
+ * screens in the emulator (docs/re-notes/hud.md). confirmed for these King entities; where the game
+ * keeps this mapping, and the other factions' numbers, are open.
+ */
+export const COMMAND_ICONS: Record<string, number> = {
+  K_Castle: 9, K_LumberMill: 10, K_Mine: 11, K_Farm: 12, K_Barracks: 13, K_Stables: 14, K_Tower: 15,
+  K_King: 104, K_Engineer: 105, K_Shipyard: 151,
+};
+/** MiniHeadsGame is drawn with WorldViewTop_Back bank 7, the same red as the strip's texture palette. confirmed */
+const COMMAND_ICON_BANK = 7;
+
+/** One 24x24 icon cell. Reads pixels directly: the sheet has 1440 tiles and blitTile keeps only 10 bits of a tile number. */
+function commandIcon(chars: CharData, pal: Uint8Array, i: number): Rgba {
+  const out = blank(24, 24);
+  const x0 = (i % 16) * 24;
+  const y0 = Math.floor(i / 16) * 24;
+  for (let y = 0; y < 24; y++) {
+    for (let x = 0; x < 24; x++) {
+      const sx = x0 + x;
+      const sy = y0 + y;
+      const v = chars.pixels[((sy >> 3) * chars.tilesWide + (sx >> 3)) * 64 + (sy & 7) * 8 + (sx & 7)]!;
+      if (!v) continue;
+      const o = (COMMAND_ICON_BANK * 16 + v) * 4;
+      out.data.set([pal[o]!, pal[o + 1]!, pal[o + 2]!, 255], (y * 24 + x) * 4);
+    }
+  }
+  return out;
 }
 
 /** Where things sit on the top screen (confirmed against the emulator unless noted). */
@@ -109,7 +141,13 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const p = portrait(rom, id);
     if (p) portraits[id] = p;
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')) };
+  const heads = tryRomFile(rom, 'UI/MiniHeadsGame.NCGR');
+  const commandIcons: Record<string, Rgba> = {};
+  if (heads) {
+    const hc = decodeChars(heads);
+    for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
+  }
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons };
 }
 
 /** What the top screen shows this frame. */

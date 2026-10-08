@@ -40,6 +40,10 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020638A8` | ARM | `Ai_pickTarget` | Picks from search results: in-range first, then priority +0x70 | confirmed | |
 | `0x0205E7D4` | ARM | `Unit_setHp` | Writes HP, damage time +0x1A4, under-attack alert, damaged event 0x2C | likely | |
 | `0x020F1108` | ARM | `Math_rand32` | Nitro SDK `MATH_Rand32` 64-bit LCG | confirmed | Game RNG context at `0x021552F4` +0xC |
+| `0x020866C0` | ARM | `Player_addBricks` | Adds bricks, clamped to 500,000; player +0x90 | confirmed | See economy.md for the rest of the economy functions |
+| `0x020866F0` | ARM | `Player_spendBricks` | Pays if the player has enough | confirmed | |
+| `0x0205323C` | ARM | `HarvestAction::update` | 150-tick chop, then carry | confirmed | |
+| `0x02052388` | ARM | `ConstructProgressAction` | Build progress from +0x60 | likely | |
 | `0x020832EC` | ARM | `Game_get` | Returns the game object; +0x8B4 is the 30 Hz time counter | confirmed | |
 | `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |
 | `0x020F2558` | ARM | `Os_getMilliseconds` | 64-bit hardware tick count * 64 / 33514 (bus clock in kHz) | likely | |
@@ -73,6 +77,12 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x02085BFC` | ARM | `Team_hasHero` | Any entity of this team with role 0 | likely | |
 | `0x02001510` | ARM | `Entity_canEnterTerrain` | Per-code flag: +0x16 open, +0x19 tree, +0x17 rough, +0x18 water; 4-5 never | likely | |
 | `0x0200159C` | ARM | `Entity_layerMask` | +0x1A ground, +0x1B air, +0x1C bridges | likely | |
+| `0x02004350` | ARM | `Cmd_init` | Command base constructor; r1 = command type id | likely (hooked in the emulator) | Every player and CPU order passes through it |
+| `0x02004E9C` | ARM | `Cmd_create` (cases) | Command factory: allocates a command by type id | likely | 5 = SyncCheck, 6 = SyncStatus; see multiplayer.md |
+| `0x020074EC` | ARM | `SyncCheckCommand_ctor` | Type id 5 | likely | |
+| `0x02007514` / `0x02007534` | ARM | `SyncCheckCommand_write` / `_read` | Two u32 at +0x14, +0x18 | likely | Probably (turn, checksum) |
+| `0x02007594` | ARM | `SyncStatusCommand_ctor` | Type id 6 | likely | |
+| `0x020075BC` / `0x020075DC` | ARM | `SyncStatusCommand_write` / `_read` | u32 at +0x14, u8 at +0x18 | likely | |
 
 ## Notes
 

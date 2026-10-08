@@ -14,6 +14,7 @@ when they explain something; never paste decompiler output wholesale.
 | [skirmish.md](skirmish.md) | Skirmish options, start setup, win and loss, terrain per unit type |
 | [fog.md](fog.md) | Fog of war: vision circles, visible and explored grids |
 | [unlocks.md](unlocks.md) | What the game unlocks over time (we unlock everything) |
+| [multiplayer.md](multiplayer.md) | DS wireless setup screens, the command lockstep netcode, and our online version |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 
 ## Confidence levels
