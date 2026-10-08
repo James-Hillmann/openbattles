@@ -57,6 +57,7 @@ import { mountMenus } from './menus';
 import type { GameSettings, GameType } from '@lbw/server/protocol';
 import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
+import { SiteFx } from './siteFx';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
 let localPlayer = 0;
@@ -294,6 +295,7 @@ const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
+  siteFx = hud.particles ? new SiteFx(hud.particles) : null;
   minimap = b.minimap;
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
@@ -473,10 +475,20 @@ function footprint(u: World['units'][number]) {
   return { left: (c % g.width) * CELL_W, top: Math.floor(c / g.width) * CELL_H, w: u.size * CELL_W, h: u.size * CELL_H };
 }
 
+/** The construction effect, once the ROM is loaded. */
+let siteFx: SiteFx | null = null;
+/** Per site: the cloud's sprite, and the picture cut to the part built so far. */
+const siteViews = new Map<number, { fx: Sprite; cut?: { key: string; tex: Texture } }>();
+/** Sites a Builder is working right now (the studs only fly then). */
+let workedSites = new Set<number>();
+
 /**
  * Building picture with its bottom centre on the footprint's bottom centre: guess, not yet lined
- * up with the emulator. A site under construction is drawn see-through (our stand-in; the game's
- * construction look is not traced yet). Selected buildings use the odd (outlined) bank like units.
+ * up with the emulator. Selected buildings use the odd (outlined) bank like units.
+ *
+ * A site under construction (docs/re-notes/build-ui.md): the dust cloud sits on the done line,
+ * which climbs the picture as the work goes on, and only the part of the picture below that line
+ * shows, see-through (emulator: likely; how see-through is a guess).
  */
 function drawBuilding(u: World['units'][number], isSelected: boolean, out: Pickable[]) {
   if (!world.grid) return;
@@ -485,6 +497,8 @@ function drawBuilding(u: World['units'][number], isSelected: boolean, out: Picka
   const tex = buildingTex.get(`${name}@${bankOf(u.owner) + (isSelected ? 1 : 0)}`) ?? buildingTex.get(`${name}@${bankOf(u.owner)}`);
   const top = tex ? f.top + f.h - tex.height : f.top;
   out.push({ id: u.id, owner: u.owner, x: f.left + f.w / 2, y: f.top + f.h, box: { l: f.left, t: top, r: f.left + f.w, b: f.top + f.h }, building: true });
+  const done = isFinished(u);
+  const view = siteViews.get(u.id);
   if (!tex) {
     fallback.rect(f.left + 2, f.top + 2, f.w - 4, f.h - 4).fill(COLORS[teamColor[u.owner] ?? u.owner] ?? 0xffffff);
   } else {
@@ -495,14 +509,61 @@ function drawBuilding(u: World['units'][number], isSelected: boolean, out: Picka
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
-    s.texture = tex;
+    const left = Math.round(f.left + f.w / 2 - tex.width / 2);
+    // The game's box: picture-wide in whole 24 px cells, picture-high in whole 16 px rows.
+    const box = { left, top, w: Math.floor(tex.width / 24) * 24, h: Math.floor(tex.height / 16) * 16 };
+    const pct = Math.floor((100 * u.progress) / Math.max(1, u.buildTime));
+    const hidden = done ? 0 : Math.max(0, SiteFx.anchorY(box, pct) - top);
+    s.texture = hidden ? cutTexture(u.id, tex, hidden) : tex;
     s.position.set(f.left + f.w / 2, f.top + f.h);
     s.zIndex = f.top + f.h;
-    s.alpha = isFinished(u) ? 1 : 0.55;
-    s.visible = true;
+    s.alpha = done ? 1 : 0.55;
+    s.visible = hidden < tex.height;
+    const cloud = siteFx?.draw(u.id, box, done ? 100 : pct, workedSites.has(u.id), animTime / TICK_MS);
+    if (cloud) {
+      const v = view ?? { fx: new Sprite() };
+      if (!view) {
+        unitLayer.addChild(v.fx);
+        siteViews.set(u.id, v);
+      }
+      if (v.fx.texture.source.resource !== cloud.canvas) {
+        v.fx.texture = Texture.from(cloud.canvas);
+        v.fx.texture.source.scaleMode = 'nearest';
+      } else v.fx.texture.source.update();
+      v.fx.position.set(cloud.x, cloud.y);
+      v.fx.zIndex = f.top + f.h + 1;
+      v.fx.visible = true;
+    } else if (view) view.fx.visible = false;
   }
   // Buildings show bars when selected or at <= 32% HP (emulator); we also show them while being built.
-  if (isSelected || !isFinished(u) || u.hp * 100 <= u.maxHp * 32) drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), top + 4, u.hp, u.maxHp);
+  if (isSelected || !done || u.hp * 100 <= u.maxHp * 32) drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), top + 4, u.hp, u.maxHp);
+}
+
+/** The picture without its top `hidden` rows, cached until the cut moves. */
+function cutTexture(id: number, tex: Texture, hidden: number): Texture {
+  const v = siteViews.get(id) ?? { fx: new Sprite() };
+  if (!siteViews.has(id)) {
+    unitLayer.addChild(v.fx);
+    siteViews.set(id, v);
+  }
+  const key = `${tex.uid}:${hidden}`;
+  if (v.cut?.key !== key) {
+    v.cut?.tex.destroy();
+    const fr = tex.frame;
+    v.cut = { key, tex: new Texture({ source: tex.source, frame: new Rectangle(fr.x, fr.y + hidden, fr.width, fr.height - hidden) }) };
+  }
+  return v.cut.tex;
+}
+
+/** Drop the cloud and cut picture of buildings that are gone. */
+function pruneSites() {
+  for (const [id, v] of siteViews) {
+    if (world.units.some((u) => u.id === id)) continue;
+    v.cut?.tex.destroy();
+    v.fx.destroy();
+    siteViews.delete(id);
+  }
+  siteFx?.prune((id) => siteViews.has(id));
 }
 
 // --- Build and train strip (docs/re-notes/build-ui.md) ---------------------------
@@ -735,12 +796,16 @@ app.ticker.add((t) => {
   }
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   selection.prune((id) => world.units.some((u) => u.id === id));
+  pruneSites();
+  workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'build' && workSpot(u) ? [u.job.site] : [])));
   drawFog();
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
     if (hiddenByFog(u)) {
       const hidden = unitSprites.get(u.id);
       if (hidden) hidden.visible = false;
+      const site = siteViews.get(u.id);
+      if (site) site.fx.visible = false;
       continue;
     }
     if (isBuilding(u)) {
@@ -1029,6 +1094,8 @@ void menus.boot();
     match.issue({ kind: 'move', unitIds: world.units.filter((u) => u.owner === localPlayer).map((u) => u.id), x: fx(x), y: fx(y) }),
   desynced: () => match.desynced,
   /** Economy orders through the real command path: the base trains a Builder, Builders chop the nearest tree. */
+  /** Any command, as if the local player gave it. */
+  issue: (c: Parameters<Match['issue']>[0]) => match.issue(c),
   issueEconomy: () => {
     const mine = world.units.filter((u) => u.owner === localPlayer && u.hp > 0);
     const builder = mine.find((u) => u.role === ROLE_BUILDER);
