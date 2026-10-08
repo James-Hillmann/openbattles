@@ -3,6 +3,7 @@ import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTile
 import { decodeChars, decodePalette } from './nitro';
 import { renderMap, renderSheet, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
+import { bakeTrees, readTreeTable, type TreeTable } from './trees';
 
 /** Everything the M1 client needs to show one map with units. Built in the worker. */
 export interface MapBundle {
@@ -37,8 +38,18 @@ const M1_UNITS = [
   { sheet: 'k_mel_1', palette: 'KingFaction.NCLR', bank: 2 },
 ];
 
+const treeTables = new WeakMap<UnpackedRom, TreeTable | null>();
+
+/** The game's tree tile lookup, read once per ROM. Null if this game version isn't mapped yet. */
+export function romTreeTable(rom: UnpackedRom): TreeTable | null {
+  if (!treeTables.has(rom)) treeTables.set(rom, readTreeTable(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode));
+  return treeTables.get(rom)!;
+}
+
 export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
-  const map = parseMap(romFile(rom, `Maps/${name}.map`));
+  const parsed = parseMap(romFile(rom, `Maps/${name}.map`));
+  const trees = romTreeTable(rom);
+  const map = trees ? { ...parsed, ...bakeTrees(parsed, trees) } : parsed;
   const chars = decodeChars(romFile(rom, `${map.tileset}.NCGR`));
   const pal = decodePalette(romFile(rom, `${map.tileset}.NCLR`));
   let metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));

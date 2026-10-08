@@ -90,20 +90,49 @@ Decoder: `extract/src/map.ts`, renderer `extract/src/render.ts`.
 | 0x09 | 2 | `03 02` on every map: probably the cell size in tiles (3 wide, 2 high) | likely |
 | 0x0B | 32 | tileset name, NUL-padded (`KingTileset`, `MarsTileset`, `PirateTileset`) | confirmed |
 | 0x2B | W*H | **terrain grid**, one byte per cell | confirmed layout, meanings guessed |
-| ... | 2*W*H + 204 | unknown: looks like two byte planes plus a 204-byte block | open |
+| 0x2B+W*H | W*H | **edges**: 8-neighbour bitmask of rough-ground borders (bit 0 NW, 1 N, 2 NE, 3 W, 4 E, 5 SW, 6 S, 7 SE) | confirmed (the game reads it when picking tree tiles) |
+| 0x2B+2*W*H | W*H | **regions**: small ids grouping areas (rough patches, cliffs); meaning open | open |
+| 0x2B+3*W*H | 2+n | **tree mask**, run-length coded: u16 byte count n, then n run lengths alternating open / tree, starting with open; runs sum to W*H | confirmed (all 122 maps) |
+| `RRET`-2*W*H | 2*W*H | **ground layer**: u16 metatile index per cell | confirmed (renders correctly) |
 | `RRET`-2*W*H | 2*W*H | **ground layer**: u16 metatile index per cell | confirmed (renders correctly) |
 | | 4 | `RRET` closes TERR | confirmed |
 
 Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, and `!PAM`.
 
 - **Cells are 24x16 pixels** (3x2 tiles of 8x8), so a 64x64 map is 1536x1024 px. confirmed.
-- Terrain codes seen: 0 (most common, open ground), 2, 3 (water on lake maps), 5. Exact
-  meanings (passable, buildable, shallow?) are open; we need them for M2 pathing.
+- Terrain codes in files: 0 open ground, 2 rough ground, 3 water, 5 cliff/plateau. At load the
+  game adds **1 = tree** (see Trees). 0 and 3 confirmed from the emulator; 2 and 5 likely, from
+  where they sit on the rendered maps. Passability per code is still open (M2).
 - Ground ids >= 440 are **per-map detail metatiles**: id N reads entry N-440 of
   `BP/DetailTiles_<map>.tbp` (confirmed: with this rule mp01 and mp12 render with zero transparent
   pixels, and seams line up). In the tileset table, entries from 440 up are transparent filler.
 - Mars maps have LEGO-brick tiles in some cells; whether those are decoration or object markers is open.
 - 41 maps use KingTileset, 41 PirateTileset, 40 MarsTileset.
+
+## Trees (confirmed)
+
+Trees are not sprites. They are ground metatiles that the game writes over the map at load.
+Checked against the running game in an emulator: the baked ground and terrain layers match
+our output cell for cell on mp01 (King), mp02 (Mars) and mp03 (Pirate). The only differences
+on mp03 were two trees an AI builder had already started chopping.
+
+What the game does at load:
+
+1. Decode the tree mask. For each tree cell whose terrain is 0, set terrain to 1. A tree on any
+   other terrain is dropped (mp03 has one on water).
+2. For every terrain-1 cell, build a key from its 3x3 neighbourhood. Each of the 9 cells
+   (row-major, NW first) gets 2 bits:
+   - 2 if the centre cell's edges bit for that neighbour is set,
+   - else 0 if the neighbour is on the map and its terrain is 0,
+   - else 1 (tree, water, cliff, or off the map).
+   The centre cell is always 1.
+3. Look the key up in a range table: 230 sorted start keys, a u16 length each, and a byte array
+   each. The result is the metatile id; `0xFF` or an out-of-range key gives a fallback id.
+4. Write that id into the ground layer.
+
+The same table serves all three tilesets, which share their layout for tree tiles. The tables live
+in ARM9 (USA addresses in `extract/src/trees.ts`). We read them from the player's ROM at load and
+never copy them into the repo.
 
 ## Tilesets (confirmed)
 

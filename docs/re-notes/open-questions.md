@@ -6,8 +6,9 @@
 | How entity records reference the name/sprite string table | look for offsets into the tail of `Entities.ebp` | open |
 | What `Factions.fbp` holds per entry | names like `KCM01_User` / `KCM01_Enemy` suggest per-mission starting forces | open |
 | Map sections `EVNT`, `TRIG`, `MARK`, `MINE` | diff a few skirmish maps; start positions and resource spots are likely in `MARK`/`MINE` | open (M1) |
-| Terrain codes (0/2/3/5) | compare with where units can walk in-game; needed for M2 pathing | open |
-| Object layer (trees, rocks) | "holes" were detail metatiles (ground id >= 440), not objects. Whether trees are separate sprites or baked into terrain + P0 autotile mask is still open | open |
+| Terrain codes: which ones block walking and building | known: 0 open, 1 tree, 2 rough, 3 water, 5 cliff. Test passability in the emulator | open (M2) |
+| Object layer (trees, rocks) | trees are metatiles baked at load (formats.md "Trees"); rocks/cliffs are plain ground tiles | **answered** |
+| How chopping a tree changes its tiles | mp03 in the emulator showed a half-chopped tree as metatile 186; watch `Map_setTerrain` writes while a builder chops | open (M4) |
 | Original sim tick rate | find the main loop: what it waits on per iteration (VBlank = 60 Hz) and whether logic runs every frame or every N | open |
 | Does combat use randomness? | find the game RNG (often an LCG `x = x * A + C`); see who calls it from combat code | open |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |

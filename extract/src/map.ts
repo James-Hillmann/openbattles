@@ -11,6 +11,12 @@ export interface GameMap {
   tileset: string;
   /** One logical terrain code per cell (0 open ground, 3 water, ... see notes). */
   terrain: Uint8Array;
+  /** Per-cell 8-neighbour bitmask of rough-ground edges (bit order: NW, N, NE, W, E, SW, S, SE). */
+  edges: Uint8Array;
+  /** Per-cell region/feature id (meaning partly open, see notes). */
+  regions: Uint8Array;
+  /** 1 where a tree stands at map start. Trees are baked into terrain and ground by bakeTrees(). */
+  trees: Uint8Array;
   /** One metatile index per cell into the tileset's .tbp table. */
   ground: Uint16Array;
 }
@@ -26,13 +32,30 @@ export function parseMap(d: Uint8Array): GameMap {
   const tileset = ascii(d, 0x0b, 32);
   const n = width * height;
   const terrain = d.slice(0x2b, 0x2b + n);
+  const edges = d.slice(0x2b + n, 0x2b + 2 * n);
+  const regions = d.slice(0x2b + 2 * n, 0x2b + 3 * n);
+  const trees = decodeTreeRuns(d, 0x2b + 3 * n, n);
   // The ground layer is the last block of the TERR section, which is closed by "RRET".
   const end = indexOfTag(d, 'RRET');
   const groundStart = end - n * 2;
   if (groundStart < 0x2b + n) throw new Error('TERR section too short');
   const ground = new Uint16Array(n);
   for (let i = 0; i < n; i++) ground[i] = u16(d, groundStart + i * 2);
-  return { width, height, tileset, terrain, ground };
+  return { width, height, tileset, terrain, edges, regions, trees, ground };
+}
+
+/** Tree mask: u16 byte count, then run lengths alternating no-tree / tree, starting with no-tree. */
+function decodeTreeRuns(d: Uint8Array, at: number, n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  const count = u16(d, at);
+  let p = 0;
+  for (let i = 0; i < count; i++) {
+    const run = d[at + 2 + i]!;
+    if (i & 1) out.fill(1, p, Math.min(n, p + run));
+    p += run;
+  }
+  if (p !== n) throw new Error(`Tree runs cover ${p} cells, expected ${n}`);
+  return out;
 }
 
 function indexOfTag(d: Uint8Array, tag: string): number {
