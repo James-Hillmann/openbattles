@@ -19,6 +19,8 @@ export interface GameMap {
   trees: Uint8Array;
   /** One metatile index per cell into the tileset's .tbp table. */
   ground: Uint16Array;
+  /** Cells where a Mine can be built (top-left of the site). The site marking itself is part of the ground tiles. */
+  mineSites: { x: number; y: number }[];
 }
 
 /** Each map cell is a 3x2 block of 8x8 tiles. */
@@ -41,7 +43,22 @@ export function parseMap(d: Uint8Array): GameMap {
   if (groundStart < 0x2b + n) throw new Error('TERR section too short');
   const ground = new Uint16Array(n);
   for (let i = 0; i < n; i++) ground[i] = u16(d, groundStart + i * 2);
-  return { width, height, tileset, terrain, edges, regions, trees, ground };
+  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d) };
+}
+
+/** MINE section: four lists of `L`, u8 count, count x (u8 x, u8 y). Only the second is ever non-empty. */
+function readMineSites(d: Uint8Array): { x: number; y: number }[] {
+  let p = indexOfTag(d, 'MINE') + 4;
+  const lists: { x: number; y: number }[][] = [];
+  for (let l = 0; l < 4; l++) {
+    if (d[p] !== 0x4c) throw new Error('Bad MINE list');
+    const count = d[p + 1]!;
+    const list = [];
+    for (let i = 0; i < count; i++) list.push({ x: d[p + 2 + i * 2]!, y: d[p + 3 + i * 2]! });
+    lists.push(list);
+    p += 2 + count * 2;
+  }
+  return lists[1]!;
 }
 
 /** Tree mask: u16 byte count, then run lengths alternating no-tree / tree, starting with no-tree. */

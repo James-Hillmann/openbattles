@@ -99,6 +99,13 @@ Decoder: `extract/src/map.ts`, renderer `extract/src/render.ts`.
 
 Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, and `!PAM`.
 
+- `MINE` (confirmed layout, all 122 maps): four lists, each `L`, u8 count, then count x (u8 x, u8 y).
+  Only the second list is ever non-empty: the cells where a Mine can be built. The marking on the
+  ground (cracked earth) is already part of the ground tiles; the emulator shows nothing else drawn there
+  before a Mine is built. That each site is the top-left of a 2x2 footprint is likely, from where the crack sits.
+- `MARK` (guess): lists of `L`, u8 type, u8 count, count x (x, y, 0). mp01 has type 0 points along the map
+  edges and type 3 points scattered inland. Possibly AI or pickup spots; nothing is drawn at them on load.
+
 - **Cells are 24x16 pixels** (3x2 tiles of 8x8), so a 64x64 map is 1536x1024 px. confirmed.
 - Terrain codes in files: 0 open ground, 2 rough ground, 3 water, 5 cliff/plateau. At load the
   game adds **1 = tree** (see Trees). 0 and 3 confirmed from the emulator; 2 and 5 likely, from
