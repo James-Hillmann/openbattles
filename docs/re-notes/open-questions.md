@@ -5,7 +5,7 @@
 | Entity record fields (HP, cost, damage, range, speed, build time) | combat fields done (combat.md); build time and +0x70 still guesses | **mostly answered** |
 | How entity records reference the name/sprite string table | look for offsets into the tail of `Entities.ebp` | open |
 | What `Factions.fbp` holds per entry | names like `KCM01_User` / `KCM01_Enemy` suggest per-mission starting forces | open |
-| Map sections `EVNT`, `TRIG`, `MARK` | `MINE` is done (mine sites). EVNT looks like starting units and buildings per player; MARK points are unknown. Watch them in the emulator | open (M2) |
+| Map sections `EVNT`, `TRIG`, `MARK` | `MINE` done; `EVNT` = start spawns + pickups (skirmish.md); TRIG empty on skirmish maps; MARK points unknown | EVNT **answered**, MARK open |
 | Terrain codes: which ones block walking and building | walking answered (formats.md): 0 and 2 walkable; 1, 3, 5 block. Building placement still open | walking **answered**, building open |
 | How units avoid each other while walking | one unit per cell, wait 2 s for walkers, sidestep, short A*: see movement.md | answered (likely; key cases confirmed) |
 | How a group order picks each unit's goal cell | we spread units over nearby cells (our rule) | open |
@@ -26,3 +26,7 @@
 | Minimap: fog-of-war reveal radius, other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
 | What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
+| Fog of war: visibility grid, reveal radius, does it re-fog | `User::FogCircle`; BG2 + `FoWTileset.NCGR`; see skirmish.md | open |
+| Hero defeat in the emulator | heroes regenerate; needs a real fight to watch `Rules_onUnitDestroyed` | open |
+| Building footprints | not in record +0x10..+0x13 (0xFF); `0x02001170` returns w/h per entity | open |
+| What pickups (`CollectableItem`, blueprint 8) give | 10 per skirmish map from EVNT | open |

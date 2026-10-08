@@ -11,6 +11,7 @@ when they explain something; never paste decompiler output wholesale.
 | [formats.md](formats.md) | File formats: layout tables, what's known, what isn't |
 | [movement.md](movement.md) | Walking, cell occupancy, waiting, sidestepping, the path search |
 | [hud.md](hud.md) | Top-screen HUD, selection outline, bars over units |
+| [skirmish.md](skirmish.md) | Skirmish options, start setup, win and loss, terrain per unit type |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 
 ## Confidence levels

@@ -53,6 +53,21 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x0203BED0` | ARM | `Unit_drawBars` | Health bar (+ hero charge bar) over a unit, as untextured 3D quads | confirmed | Rules in docs/re-notes/hud.md |
 | `0x0203C264` | ARM | (bar layout) | Bar width/cell count and screen position | likely | |
 | `0x0203C480` | ARM | (bar polygons) | Emits the bar's quads; colors packed to BGR555 at `0x0203C640` | likely | |
+| `0x020A3BB0` | Thumb | `Map_readEvnt` | EVNT section: groups of start spawns and pickups | likely | See skirmish.md |
+| `0x020A5C0C` | Thumb | `Evnt_readSpawn` | 9-byte spawn record: x, y, slot, role, index, 4 unknown bytes | likely | Spot-checked on mp01 |
+| `0x020A45F0` | Thumb | `Evnt_readPickup` | 8-byte pickup record, makes a `CollectableItem` | likely | |
+| `0x020A2FD4` | Thumb | `Skirmish_filterSpawn` | Without prebuilt bases, keeps the first hero, builder and base per player | confirmed | Emulator, mp01 |
+| `0x020A3CEC` | Thumb | `Map_setStartPoint` | Hero record sets the player's start cell (map +0x234) | likely | |
+| `0x020858D4` | ARM | `Faction_entitiesWithRole` | Player's faction entities with role (+0x5C) = r1, 0x14 = all | likely | |
+| `0x020753D4` | ARM | `GameRuleManager_ctor` | Registers six event listeners; +4 = win mode (0 hero, 1 units, 2 bricks) | confirmed (mode values) | Pointer at `0x02155084` |
+| `0x02075750` | ARM | `Rules_onUnitDestroyed` | Mode 0: no hero left -> defeated; modes 1-2: eliminated -> defeated | likely | |
+| `0x02075808` | ARM | `Rules_isEliminated` | No units and no affordable production building | likely | Thresholds 50/100/250 |
+| `0x02075B9C` | ARM | `Rules_onBricks` | Mode 2: >= 10000 bricks wins, others lose | confirmed | |
+| `0x02075DAC` | ARM | `Rules_oneSideLeft` | All remaining players allied | likely | |
+| `0x02086750` | ARM | `Team_setStatus` | Team +0x9C: 0 playing, 1 defeated, 2 won, 3 lost | likely | |
+| `0x02085BFC` | ARM | `Team_hasHero` | Any entity of this team with role 0 | likely | |
+| `0x02001510` | ARM | `Entity_canEnterTerrain` | Per-code flag: +0x16 open, +0x19 tree, +0x17 rough, +0x18 water; 4-5 never | likely | |
+| `0x0200159C` | ARM | `Entity_layerMask` | +0x1A ground, +0x1B air, +0x1C bridges | likely | |
 
 ## Notes
 

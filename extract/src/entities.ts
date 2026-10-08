@@ -55,6 +55,13 @@ export interface UnitStats {
   priority: number;
   /** Null for melee units. */
   projectile: ProjectileStats | null;
+  /**
+   * Terrain the unit may enter, bit n = terrain code n (0 open, 1 tree, 2 rough,
+   * 3 water), from +0x16 open, +0x17 rough, +0x18 water, +0x19 tree (0x02001510).
+   */
+  moves: number;
+  /** Occupancy layer: 0 ground (+0x1A), 1 air (+0x1B), 2 bridges (+0x1C) (0x0200159C). */
+  layer: number;
 }
 
 
@@ -111,6 +118,8 @@ export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): Uni
     role: r[0x5c]!,
     priority: r[0x70]!,
     projectile: proj === MELEE ? null : projectileStats(recs[proj]!),
+    moves: (r[0x16] ? 1 : 0) | (r[0x19] ? 2 : 0) | (r[0x17] ? 4 : 0) | (r[0x18] ? 8 : 0),
+    layer: r[0x1b] ? 1 : r[0x1c] ? 2 : 0,
   };
 }
 

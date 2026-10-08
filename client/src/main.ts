@@ -111,8 +111,8 @@ let combatBonus: MeleeBonusTable | null = null;
 
 function simType(s: UnitStats | undefined): SimUnitType {
   if (!s) return {};
-  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
-  return { kind: index, speed, hp, priority, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role } = s;
+  return { kind: index, speed, hp, priority, moves, layer, role, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
 }
 /** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
 const unitKind = new Map<number, string>();
