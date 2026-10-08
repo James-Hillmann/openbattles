@@ -24,6 +24,11 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020A41E4` | Thumb | `Map_retileTree` | Looks the key up and writes the ground metatile | confirmed | Table addresses in `extract/src/trees.ts` |
 | `0x020A26B8` | Thumb | `Table_findRange` | Binary search: index of the last start key <= key | confirmed | |
 | `0x020A308C` / `0x020A30A0` | Thumb | `Map_getTerrain` / `Map_setTerrain` | Read/write one terrain byte at a cell | confirmed | |
+| `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |
+| `0x020F2558` | ARM | `Os_getMilliseconds` | 64-bit hardware tick count * 64 / 33514 (bus clock in kHz) | likely | |
+| `0x0210FA34` | ARM | `Os_waitVBlank` | Waits for the next VBlank interrupt | likely | |
+| `0x02089E40` | ARM | `Game_frame` | One game update; called once per loop iteration | likely | Units move one step per call |
+| `0x020599D4` | ARM | `Unit_setPosition` | Stores x, y (20.12 px) at unit +0xEC / +0xF0 | likely | |
 | `0x02080EF4` | ARM | `Path_astar?` | References the string `AstarSearch.cpp` | guess | Pathfinding lives near here; start M4 movement work from this |
 
 ## Notes

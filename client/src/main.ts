@@ -9,7 +9,15 @@ import {
   hashWorld,
   spawnUnit,
   step,
+  CELL_H,
+  CELL_W,
+  cellCenterX,
+  cellCenterY,
+  reachableFrom,
+  spreadCells,
+  type Fx,
   type ScheduledCommand,
+  type TerrainGrid,
   type World,
 } from '@lbw/sim';
 import { FACINGS, FACTIONS, type MapBundle, type Rgba, type UnitBundle, type UnitSprite } from '@lbw/extract';
@@ -25,10 +33,23 @@ let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
 const pending: ScheduledCommand[] = [];
 
-function resetWorld(cx: number, cy: number) {
-  world = createWorld({ seed: 1234 });
-  for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
-  for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+function resetWorld(cx: number, cy: number, grid: TerrainGrid | null = null) {
+  world = createWorld({ seed: 1234, grid });
+  if (grid) {
+    // Stand each team on walkable cells near a point left/right of centre.
+    // Keep a team on one landmass: spread only over cells reachable from the first one found.
+    const team = (px: number, owner: number) => {
+      const [x, y] = [Math.floor(px / CELL_W), Math.floor(cy / CELL_H)];
+      const first = spreadCells(grid, x, y, 1);
+      for (const c of spreadCells(grid, x, y, 4, reachableFrom(grid, first)))
+        spawnUnit(world, owner, cellCenterX(c % grid.width), cellCenterY(Math.floor(c / grid.width)));
+    };
+    team(cx - 120, 0);
+    team(cx + 120, 1);
+  } else {
+    for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
+    for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+  }
   prev = cloneWorld(world);
   pending.length = 0;
 }
@@ -94,19 +115,33 @@ function onUnits(u: UnitBundle) {
   mountFactionPickers(u);
 }
 
+/** Walkable cells for `count` units near (px, py), all on one landmass. */
+function spawnCells(grid: TerrainGrid, px: number, py: number, count: number): [Fx, Fx][] {
+  const [x, y] = [Math.floor(px / CELL_W), Math.floor(py / CELL_H)];
+  const first = spreadCells(grid, x, y, 1);
+  return spreadCells(grid, x, y, count, reachableFrom(grid, first)).map((c) => [
+    cellCenterX(c % grid.width),
+    cellCenterY(Math.floor(c / grid.width)),
+  ]);
+}
+
 /** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
 function spawnLineups(cx: number, cy: number) {
-  world = createWorld({ seed: 1234 });
+  world = createWorld({ seed: 1234, grid: mapGrid });
   unitKind.clear();
   for (let p = 0; p < 2; p++) {
     const names = factionUnits.get(factionPick[p]!) ?? [];
+    const py = cy + (p === 0 ? -50 : 50);
+    const spots = mapGrid ? spawnCells(mapGrid, cx, py, names.length) : names.map((_, i) => [fx(cx - 90 + i * 36), fx(py)] as [Fx, Fx]);
     names.forEach((name, i) => {
+      const spot = spots[i];
+      if (!spot) return;
       const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
-      const u = spawnUnit(world, p, fx(cx - 90 + i * 36), fx(cy + (p === 0 ? -50 : 50)), t?.sprite.speed);
+      const u = spawnUnit(world, p, spot[0], spot[1], t?.sprite.speed);
       unitKind.set(u.id, name);
     });
   }
-  if (!factionUnits.size) resetWorld(cx, cy);
+  if (!factionUnits.size) resetWorld(cx, cy, mapGrid);
   prev = cloneWorld(world);
   pending.length = 0;
   for (const s of unitSprites.values()) s.destroy();
@@ -115,9 +150,11 @@ function spawnLineups(cx: number, cy: number) {
 }
 
 let mapSize = { w: 600, h: 440 };
+let mapGrid: TerrainGrid | null = null;
 function onMap(b: MapBundle) {
   ground.texture = textureFrom(b.ground);
   mapSize = { w: b.ground.width, h: b.ground.height };
+  mapGrid = { width: b.width, height: b.height, cells: b.terrain };
   spawnLineups(mapSize.w / 2, mapSize.h / 2);
   centerOn(mapSize.w / 2, mapSize.h / 2);
 }
