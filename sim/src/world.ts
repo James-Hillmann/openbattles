@@ -30,6 +30,8 @@ export interface UnitType {
   speed?: number;
   hp?: number;
   attack?: AttackStats | null;
+  /** Sight radius in cells; defaults to the attack's sight. Buildings see without attacking (castle 11). */
+  sight?: number;
   priority?: number;
   /** Terrain the unit may enter; default open and rough ground. */
   moves?: TerrainMask;
@@ -38,8 +40,18 @@ export interface UnitType {
   role?: number;
 }
 
+/** Entities.ebp speed of a building (+0x0C = 0xFFFF): it never moves, so the sim stores 0. */
+const IMMOBILE = 0xffff;
+
 /** HP for units spawned without a type (test fixtures). */
 const DEFAULT_HP = 100;
+
+/**
+ * The entity table gives every unit and building attack fields, but one with no
+ * melee damage and no projectile (castles, farms, mills) has nothing to hit with
+ * (likely: 0x02050A40 would deal max(1, bonus) a swing, which no building does).
+ */
+const canAttack = (a: AttackStats | null | undefined): a is AttackStats => !!a && (a.projectile !== null || a.damage > 0 || a.damageRand > 0);
 
 export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitType = {}): Unit {
   const hp = type.hp ?? DEFAULT_HP;
@@ -51,11 +63,12 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     tx: null,
     ty: null,
     path: [],
-    speed: type.speed ?? DEFAULT_SPEED,
+    speed: type.speed === IMMOBILE ? 0 : type.speed ?? DEFAULT_SPEED,
     kind: type.kind ?? -1,
     hp,
     maxHp: hp,
-    attack: type.attack ?? null,
+    attack: canAttack(type.attack) ? type.attack : null,
+    sight: type.sight ?? type.attack?.sight ?? 0,
     target: null,
     ordered: false,
     lastAttack: NEVER,
