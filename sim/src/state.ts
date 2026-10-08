@@ -94,6 +94,8 @@ export interface EntityType {
   yield: number;
   priority: number;
   attack: AttackStats | null;
+  /** Faction prefix of the entity name (K, W, P, I, E, A): a building only makes its own faction's entities. */
+  faction?: string;
   /** Terrain mask, occupancy layer and sight for units this type spawns (see Unit). */
   moves?: TerrainMask;
   layer?: number;
