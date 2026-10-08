@@ -24,6 +24,17 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020A41E4` | Thumb | `Map_retileTree` | Looks the key up and writes the ground metatile | confirmed | Table addresses in `extract/src/trees.ts` |
 | `0x020A26B8` | Thumb | `Table_findRange` | Binary search: index of the last start key <= key | confirmed | |
 | `0x020A308C` / `0x020A30A0` | Thumb | `Map_getTerrain` / `Map_setTerrain` | Read/write one terrain byte at a cell | confirmed | |
+| `0x0205CBF4` | ARM | `Stats_init` | Fills a unit's stats component from its entity record: speed, damage (+0x68), multiplier 1.0, cooldown (+0x6D) | confirmed | Component at unit +0x164 |
+| `0x0205CC68` | ARM | `Stats_meleeDamage` | `max(1, damage + Combat_meleeBonus(attacker, defender))` | confirmed | |
+| `0x02002B18` | ARM | `Combat_meleeBonus` | Signed byte from the class matrix, by entity index | confirmed | Tables in combat.md |
+| `0x02050A40` | ARM | `Unit_attackTick` | Cooldown check vs unit +0x19C, melee hit with `rand(+0x6A)` roll, HP at unit +0x1A0; ranged units branch to spawn a projectile | confirmed | Watched in the emulator |
+| `0x0205E5F4` | ARM | `Unit_isMelee` | Projectile field (+0x66) == 0xFFFF | confirmed | |
+| `0x0205E63C` | ARM | `Unit_inRange` | Range check with +0x6E/+0x6F, or an override range | confirmed | |
+| `0x0207F640` | ARM | `Range_check` | Squared cell distance between footprints vs min^2/max^2 | confirmed | |
+| `0x0206E950` | ARM | `Projectile_hit` | `min + rand(max - min)` from projectile +0x70/+0x72, times defender multiplier | confirmed | |
+| `0x0206E5EC` | ARM | `Projectile_splash?` | Area-damage path when projectile +0x6B is set | guess | |
+| `0x020F1108` | ARM | `Math_rand32` | Nitro SDK `MATH_Rand32` 64-bit LCG | confirmed | Game RNG context at `0x021552F4` +0xC |
+| `0x020832EC` | ARM | `Game_get` | Returns the game object; +0x8B4 is the 30 Hz time counter | confirmed | |
 | `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |
 | `0x020F2558` | ARM | `Os_getMilliseconds` | 64-bit hardware tick count * 64 / 33514 (bus clock in kHz) | likely | |
 | `0x0210FA34` | ARM | `Os_waitVBlank` | Waits for the next VBlank interrupt | likely | |

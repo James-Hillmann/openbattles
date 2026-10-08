@@ -16,11 +16,13 @@ import {
   reachableFrom,
   spreadCells,
   type Fx,
+  type MeleeBonusTable,
   type ScheduledCommand,
+  type UnitType as SimUnitType,
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACINGS, FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite } from '@lbw/extract';
+import { FACINGS, FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { mountRomPanel } from './romPanel';
@@ -100,15 +102,26 @@ interface UnitType {
 const unitTypes = new Map<string, UnitType>();
 /** Entity names per faction prefix, in table order (hero, hero F, builder, melee, ranged, mounted). */
 let factionUnits = new Map<string, string[]>();
+/** Sim stats per entity name, from Entities.ebp. */
+let unitStats: Record<string, UnitStats> = {};
+let combatBonus: MeleeBonusTable | null = null;
+
+function simType(s: UnitStats | undefined): SimUnitType {
+  if (!s) return {};
+  const { index, speed, hp, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
+  return { kind: index, speed, hp, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+}
 /** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
 const unitKind = new Map<number, string>();
 const unitSprites = new Map<number, Sprite>();
-const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean }>();
+/** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
+const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number }>();
 const factionPick: [string, string] = ['K', 'A'];
 
 function onUnits(u: UnitBundle) {
   unitTypes.clear();
   factionUnits = new Map();
+  unitStats = u.stats;
   for (const s of u.sprites) {
     const tex = textureFrom(s.atlas);
     const cols = s.atlas.width / s.frame;
@@ -136,7 +149,7 @@ function spawnCells(grid: TerrainGrid, px: number, py: number, count: number): [
 
 /** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
 function spawnLineups(cx: number, cy: number) {
-  world = createWorld({ seed: 1234, grid: mapGrid });
+  world = createWorld({ seed: 1234, grid: mapGrid, bonus: combatBonus });
   unitKind.clear();
   for (let p = 0; p < 2; p++) {
     const names = factionUnits.get(factionPick[p]!) ?? [];
@@ -146,7 +159,7 @@ function spawnLineups(cx: number, cy: number) {
       const spot = spots[i];
       if (!spot) return;
       const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
-      const u = spawnUnit(world, p, spot[0], spot[1], t?.sprite.speed);
+      const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: t?.sprite.speed });
       unitKind.set(u.id, name);
     });
   }
@@ -164,13 +177,12 @@ let mapGrid: TerrainGrid | null = null;
 let minimap: Rgba | undefined;
 /** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
 const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
-/** Until the sim tracks HP, every unit shows full health: its max HP from Entities.ebp, by entity name. */
-const maxHpOf = (name: string | undefined): number => (name ? (hudView.label(name)?.maxHp ?? 0) : 0);
 
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
   minimap = b.minimap;
+  combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
   spawnLineups(mapSize.w / 2, mapSize.h / 2);
@@ -241,12 +253,7 @@ window.addEventListener('pointermove', (e) => {
   camera.y = e.clientY - drag.y;
 });
 const keys = new Set<string>();
-window.addEventListener('keydown', (e) => {
-  keys.add(e.key.toLowerCase());
-  // F: preview the attack animation on your selected units (combat itself isn't in the sim yet).
-  if (e.key.toLowerCase() === 'f' && !e.repeat) attackQueued = true;
-});
-let attackQueued = false;
+window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 app.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -262,17 +269,22 @@ app.canvas.addEventListener('wheel', (e) => {
   camera.y = Math.round(sy - wy * s);
 });
 
-// --- Input: right-click moves your selected units -------------------------------
+// --- Input: right-click an enemy to attack it, anywhere else to move ------------
 
 app.canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const r = app.canvas.getBoundingClientRect();
   // Quantize pointer input to whole world pixels before it enters the sim.
-  const x = fx(Math.round((e.clientX - r.left - camera.x) / camera.scale.x));
-  const y = fx(Math.round((e.clientY - r.top - camera.y) / camera.scale.y));
+  const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
+  const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
   const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER && selection.ids.has(u.id)).map((u) => u.id);
   if (unitIds.length === 0) return;
-  pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd: { kind: 'move', unitIds, x, y } });
+  // Sprites are anchored near the feet, so hit-test the box above them.
+  const enemy = world.units.find(
+    (u) => u.owner !== LOCAL_PLAYER && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
+  );
+  const cmd = enemy ? { kind: 'attack' as const, unitIds, target: enemy.id } : { kind: 'move' as const, unitIds, x: fx(px), y: fx(py) };
+  pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd });
 });
 
 // --- Loop: fixed-step sim, interpolated render ---------------------------------
@@ -304,6 +316,14 @@ app.ticker.add((t) => {
   const alpha = acc / TICK_MS;
   fallback.clear();
   overlay.clear();
+  // Dead units leave the sim; drop their sprites.
+  for (const [id, sp] of unitSprites) {
+    if (world.units.some((u) => u.id === id)) continue;
+    sp.destroy();
+    unitSprites.delete(id);
+    unitAnim.delete(id);
+  }
+  for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   selection.prune((id) => world.units.some((u) => u.id === id));
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
@@ -326,10 +346,16 @@ app.ticker.add((t) => {
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
-    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: 4, flip: false };
+    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: 4, flip: false, swing: u.lastAttack };
     const moving = u.x !== p.x || u.y !== p.y;
     if (moving) Object.assign(a, facing(u.x - p.x, u.y - p.y));
-    if (attackQueued && u.owner === LOCAL_PLAYER && isSelected) a.state = attack(animTime);
+    if (u.lastAttack !== a.swing) {
+      // The sim just attacked: face the target and play one swing.
+      a.swing = u.lastAttack;
+      const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
+      if (target) Object.assign(a, facing(target.x - u.x, target.y - u.y));
+      a.state = attack(animTime);
+    }
     const r = animate(type.sprite, a.state, moving, animTime);
     a.state = r.state;
     unitAnim.set(u.id, a);
@@ -337,13 +363,9 @@ app.ticker.add((t) => {
     s.scale.x = a.flip ? -1 : 1;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
-    // The game shows a unit's bars while it is selected.
-    if (isSelected) {
-      const hp = maxHpOf(unitKind.get(u.id));
-      drawUnitBars(overlay, Math.round(x) - type.sprite.frame / 2, Math.round(y) - (type.sprite.frame - 5), hp, hp);
-    }
+    // The game shows a unit's bars while it is selected; we also show them once it is hurt.
+    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - type.sprite.frame / 2, Math.round(y) - (type.sprite.frame - 5), u.hp, u.maxHp);
   }
-  attackQueued = false;
   unitLayer.sortableChildren = true;
   drawn = nextDrawn;
   if (boxRect) {
@@ -362,7 +384,7 @@ app.ticker.add((t) => {
     minifigs: mine.length,
     minifigCap: Math.max(4, mine.length),
     star: [0, 0],
-    selected: selectedEntity >= 0 ? { entity: selectedEntity, hp: maxHpOf(selectedName) } : undefined,
+    selected: selectedEntity >= 0 && firstSelected ? { entity: selectedEntity, hp: firstSelected.hp } : undefined,
     minimap: minimap && {
       image: minimap,
       // World px -> minimap px: 1.5 px per 24x16 cell, i.e. x / 16 and y * 3 / 32.

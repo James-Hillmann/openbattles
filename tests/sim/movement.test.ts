@@ -17,7 +17,7 @@ describe('movement matches the game per update', () => {
   for (const m of measured) {
     it(`moves like the game going ${m.dir}`, () => {
       const w = createWorld({ seed: 1 });
-      const u = spawnUnit(w, 0, fx(0), fx(0), 410);
+      const u = spawnUnit(w, 0, fx(0), fx(0), { speed: 410 });
       u.tx = fx(m.cells[0] * 24 * 20);
       u.ty = fx(m.cells[1] * 16 * 20);
       step(w, []);

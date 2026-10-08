@@ -26,8 +26,21 @@ export function hashWorld(w: World): number {
     mix(u.tx);
     mix(u.ty);
     mix(u.speed);
+    mix(u.kind);
+    mix(u.hp);
+    mix(u.maxHp);
+    mix(u.target);
+    mix(u.lastAttack);
     mix(u.path.length);
     for (const c of u.path) mix(c);
+  }
+  mix(w.projectiles.length);
+  for (const p of w.projectiles) {
+    mix(p.id);
+    mix(p.owner);
+    mix(p.x);
+    mix(p.y);
+    mix(p.target);
   }
   if (w.grid) {
     mix(w.grid.width);

@@ -5,6 +5,7 @@ import { renderMap, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
 import { renderMinimap } from './minimap';
 import { bakeTrees, readTreeTable, type TreeTable } from './trees';
+import { readCombatBonus, type CombatBonus } from './entities';
 
 /** Everything the M1 client needs to show one map with units. Built in the worker. */
 export interface MapBundle {
@@ -16,6 +17,8 @@ export interface MapBundle {
   ground: Rgba;
   /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
   minimap?: Rgba;
+  /** Melee bonus tables from ARM9; null for game versions we haven't mapped. */
+  combatBonus: CombatBonus | null;
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
@@ -51,5 +54,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const detail = tryRomFile(rom, detailTilesPath(name));
   if (detail) metatiles = withDetailTiles(metatiles, parseMetatiles(detail));
   const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap };
+  const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
+  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus };
 }

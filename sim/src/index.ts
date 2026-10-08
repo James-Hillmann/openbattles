@@ -5,5 +5,6 @@ export * from './state';
 export * from './commands';
 export * from './terrain';
 export * from './world';
+export * from './combat';
 export * from './hash';
 export * from './replay';

@@ -12,6 +12,7 @@ import {
   spreadCells,
   step,
   type TerrainGrid,
+  type UnitType,
 } from '@lbw/sim';
 
 /** '.' open, 'r' rough, 'T' tree, '~' water, '#' plateau. */
@@ -103,6 +104,23 @@ describe('moving on a map', () => {
 
   it('is deterministic (hash pinned; update deliberately when sim rules change)', () => {
     expect(hashWorld(run().w)).toBe(hashWorld(run().w));
-    expect(hashWorld(run().w).toString(16)).toMatchInlineSnapshot(`"15ccaac0"`);
+    expect(hashWorld(run().w).toString(16)).toMatchInlineSnapshot(`"a65ad1e0"`);
+  });
+});
+
+describe('chasing on a map', () => {
+  it('a melee unit walks around water to reach and hit its target', () => {
+    const g = grid(['..........', '....~.....', '....~.....', '....~.....', '..........']);
+    const SWORD: UnitType = { speed: 410, hp: 350, attack: { damage: 10, damageRand: 0, cooldown: 30, minRange: 1, maxRange: 1, sight: 5, projectile: null } };
+    const w = createWorld({ seed: 3, grid: g });
+    spawnUnit(w, 0, cellCenterX(2), cellCenterY(2), SWORD);
+    spawnUnit(w, 1, cellCenterX(7), cellCenterY(2), { hp: 350 });
+    step(w, [{ tick: 0, player: 0, cmd: { kind: 'attack', unitIds: [1], target: 2 } }]);
+    for (let t = 0; t < 200; t++) {
+      step(w, []);
+      const [cx, cy] = cellOf(w.units[0]!.x, w.units[0]!.y);
+      expect(isWalkable(g, cx, cy)).toBe(true);
+    }
+    expect(w.units[1]!.hp).toBeLessThan(350);
   });
 });

@@ -1,6 +1,7 @@
 import { ascii, u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
+import { parseEntityRecords, unitStats, type UnitStats } from './entities';
 
 /**
  * Entity blueprints (BP/Entities.ebp, after PMOC): `BPNZ`, then 0x7C-byte records,
@@ -206,6 +207,8 @@ export interface UnitBundle {
   sprites: UnitSprite[];
   /** Units drawn from 3D models (siege, flyers, ships). Listed so the client can say what is missing. */
   models: EntityInfo[];
+  /** Combat and movement stats per entity name, for every sprite unit (see docs/re-notes/combat.md). */
+  stats: Record<string, UnitStats>;
 }
 
 /**
@@ -226,11 +229,19 @@ export function buildUnitBundle(
   const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name);
   const palette = decodePalette(need(UNIT_PALETTE));
   fixPalette?.(palette);
+  const sprites = buildUnitSprites(entities, (p) => {
+    const d = file(p);
+    return d ? decodeChars(d) : undefined;
+  }, palette, banks, playable);
+  const records = parseEntityRecords(need('BP/Entities.ebp'));
+  const stats: Record<string, UnitStats> = {};
+  for (const name of new Set(sprites.map((s) => s.name))) {
+    const rec = records.find((r) => r.name === name);
+    if (rec?.kind === 0) stats[name] = unitStats(records, rec);
+  }
   return {
-    sprites: buildUnitSprites(entities, (p) => {
-      const d = file(p);
-      return d ? decodeChars(d) : undefined;
-    }, palette, banks, playable),
+    sprites,
+    stats,
     models: entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/')),
   };
 }

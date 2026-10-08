@@ -1,5 +1,6 @@
 import { CELL_H, CELL_W } from './config';
 import { fx, fxToInt, type Fx } from './fixed';
+import type { Unit } from './state';
 
 /**
  * The map's walkability, one terrain code per cell (the baked grid from the
@@ -215,4 +216,20 @@ export function spreadCells(g: TerrainGrid, cx: number, cy: number, count: numbe
     }
   }
   return out;
+}
+
+/**
+ * Send one unit to (x, y) along a path: to the exact point when its cell is
+ * reachable, else to the centre of the closest reachable cell.
+ */
+export function planUnitPath(g: TerrainGrid, u: Unit, x: Fx, y: Fx): void {
+  const [ux, uy] = cellOf(u.x, u.y);
+  const [gx, gy] = cellOf(x, y);
+  const start = uy * g.width + ux;
+  const raw = findPath(g, ux, uy, gx, gy);
+  const end = raw.length > 0 ? raw[raw.length - 1]! : start;
+  const exact = end === gy * g.width + gx;
+  u.tx = exact ? x : cellCenterX(end % g.width);
+  u.ty = exact ? y : cellCenterY(Math.floor(end / g.width));
+  u.path = simplifyPath(g, start, raw).slice(0, -1);
 }
