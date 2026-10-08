@@ -1,6 +1,5 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import {
-  INPUT_DELAY_TICKS,
   TICK_MS,
   cloneWorld,
   createFog,
@@ -11,7 +10,6 @@ import {
   fxToFloat,
   hashWorld,
   spawnUnit,
-  step,
   CELL_H,
   CELL_W,
   cellCenterX,
@@ -21,7 +19,6 @@ import {
   type Fx,
   type MeleeBonusTable,
   type Fog,
-  type ScheduledCommand,
   type UnitType as SimUnitType,
   type TerrainGrid,
   type World,
@@ -30,23 +27,50 @@ import { FACINGS, FACTIONS, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, m
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
-import { mountRomPanel } from './romPanel';
+import { mountRomPanel, skirmishFirst } from './romPanel';
 import { Selection, type Pickable } from './selection';
+import { Match, bareWorld, type MatchStart, type RelayClient } from './match';
+import { defaultRelayUrl, mountLobby } from './lobby';
+import type { GameSettings } from '@lbw/server/protocol';
 
-const LOCAL_PLAYER = 0;
-const COLORS = [0xd33b2c, 0x3b6fd3];
-/** Palette bank per player: even banks are team colors (0 red, 2 blue); bank + 1 is the same team selected. */
-const TEAM_BANK = [0, 2];
+/** The player this browser controls: 0 offline, the lobby slot online. */
+let localPlayer = 0;
+/** Fallback circle colors per team color (red, blue, green, orange, magenta, grey). */
+const COLORS = [0xd33b2c, 0x3b6fd3, 0x2f9e44, 0xf08c00, 0xb030b0, 0x707070];
+/**
+ * Team color (0..5) per player; palette bank 2c is that team, 2c + 1 the same team selected.
+ * Offline: red vs blue.
+ */
+let teamColor = [0, 1];
+const bankOf = (p: number) => 2 * (teamColor[p] ?? p);
+/** Online settings, or null in the offline sandbox. */
+let online: { settings: GameSettings; relay: RelayClient; ready: boolean } | null = null;
+/** Most catch-up ticks run in one frame after a stall or a slow frame. */
+const MAX_CATCHUP_TICKS = 8;
+/** Our hash at each hash tick, for the two-tab test and for desync reports. */
+const hashLog = new Map<number, number>();
 /** Hit flash window, in ticks after the tick the damage landed. */
 const HIT_FLASH_FROM = 2.5;
 const HIT_FLASH_TO = 5.5;
 
-let world: World = createWorld({ seed: 1234 });
+/** Seed for the next world: fixed offline, the relay's online. */
+let worldSeed = 1234;
+let world: World = createWorld({ seed: worldSeed });
 let prev: World = cloneWorld(world);
-const pending: ScheduledCommand[] = [];
+let match = new Match(world, 0, [0]);
+
+/** Start ticking `w`: offline only player 0 sends input; online everyone in the room does. */
+function adopt(w: World) {
+  world = w;
+  prev = cloneWorld(w);
+  match.dispose();
+  match = online ? new Match(w, localPlayer, teamColor.map((_, p) => p), online.relay) : new Match(w, 0, [0]);
+  hashLog.clear();
+  if (online) online.ready = true;
+}
 
 function resetWorld(cx: number, cy: number, grid: TerrainGrid | null = null) {
-  world = createWorld({ seed: 1234, grid });
+  world = createWorld({ seed: worldSeed, grid });
   if (grid) {
     // Stand each team on walkable cells near a point left/right of centre.
     // Keep a team on one landmass: spread only over cells reachable from the first one found.
@@ -59,11 +83,9 @@ function resetWorld(cx: number, cy: number, grid: TerrainGrid | null = null) {
     team(cx - 120, 0);
     team(cx + 120, 1);
   } else {
-    for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
-    for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+    world = bareWorld(worldSeed, cx, cy);
   }
-  prev = cloneWorld(world);
-  pending.length = 0;
+  adopt(world);
 }
 resetWorld(300, 220);
 
@@ -128,7 +150,7 @@ const unitSprites = new Map<number, Sprite>();
 /** Per unit: animation state, facing, and the sim's lastAttack we last started a swing for. */
 const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean; swing: number; clip: ModelClipName; clipStart: number }>();
 const bgr = (c: number): [number, number, number] => [((c & 31) * 255) / 31, (((c >> 5) & 31) * 255) / 31, (((c >> 10) & 31) * 255) / 31];
-const factionPick: [string, string] = ['K', 'A'];
+let factionPick: string[] = ['K', 'A'];
 
 function onUnits(u: UnitBundle) {
   for (const t of unitTypes.values()) t.model?.destroy();
@@ -166,23 +188,22 @@ function spawnCells(grid: TerrainGrid, px: number, py: number, count: number): [
 
 /** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
 function spawnLineups(cx: number, cy: number) {
-  world = createWorld({ seed: 1234, grid: mapGrid, bonus: combatBonus });
+  world = createWorld({ seed: worldSeed, grid: mapGrid, bonus: combatBonus });
   unitKind.clear();
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < factionPick.length; p++) {
     const names = factionUnits.get(factionPick[p]!) ?? [];
     const py = cy + (p === 0 ? -50 : 50);
     const spots = mapGrid ? spawnCells(mapGrid, cx, py, names.length) : names.map((_, i) => [fx(cx - 90 + i * 36), fx(py)] as [Fx, Fx]);
     names.forEach((name, i) => {
       const spot = spots[i];
       if (!spot) return;
-      const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
+      const t = unitTypes.get(`${name}@${bankOf(p)}`);
       const u = spawnUnit(world, p, spot[0], spot[1], unitStats[name] ? simType(unitStats[name]) : { speed: (t?.sprite ?? t?.model?.unit)?.speed });
       unitKind.set(u.id, name);
     });
   }
-  if (!factionUnits.size) resetWorld(cx, cy, mapGrid);
-  prev = cloneWorld(world);
-  pending.length = 0;
+  if (!factionUnits.size) return resetWorld(cx, cy, mapGrid);
+  adopt(world);
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
   unitAnim.clear();
@@ -221,7 +242,9 @@ function mountFactionPickers(u: UnitBundle) {
   el.querySelectorAll<HTMLSelectElement>('select').forEach((sel) => {
     const p = Number(sel.dataset.p);
     sel.value = factionPick[p]!;
+    sel.disabled = online !== null;
     sel.addEventListener('change', () => {
+      if (online) return;
       factionPick[p] = sel.value;
       spawnLineups(mapSize.w / 2, mapSize.h / 2);
     });
@@ -254,9 +277,9 @@ window.addEventListener('pointerup', (e) => {
   if (!drag) return;
   if (!drag.moved) {
     const w = toWorld(e.clientX, e.clientY);
-    selection.click(drawn, LOCAL_PLAYER, w.x, w.y, e.shiftKey);
+    selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
   } else if (boxRect) {
-    selection.box(drawn, LOCAL_PLAYER, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
+    selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
   }
   drag = null;
   boxRect = null;
@@ -299,21 +322,21 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
   const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
-  const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER && selection.ids.has(u.id)).map((u) => u.id);
+  const unitIds = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id)).map((u) => u.id);
   if (unitIds.length === 0) return;
   // Sprites are anchored near the feet, so hit-test the box above them.
   const enemy = world.units.find(
-    (u) => u.owner !== LOCAL_PLAYER && !hiddenByFog(u) && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
+    (u) => u.owner !== localPlayer && !hiddenByFog(u) && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
   );
   const cmd = enemy ? { kind: 'attack' as const, unitIds, target: enemy.id } : { kind: 'move' as const, unitIds, x: fx(px), y: fx(py) };
-  pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd });
+  match.issue(cmd);
 });
 
 // --- Fog of war (sim/src/fog.ts; docs/re-notes/fog.md) --------------------------
 
 /** Enemy units outside our vision aren't drawn. guess: not yet checked in the emulator. */
 function hiddenByFog(u: World['units'][number]): boolean {
-  if (!fog || u.owner === LOCAL_PLAYER || u.cell < 0) return false;
+  if (!fog || u.owner === localPlayer || u.cell < 0) return false;
   return !isVisible(fog, u.cell % fog.width, Math.floor(u.cell / fog.width));
 }
 
@@ -338,9 +361,42 @@ function drawFog() {
 
 const tickEl = document.getElementById('tick')!;
 const hashEl = document.getElementById('hash')!;
+const netEl = document.getElementById('net')!;
 
 let acc = 0;
 let animTime = 0;
+
+/** Run every sim tick that `ms` more of wall time allows (fewer while waiting on input). */
+function advance(ms: number) {
+  acc = Math.min(acc + ms, TICK_MS * MAX_CATCHUP_TICKS);
+  while (acc >= TICK_MS) {
+    const before = cloneWorld(world);
+    const r = match.tick();
+    if (!r) break; // waiting for the other player's input: hold this tick
+    prev = before;
+    acc -= TICK_MS;
+    if (r.hash !== null) hashLog.set(world.tick, r.hash);
+    if (fog) updateFog(fog, world, localPlayer);
+    tickEl.textContent = String(world.tick);
+    hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
+  }
+}
+
+// Browsers stop animation frames in a hidden tab and slow its timers to 1 Hz, which would
+// freeze an online match for the other player too. A worker's timer keeps running, so it
+// drives the sim while the tab is hidden; the render loop drives it while visible.
+const clock = new Worker(URL.createObjectURL(new Blob([`setInterval(() => postMessage(0), ${Math.floor(TICK_MS)})`], { type: 'text/javascript' })));
+let hiddenAt = 0;
+clock.onmessage = () => {
+  if (!document.hidden || !online) return;
+  const now = performance.now();
+  advance(hiddenAt ? now - hiddenAt : TICK_MS);
+  hiddenAt = now;
+};
+document.addEventListener('visibilitychange', () => {
+  hiddenAt = document.hidden ? performance.now() : 0;
+});
+
 app.ticker.add((t) => {
   const pan = 8 / camera.scale.x;
   if (keys.has('arrowleft') || keys.has('a')) camera.x += pan * camera.scale.x;
@@ -348,20 +404,14 @@ app.ticker.add((t) => {
   if (keys.has('arrowup') || keys.has('w')) camera.y += pan * camera.scale.y;
   if (keys.has('arrowdown') || keys.has('s')) camera.y -= pan * camera.scale.y;
 
-  acc += t.deltaMS;
+  // The first frame back after hiding can carry a huge delta; the worker already ticked.
+  advance(document.hidden ? 0 : Math.min(t.deltaMS, 250));
   animTime += t.deltaMS;
-  while (acc >= TICK_MS) {
-    acc -= TICK_MS;
-    prev = cloneWorld(world);
-    const due = pending.filter((c) => c.tick === world.tick);
-    for (const c of due) pending.splice(pending.indexOf(c), 1);
-    step(world, due);
-    if (fog) updateFog(fog, world, LOCAL_PLAYER);
-    tickEl.textContent = String(world.tick);
-    hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
-  }
+  // While stalled, show the latest tick rather than extrapolating past it.
+  const waiting = online ? match.waitingFor() : [];
+  netEl.textContent = !online ? '' : match.desynced ? 'Out of sync' : match.left.length ? 'Connection Lost!' : waiting.length && acc >= TICK_MS ? 'Waiting...' : '';
 
-  const alpha = acc / TICK_MS;
+  const alpha = Math.min(1, acc / TICK_MS);
   fallback.clear();
   overlay.clear();
   // Dead units leave the sim; drop their sprites.
@@ -386,14 +436,14 @@ app.ticker.add((t) => {
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
     nextDrawn.push({ id: u.id, owner: u.owner, x, y });
     const isSelected = selection.ids.has(u.id);
-    const bank = TEAM_BANK[u.owner]! + (isSelected ? 1 : 0);
+    const bank = bankOf(u.owner) + (isSelected ? 1 : 0);
     // Models carry team colors only; a selected one gets an outline instead of the odd bank.
     const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`) ?? unitTypes.get(`${unitKind.get(u.id)}@${bank & ~1}`);
     // Hit flash: drawn in the grey bank from 2.5 to 5.5 ticks after the damage tick (emulator).
     const sinceHit = world.tick - 1 - u.lastHit + alpha;
     const flash = sinceHit >= HIT_FLASH_FROM && sinceHit < HIT_FLASH_TO ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
     if (!type) {
-      fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
+      fallback.circle(x, y, 8).fill(COLORS[teamColor[u.owner] ?? u.owner] ?? 0xffffff);
       continue;
     }
     const box = type.sprite ?? type.model.unit;
@@ -420,7 +470,7 @@ app.ticker.add((t) => {
       // The game keeps one controller per clip and switches between idle, move and attack.
       const clip: ModelClipName = moving ? 'move' : target ? 'attack' : 'idle';
       if (clip !== a.clip) Object.assign(a, { clip, clipStart: animTime });
-      const outline = isSelected ? bgr(u.owner === LOCAL_PLAYER ? OUTLINE_OWN : OUTLINE_OTHER) : undefined;
+      const outline = isSelected ? bgr(u.owner === localPlayer ? OUTLINE_OWN : OUTLINE_OTHER) : undefined;
       s.texture = type.model.texture(a.row, clipFrame(type.model.unit.clips[clip], animTime - a.clipStart), outline);
       s.scale.x = 1;
     } else {
@@ -444,13 +494,13 @@ app.ticker.add((t) => {
     overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).stroke({ color: 0xffff00, width: 1 / camera.scale.x });
   }
 
-  const mine = world.units.filter((u) => u.owner === LOCAL_PLAYER);
+  const mine = world.units.filter((u) => u.owner === localPlayer);
   const firstSelected = mine.find((u) => selection.ids.has(u.id));
   const selectedName = firstSelected && unitKind.get(firstSelected.id);
   const selectedEntity = selectedName ? hudView.entityIndex(selectedName) : -1;
   hudView.update({
     // Placeholders until the sim has an economy: the skirmish starting bricks and the population cap seen in the emulator.
-    bricks: 500,
+    bricks: online?.settings.bank ?? 500,
     minifigs: mine.length,
     minifigCap: Math.max(4, mine.length),
     star: [0, 0],
@@ -464,9 +514,72 @@ app.ticker.add((t) => {
         w: Math.round(app.screen.width / camera.scale.x / 16),
         h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
       },
-      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[d.owner] ?? [255, 255, 255] })),
+      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[teamColor[d.owner] ?? d.owner] ?? [255, 255, 255] })),
     },
   });
 });
 
-mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);
+const rom = mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);
+
+// --- Online: lobby, then a lockstep match --------------------------------------
+
+async function startOnline(relay: RelayClient, start: MatchStart) {
+  const players = [...start.players].sort((a, b) => a.slot - b.slot);
+  localPlayer = start.you;
+  teamColor = players.map((p) => p.color);
+  factionPick = players.map((p) => p.faction);
+  worldSeed = start.seed;
+  online = { settings: start.settings, relay, ready: false };
+  selection.ids.clear();
+  // Freeze the offline sandbox until the world is built, so nothing ticks early.
+  match.dispose();
+  match = new Match(world, localPlayer, [-1]);
+  if (rom.summary()) {
+    rom.lockMap(start.settings.map);
+    // Same ROM (the lobby checked) + same seed + same lineups = the same world everywhere.
+    await rom.loadUnits(teamColor, teamColor[localPlayer]!);
+    await rom.loadMap(start.settings.map);
+  } else {
+    adopt(bareWorld(worldSeed));
+  }
+  for (const s of unitSprites.values()) s.destroy();
+  unitSprites.clear();
+  unitAnim.clear();
+}
+
+function endOnline() {
+  online = null;
+  localPlayer = 0;
+  teamColor = [0, 1];
+  factionPick = ['K', 'A'];
+  worldSeed = 1234;
+  rom.lockMap(null);
+  if (rom.summary()) void rom.loadUnits(teamColor, 0).then(() => spawnLineups(mapSize.w / 2, mapSize.h / 2));
+  else resetWorld(300, 220);
+}
+
+mountLobby(
+  document.getElementById('mp')!,
+  {
+    rom: () => {
+      const s = rom.summary();
+      return s && { fingerprint: s.fingerprint, maps: skirmishFirst(s.maps).filter((m) => /^mp\d+$/.test(m)) };
+    },
+    start: (relay, start) => void startOnline(relay, start),
+    ended: endOnline,
+  },
+  defaultRelayUrl(location),
+);
+
+/** Read-only hooks for the two-tab browser test (tests/e2e). Not used by the game. */
+(window as unknown as { __ob: object }).__ob = {
+  tick: () => world.tick,
+  hashAt: (t: number) => hashLog.get(t) ?? null,
+  /** True once the online match's world is built and ticking. */
+  online: () => online?.ready === true,
+  local: () => localPlayer,
+  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y })),
+  issueMove: (x: number, y: number) =>
+    match.issue({ kind: 'move', unitIds: world.units.filter((u) => u.owner === localPlayer).map((u) => u.id), x: fx(x), y: fx(y) }),
+  desynced: () => match.desynced,
+};

@@ -12,3 +12,4 @@ export * from './movement';
 export * from './rules';
 export * from './skirmish';
 export * from './fog';
+export * from './lockstep';

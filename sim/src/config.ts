@@ -6,7 +6,10 @@
  */
 export const TICK_HZ = 30;
 export const TICK_MS = 1000 / TICK_HZ; // render-side only
-/** Inputs are scheduled this many ticks ahead to hide network latency (200 ms). */
+/**
+ * Inputs are scheduled this many ticks ahead to hide network latency (200 ms). The DS
+ * game's own value isn't known (docs/re-notes/multiplayer.md); this one is ours.
+ */
 export const INPUT_DELAY_TICKS = 6;
 /** Clients exchange a state hash every N ticks for desync detection (once a second). */
 export const HASH_INTERVAL_TICKS = 30;
