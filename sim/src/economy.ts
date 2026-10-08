@@ -385,8 +385,9 @@ export function clearFootprint(w: World, b: Unit): void {
   const g = w.grid;
   if (!g || !isBuilding(b)) return;
   const o = originCell(w, b);
-  for (let y = cellY(g, o); y < cellY(g, o) + b.size; y++)
-    for (let x = cellX(g, o); x < cellX(g, o) + b.size; x++) g.cells[y * g.width + x] = TERRAIN_OPEN;
+  for (let y = cellY(g, o); y < Math.min(g.height, cellY(g, o) + b.size); y++)
+    for (let x = cellX(g, o); x < Math.min(g.width, cellX(g, o) + b.size); x++)
+      if (g.cells[y * g.width + x] === TERRAIN_BUILDING) g.cells[y * g.width + x] = TERRAIN_OPEN;
 }
 
 /** Position for a unit spawned in a cell: the cell's centre. */

@@ -57,10 +57,20 @@ export interface UnitStats {
   projectile: ProjectileStats | null;
   /** Ticks to build (buildings) or train (units) (+0x60). Confirmed in the emulator: Farm 360, Builder 150. */
   buildTime: number;
-  /** Footprint side in cells (+0x1D): 1 units and towers, 2 most buildings, 3 the base. */
+  /**
+   * Footprint shape (+0x1D), an index into the game's size table (0x02001170): 1 = 1x1, 2 = 2x2,
+   * 3 = 3x3, 4 = 2x3, 5 = 2x6, 6 = 2x9, 7 = 3x2, 8 = 6x2, 9 = 9x2, 10 = 1x4, 11 = 4x1.
+   */
   size: number;
   /** +0x6C: bricks per Mine payout (25); 0 for everything else. */
   yield: number;
+  /**
+   * Terrain the unit may enter, bit n = terrain code n (0 open, 1 tree, 2 rough,
+   * 3 water), from +0x16 open, +0x17 rough, +0x18 water, +0x19 tree (0x02001510).
+   */
+  moves: number;
+  /** Occupancy layer: 0 ground (+0x1A), 1 air (+0x1B), 2 bridges (+0x1C) (0x0200159C). */
+  layer: number;
 }
 
 
@@ -120,6 +130,8 @@ export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): Uni
     buildTime: u16(r, 0x60),
     size: r[0x1d]!,
     yield: r[0x6c]!,
+    moves: (r[0x16] ? 1 : 0) | (r[0x19] ? 2 : 0) | (r[0x17] ? 4 : 0) | (r[0x18] ? 8 : 0),
+    layer: r[0x1b] ? 1 : r[0x1c] ? 2 : 0,
   };
 }
 

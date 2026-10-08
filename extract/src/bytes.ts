@@ -26,3 +26,5 @@ export function indexOf(hay: Uint8Array, needle: readonly number[], from = 0): n
   }
   return -1;
 }
+export const s16 = (b: Uint8Array, o: number): number => (u16(b, o) << 16) >> 16;
+export const s32 = (b: Uint8Array, o: number): number => u32(b, o) | 0;

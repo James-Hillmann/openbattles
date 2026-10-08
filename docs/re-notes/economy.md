@@ -49,8 +49,10 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
   ticks** (Farm 360: started tick 386, finished tick 746). HP rises with it to the full value.
   Unit +0x22E holds percent done (100 = finished). confirmed (one Builder on a Farm)
 - Whether several Builders build faster: **open**. The sim counts one tick of work per tick.
-- Footprint side in cells is +0x1D: 3 Castle, 2 most buildings, 1 towers and units. likely (the
-  Castle's 3 rows match where its first unit walks out; the Farm preview is 2x2)
+- Footprint is +0x1D, an index into a size table built by `0x02001170`: 1 = 1x1, 2 = 2x2, 3 = 3x3,
+  4 = 2x3, 5 = 2x6, 6 = 2x9, 7 = 3x2, 8 = 6x2, 9 = 9x2, 10 = 1x4, 11 = 4x1 (w x h). confirmed (code);
+  Castle 3, most buildings 2, towers 1, which fits the emulator (the Castle's first unit walks out
+  3 rows below its corner; the Farm preview is 2x2). The sim only places the square ones (1-3).
 - A Mine must sit on a `MINE` site from the map. likely. Other placement rules (rough ground, cliffs,
   units in the way) are a **guess**: the sim wants every footprint cell walkable and free.
 

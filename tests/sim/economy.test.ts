@@ -29,7 +29,7 @@ function grid(): TerrainGrid {
 }
 
 function world(bricks = 500, mineSites: number[] = []): World {
-  return createWorld({ seed: 7, grid: grid(), players: [{ id: 0, bricks }], types: TYPES, mineSites });
+  return createWorld({ seed: 7, grid: grid(), players: [{ id: 0, team: 0, bricks, status: 0, start: -1, reservedPop: 0, reservedStars: 0 }], types: TYPES, mineSites });
 }
 
 const at = (w: World, cx: number, cy: number) => spawnUnit(w, 0, cellCenterX(cx), cellCenterY(cy), BUILDER);
@@ -163,6 +163,6 @@ describe('economy', () => {
     ]);
     run(w, 900);
     expect(bricks(w)).toBeGreaterThan(450);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"f9f2bd08"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"b759491a"`);
   });
 });
