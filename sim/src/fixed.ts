@@ -35,6 +35,18 @@ export function fxDiv(a: Fx, b: Fx): Fx {
   return (Math.trunc((a * 65536) / b) | 0) as Fx;
 }
 
+/**
+ * a * b / c in one step, truncated toward zero. Use this instead of
+ * fxMul(a, fxDiv(b, c)) when b/c is small: the Q16.16 ratio would lose most of its digits.
+ * |a * b| must stay below 2^53.
+ */
+export function fxMulDiv(a: Fx, b: Fx, c: Fx): Fx {
+  if (c === 0) throw new RangeError('fxMulDiv by zero');
+  const p = a * b;
+  if (!Number.isSafeInteger(p)) throw new RangeError('fxMulDiv overflow');
+  return (Math.trunc(p / c) | 0) as Fx;
+}
+
 /** Integer part, truncated toward zero. */
 export const fxToInt = (a: Fx): number => Math.trunc(a / 65536);
 /** For rendering only. Never feed the result back into the sim. */

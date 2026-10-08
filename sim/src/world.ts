@@ -1,4 +1,4 @@
-import { fxAdd, fxDiv, fxLen, fxMul, fxRaw, type Fx } from './fixed';
+import { fxAdd, fxLen, fxMulDiv, fxRaw, type Fx } from './fixed';
 import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
@@ -51,9 +51,10 @@ function moveUnit(u: Unit): void {
     u.tx = u.ty = null;
     return;
   }
-  const k = fxDiv(step48, dist48);
-  u.x = fxAdd(u.x, fxMul(dx, k));
-  u.y = fxAdd(u.y, fxMul(dy, k));
+  // Scale by step/dist in one go. A Q16.16 ratio step/dist is tiny on long moves and truncating it
+  // made units slower the farther away their target was (0.4% at 20 cells).
+  u.x = fxAdd(u.x, fxMulDiv(dx, step48, dist48));
+  u.y = fxAdd(u.y, fxMulDiv(dy, step48, dist48));
 }
 
 /** Advance one tick. `cmds` must all be scheduled for `w.tick`. */

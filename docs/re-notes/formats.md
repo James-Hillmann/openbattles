@@ -55,10 +55,10 @@ The unit and building table. 75,195 bytes decompressed.
 - **+0x00 u16: offset of the entity's name** in the string table at 0xFA08 (confirmed). Each name is
   followed by its sprite or model path, e.g. `K_King` then `Sprites/k_hrm`.
 - +0x04 u16: index within the table. +0x06 u16: a global id (0x182 for `K_King`).
-- **+0x0C u16: move speed** (likely). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
-  819 Gryphon. In the emulator the King and a 410-speed unit both covered about 3.1 cells per second,
-  measured in cells (24x16 px), not pixels. So movement is isotropic in cell space. At 30 updates a
-  second, 410/4096 cells per update gives 3.0 cells/s; the measured 3.1 leaves a 3% gap to explain.
+- **+0x0C u16: move speed** (confirmed). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
+  819 Gryphon. A unit moves exactly speed/4096 cells per game update, as a straight line in cell
+  units (24x16 px). The ~3% extra seen in the emulator comes from the update rate, not the speed;
+  see "Movement speed and update rate" below.
 - +0x5E u16 cost in bricks (King 500, Engineer 50, Swordsman 100), confirmed for the King against the
   in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed the same way.
   +0x60 u16 maybe build time (600, 150, 270). +0x66 u16 projectile id (0xFFFF = melee). guess.
@@ -204,13 +204,50 @@ clear = idle sheet". The client plays walk as frames 0-4 then the idle pose, loo
 
 ## Timing seen in the emulator (likely)
 
-- The battlefield redraws every 2nd VBlank: 30 updates per second.
+- The battlefield usually updates every 2nd VBlank (30 per second), but not always; see below.
 - A walking unit changes animation frame every 4 VBlanks (15 fps). The King hero's 6-frame walk
   loops in about 24 VBlanks (0.4 s).
-- The King hero walks about 66 px/s (132 px in 120 VBlanks), about 2.2 px per update.
-- The sim runs at this 30 Hz rate (`TICK_HZ`), and units move speed/4096 cells per tick, measured
+- The sim runs at 30 Hz (`TICK_HZ`), and units move speed/4096 cells per tick, measured
   as a straight line in cell units (so 24 px across counts the same as 16 px down).
 - Units and buildings are drawn by the 3D engine (main BG0); fog of war is main BG2.
+
+## Movement speed and update rate
+
+**Per-update step (confirmed).** A unit's position is two s32 values in 20.12 pixels (1/4096 px).
+For the King (speed 410) on mp01, each update moved it by exactly:
+
+| direction | dx | dy | length in cells |
+|---|---|---|---|
+| right | 9840 | 0 | 9840/24 = 410 |
+| down | 0 | 6560 | 6560/16 = 410 |
+| down-right, 1:1 in cells | 6957 | 4638 | 410.0 |
+| up-left, 3:5 in cells | -5062 | -5625 | 410.0 |
+
+So the step is speed/4096 cells per update, isotropic in cell space, with no hidden multiplier.
+`tests/sim/movement.test.ts` checks the sim against these numbers.
+
+**Update rate (likely).** The game has no fixed tick. Its main loop (`Game_mainLoop`, see
+function-map.md) does:
+
+1. `t0` = milliseconds now.
+2. Wait for the next VBlank.
+3. Run one game update (`Game_frame`): units move one step.
+4. If less than 20 ms passed since `t0`, wait for one more VBlank.
+
+The 20 ms check is meant to hold the game at 30 updates a second. But `t0` is taken before the
+first wait, so when an update ends just before a VBlank, the next iteration's first wait is short,
+the 20 ms is already used up, and the update after it comes only 1 VBlank later. When an update runs
+long, the gap is 3 VBlanks. Over 1,850 frames of the King walking on mp01 in DeSmuME, the gaps
+between updates were 2 VBlanks 80% of the time, 1 VBlank 13%, and 3 VBlanks 7%: 30.7 updates per
+second on average. That is the ~3% "faster than the table" seen before. (The 66 px/s figure noted
+earlier was a rough screen measurement and is superseded by the RAM values above.)
+
+How often the short gap happens depends on how long each update takes, which depends on how much
+is on screen and how fast the CPU is. DeSmuME's ARM9 timing is not cycle-exact, so the real DS may
+land on a different average. (guess: real hardware is slower per frame, so closer to 30.)
+
+**What we do.** The sim keeps a fixed 30 Hz tick: lockstep needs a fixed rate, and 30 Hz is the
+rate the game's loop aims for. Each tick moves exactly what one game update moves.
 
 ## Template for new sections
 

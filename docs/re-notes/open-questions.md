@@ -9,7 +9,7 @@
 | Terrain codes: which ones block walking and building | known: 0 open, 1 tree, 2 rough, 3 water, 5 cliff. Test passability in the emulator | open (M2) |
 | Object layer (trees, rocks) | trees are metatiles baked at load (formats.md "Trees"); rocks/cliffs are plain ground tiles | **answered** |
 | How chopping a tree changes its tiles | mp03 in the emulator showed a half-chopped tree as metatile 186; watch `Map_setTerrain` writes while a builder chops | open (M4) |
-| Original sim tick rate | find the main loop: what it waits on per iteration (VBlank = 60 Hz) and whether logic runs every frame or every N | open |
+| Original sim tick rate | no fixed tick: the main loop aims for 30 Hz but sometimes updates 1 VBlank apart, depending on frame cost (formats.md "Movement speed and update rate") | **answered** |
 | Does combat use randomness? | find the game RNG (often an LCG `x = x * A + C`); see who calls it from combat code | open |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | look for `>> 12` vs `>> 16` after multiplies | open |
