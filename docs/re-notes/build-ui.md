@@ -64,3 +64,14 @@ draws a site under construction is **not traced**: we draw the finished picture 
 - Strip icons of Imperial, Earth and Aliens units; the strip's exact end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
 - Stables and Shipyard lists; Wall and Bridge placement; the blue order strip; hero spells.
 - Construction-site look; the game's placement rules beyond "walkable and free".
+
+## Builder at work (emulator, 2026-10-08)
+
+- **Chopping**: the Builder stands next to the tree, faces it and loops its attack swing: six poses
+  (the five attack frames of `<f>_eng_2`, then the idle pose), 4 VBlanks each, 24 VBlanks a cycle,
+  for the whole chop. confirmed (frame hashes repeat exactly every 24 VBlanks). Ours does the same.
+- **Carrying** a load back: the ordinary walk; no load is drawn on the unit. likely (no carry sheet exists:
+  the King Builder has only `_eng_0/1/2`).
+- **Building**: the site is a cloud of dust with LEGO bricks flying out, under a progress bar, not the
+  building itself. The Builder's pose inside the cloud couldn't be seen; ours plays the same swing as
+  chopping (guess). The dust cloud isn't built yet (ours draws the building see-through).

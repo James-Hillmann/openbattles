@@ -442,6 +442,30 @@ function drawFog() {
 
 // --- Buildings ------------------------------------------------------------------
 
+/** Centre (Fx) of what a Builder is working on, when it stands next to it: the tree it chops or the site it builds. */
+function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
+  const g = world.grid;
+  const job = u.job;
+  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build')) return null;
+  const here = unitCell(world, u);
+  const [hx, hy] = [here % g.width, Math.floor(here / g.width)];
+  let cx: number, cy: number, size: number;
+  if (job.kind === 'chop') {
+    if (g.cells[job.tree] !== TERRAIN_TREE) return null;
+    [cx, cy, size] = [job.tree % g.width, Math.floor(job.tree / g.width), 1];
+  } else {
+    const site = world.units.find((b) => b.id === job.site);
+    if (!site || isFinished(site)) return null;
+    const o = unitCell(world, site);
+    [cx, cy, size] = [o % g.width, Math.floor(o / g.width), site.size];
+  }
+  // Next to it (Chebyshev distance 1 from the rectangle), as the sim requires before work counts.
+  const dx = hx < cx ? cx - hx : hx >= cx + size ? hx - (cx + size - 1) : 0;
+  const dy = hy < cy ? cy - hy : hy >= cy + size ? hy - (cy + size - 1) : 0;
+  if (Math.max(dx, dy) !== 1) return null;
+  return { x: fx(cx * CELL_W + (size * CELL_W) / 2), y: fx(cy * CELL_H + (size * CELL_H) / 2) };
+}
+
 /** A building's footprint in world pixels (top-left cell is where the sim keeps it). */
 function footprint(u: World['units'][number]) {
   const g = world.grid!;
@@ -757,6 +781,13 @@ app.ticker.add((t) => {
       a.swing = u.lastAttack;
       if (target) Object.assign(a, face(target.x - u.x, target.y - u.y));
       a.state = attack(animTime);
+    }
+    // Builders at work swing their attack frames over and over, facing the tree or site
+    // (emulator: 6 poses x 4 VBlanks, looping, while chopping; that building looks the same is a guess).
+    const work = !moving && !u.mv ? workSpot(u) : null;
+    if (work && !type.model) {
+      Object.assign(a, face(work.x - u.x, work.y - u.y));
+      if (a.state.mode !== 'attack') a.state = attack(animTime);
     }
     if (type.model) {
       // The game keeps one controller per clip and switches between idle, move and attack.
