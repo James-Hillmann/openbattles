@@ -52,11 +52,17 @@ The unit and building table. 75,195 bytes decompressed.
   creating a different object type for each (probably unit / building / other).
 - Records contain many `0xA1` / `0xA2A2` filler bytes, likely "unset" markers from
   the export tool. Treat as padding until proven otherwise.
-- The first record has a run of small u16s at +0x5C: 500, 600, 1000, 1000, 0xFFFF, 40, 10.
-  These look like stats (cost? HP? range?). **guess**. Cross-check against in-game values in M4.
-- A **string table** at the end (from ~0xFA08) holds each entity's name and its
-  sprite or model path, e.g. a name followed by `Sprites/k_hrm` or `Models/K_Ballista`.
-  How records point into it is not known yet.
+- **+0x00 u16: offset of the entity's name** in the string table at 0xFA08 (confirmed). Each name is
+  followed by its sprite or model path, e.g. `K_King` then `Sprites/k_hrm`.
+- +0x04 u16: index within the table. +0x06 u16: a global id (0x182 for `K_King`).
+- **+0x0C u16: move speed** (likely). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
+  819 Gryphon. In the emulator the King and a 410-speed unit both covered about 3.1 cells per second,
+  measured in cells (24x16 px), not pixels. So movement is isotropic in cell space. At 30 updates a
+  second, 410/4096 cells per update gives 3.0 cells/s; the measured 3.1 leaves a 3% gap to explain.
+- +0x5E u16 cost in bricks (King 500, Engineer 50, Swordsman 100), confirmed for the King against the
+  in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed the same way.
+  +0x60 u16 maybe build time (600, 150, 270). +0x66 u16 projectile id (0xFFFF = melee). guess.
+- +0x6F u8 attack range in cells? (1 melee, 5 Archer, 7 Ballista). +0x70 u8 damage? guess.
 
 ### Factions found in the name table
 
