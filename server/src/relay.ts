@@ -9,6 +9,7 @@ import {
   MIN_PLAYERS,
   ROOM_SIZE,
   TEAM_COLORS,
+  validArmy,
   type ClientMsg,
   type ErrorCode,
   type GameSettings,
@@ -187,6 +188,8 @@ export function startRelay(opts: RelayOptions): WebSocketServer {
           case 'me': {
             if (Number.isInteger(msg.color) && msg.color! >= 0 && msg.color! < TEAM_COLORS && !players(r).some((p) => p !== me && p.color === msg.color)) me.color = msg.color!;
             if (FACTION_PREFIXES.includes(msg.faction as never)) me.faction = msg.faction!;
+            if (msg.army === null) delete me.army;
+            else if (validArmy(msg.army)) me.army = [...msg.army];
             if (typeof msg.ready === 'boolean') me.ready = msg.ready;
             return broadcastLobby(r);
           }

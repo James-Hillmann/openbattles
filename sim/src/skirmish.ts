@@ -1,4 +1,4 @@
-import { PLAYING, type GameRules, type Player, type PlayerId, type World } from './state';
+import { PLAYING, type GameRules, type Player, type PlayerArmy, type PlayerId, type World } from './state';
 import { cellCenterX, cellCenterY } from './terrain';
 import { createWorld, placeBuilding, spawnUnit, type UnitType, type WorldInit } from './world';
 import { freeCellNear } from './economy';
@@ -28,6 +28,8 @@ export interface SkirmishOptions {
   bricks: number;
   /** Map slot per player: slots[playerId]. Fixed starting positions put player 0 on slot 0, player 1 on slot 1. */
   slots: number[];
+  /** Each player's picked army (the army screen), if any: limits what they build and train. */
+  armies?: (PlayerArmy | undefined)[];
   /** Unit type for a player's faction entity of this role and index, or null when there is none. */
   typeFor: (player: PlayerId, role: number, index: number) => UnitType | null;
 }
@@ -59,7 +61,10 @@ export function startSpawns(records: readonly StartSpawn[], slots: readonly numb
 
 /** A new skirmish world: players, rules and each player's starting units and buildings. */
 export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, records: readonly StartSpawn[], opts: SkirmishOptions): World {
-  const players: Player[] = opts.slots.map((_, id) => ({ id, team: id, bricks: opts.bricks, status: PLAYING, start: -1, reservedPop: 0, reservedStars: 0 }));
+  const players: Player[] = opts.slots.map((_, id) => {
+    const army = opts.armies?.[id];
+    return { id, team: id, bricks: opts.bricks, status: PLAYING, start: -1, reservedPop: 0, reservedStars: 0, ...(army ? { army: { units: [...army.units], base: army.base } } : {}) };
+  });
   const w = createWorld({ ...init, players, rules: opts.rules });
   const width = init.grid?.width ?? 0;
   for (const s of startSpawns(records, opts.slots, opts.prebuilt)) {

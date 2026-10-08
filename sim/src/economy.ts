@@ -241,8 +241,14 @@ export function canPlace(w: World, t: EntityType, cx: number, cy: number): boole
 export type SpawnFn = (w: World, owner: PlayerId, t: EntityType, cell: number) => Unit;
 export type PlaceFn = (w: World, owner: PlayerId, t: EntityType, cx: number, cy: number, finished: boolean) => Unit;
 
-/** A faction's strip only lists its own entities (build-ui.md); types without a faction are unrestricted. */
-const sameFaction = (w: World, by: Unit, t: EntityType): boolean => {
+/**
+ * May `player` build or train type t from `by`? With an army (picked on the army screen),
+ * units must be in it and buildings of its base faction. Without one, a faction's strip only
+ * lists its own entities (build-ui.md); types without a faction are unrestricted.
+ */
+const allowed = (w: World, player: PlayerId, by: Unit, t: EntityType): boolean => {
+  const army = getPlayer(w, player)?.army;
+  if (army) return t.role >= ROLE_BASE ? t.faction === army.base : army.units.includes(t.kind);
   const f = w.types[by.kind]?.faction;
   return f === undefined || t.faction === undefined || f === t.faction;
 };
@@ -251,7 +257,7 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const t = w.types[type];
   const p = getPlayer(w, player);
   const builders = ownBuilders(w, player, ids);
-  if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !sameFaction(w, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
+  if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
   for (const u of builders) setBuildJob(w, u, site);
@@ -274,7 +280,7 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const t = w.types[type];
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
-  if (!(TRAINS[b.role] ?? []).includes(t.role) || !sameFaction(w, b, t) || b.queue.length >= QUEUE_MAX) return;
+  if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
   // One hero at a time: the Castle only offers it while the hero is down. guess
   if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
   if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;

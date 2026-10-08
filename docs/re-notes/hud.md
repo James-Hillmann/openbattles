@@ -79,8 +79,9 @@ Checked 2026-10-08 against savestates with the Builder (build strip open) and th
   Palette `UI/WorldViewTop_Back.NCLR` bank 7 (red). `blitTile` masks tiles to 10 bits, so it can't
   draw cells past tile 1023 (rows 7-9 of icons): read `pixels` directly. confirmed.
 - Icon indices: Castle 9, LumberMill 10, Mine 11, Farm 12, Barracks 13, Stables 14, Tower 15, Wall 96,
-  King (hero) 104, Builder 105, Bridge 149, Shipyard 151. confirmed for these, from both screens. No
-  icon field in `Entities.ebp` or table in ARM9 was found. The mapping is still open.
+  King (hero) 104, Builder 105, Bridge 149, Shipyard 151. confirmed for these, from both screens.  The
+  mapping is the ARM9 icon table at 0x0214E400 (armies.md); the King's hero and builder strip icons are
+  their table cells + 104.
 - Strip order for the King Builder: Castle, Farm, Lumber Mill, Mine, Barracks, Stables, Shipyard, Tower,
   Wall, Bridge; for the Castle: hero, Builder. Icons are 24x24 at bottom-screen (12 + 24k, 40). confirmed.
 - **Bottom-strip texture**: `UI/AllInOne/UI_MainCastle.NCBR` (256x256, 4bpp) sits at texture VRAM 0 and

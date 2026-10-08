@@ -5,6 +5,8 @@ import {
   buildMapBundle,
   FLASH_BANK,
   buildUnitBundle,
+  buildArmyBundle,
+  type ArmyBundle,
   modelClips,
   hex,
   listMaps,
@@ -27,6 +29,9 @@ const DEFAULT_TEAMS = [0, 1];
 /** Team whose selection outline is yellow (the local player's, red). */
 const LOCAL_TEAM = 0;
 
+/** Characters an army can field beyond the six factions' own (bonus heroes, Dwarves, Trolls, ...). */
+let extraUnits: string[] = [];
+
 /** Units in the given team colors; `localTeam` gets the yellow selection outline. */
 function units(r: UnpackedRom, teams: readonly number[], localTeam: number): UnitBundle {
   const banks = [...teams.flatMap((t) => [2 * t, 2 * t + 1]), FLASH_BANK];
@@ -35,8 +40,11 @@ function units(r: UnpackedRom, teams: readonly number[], localTeam: number): Uni
     banks,
     (pal) => applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, localTeam),
     (e) => modelClips(r.arm9, r.header.arm9.ramAddress, r.header.gameCode, e.entityIndex),
+    extraUnits,
   );
 }
+
+const rgbaBuffers = (images: Record<string, { data: Uint8ClampedArray }>) => Object.values(images).map((i) => i.data.buffer as ArrayBuffer);
 
 /**
  * Identifies the ROM for the lobby: players with different dumps would build different
@@ -70,6 +78,7 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: 'loaded'; summary: RomSummary }
   | { type: 'units'; units: UnitBundle }
+  | { type: 'army'; army: ArmyBundle }
   | { type: 'map'; bundle: MapBundle; hud: HudBundle }
   | { type: 'ground'; name: string; ground: Rgba }
   | { type: 'error'; error: string };
@@ -99,8 +108,11 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
           inventory: rom.inventory,
         },
       });
+      const army = buildArmyBundle(rom);
+      extraUnits = [...new Set(army.choices.flat())].filter((n) => !/^[KWPIEA]_/.test(n));
+      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons)]);
       const u = units(rom, DEFAULT_TEAMS, LOCAL_TEAM);
-      portraitIds = [...new Set([...u.sprites, ...u.buildings].map((s) => s.name))];
+      portraitIds = [...new Set([...u.sprites, ...u.models, ...u.buildings].map((s) => s.name))];
       post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
     } else if (e.data.type === 'units') {
       if (!rom) throw new Error('No ROM loaded');

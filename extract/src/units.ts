@@ -48,7 +48,8 @@ export type SpriteLayout = 'hero' | 'infantry' | 'mounted';
 export function spriteLayout(asset: string): SpriteLayout | null {
   if (!asset.startsWith('Sprites/')) return null;
   if (asset.endsWith('_bld_mtd')) return 'mounted';
-  if (/_(eng|mel|rgd)$/.test(asset)) return 'infantry';
+  // Bonus characters with the same three-sheet (_0/_1/_2) files: police, criminals, dwarf and troll axemen.
+  if (/_(eng|mel|rgd|pol|crm|axe)$/.test(asset)) return 'infantry';
   return 'hero';
 }
 
@@ -250,6 +251,8 @@ export function buildUnitBundle(
   banks: readonly number[],
   fixPalette?: (pal: Uint8Array) => void,
   clipsFor: (e: EntityInfo) => ModelClips | null = () => null,
+  /** More units to draw beyond the six factions' (e.g. the bonus characters an army can field). */
+  extra: readonly string[] = [],
 ): UnitBundle {
   const need = (p: string) => {
     const d = file(p);
@@ -258,7 +261,7 @@ export function buildUnitBundle(
   };
   const records = parseEntityRecords(need('BP/Entities.ebp'));
   const entities = parseEntities(records);
-  const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name);
+  const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name) || extra.includes(e.name);
   const palette = decodePalette(need(UNIT_PALETTE));
   fixPalette?.(palette);
   const sprites = buildUnitSprites(entities, (p) => {
@@ -270,7 +273,8 @@ export function buildUnitBundle(
   const models = buildModelUnits(modelUnits, file, palette, banks.filter((b) => b % 2 === 0), clipsFor);
   const stats: Record<string, UnitStats> = {};
   const names = [...sprites, ...models].map((s) => s.name);
-  for (const name of new Set(names)) {
+  // Extra units get stats even when we can't draw them yet, so they still play.
+  for (const name of new Set([...names, ...extra])) {
     const rec = records.find((r) => r.name === name);
     if (rec?.kind === 0) stats[name] = unitStats(records, rec);
   }

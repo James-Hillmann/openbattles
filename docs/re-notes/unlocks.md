@@ -42,6 +42,5 @@ Space, Santa.
 
 - All six factions are pickable in the client already; nothing checks unlocks.
 - Red bricks are game modifiers, not characters: they stay off by default.
-- The bonus characters are used through the game's custom army builder
-  (`CustomFactionBlueprint`), which we haven't built yet. When we do, it offers
-  every minifig.
+- The bonus characters are used through the army screen (armies.md), which offers
+  every minifig in every slot it fits.

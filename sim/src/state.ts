@@ -222,6 +222,19 @@ export interface Player {
   /** Population and star slots taken by units still in a production queue (team +0xEE / +0xEF). */
   reservedPop: number;
   reservedStars: number;
+  /**
+   * The player's army from the army select screen (docs/re-notes/armies.md), or undefined to
+   * use the faction of whatever does the building or training (the old sandbox rule).
+   */
+  army?: PlayerArmy;
+}
+
+/** A picked army: the units it trains and the faction whose buildings it builds. */
+export interface PlayerArmy {
+  /** Entity index per unit slot (hero, builder, close combat, ranged, mounted, 3 specials, transport); -1 for none. */
+  units: number[];
+  /** Faction prefix of the army's buildings (K, W, P, I, E, A). */
+  base: string;
 }
 
 /**

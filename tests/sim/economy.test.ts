@@ -185,6 +185,29 @@ describe('economy', () => {
     expect(bricks(w)).toBe(4950);
   });
 
+  it("with a picked army, buildings train only the army's units and Builders build its base faction", () => {
+    const w = world(5000);
+    w.types[CASTLE.kind] = { ...CASTLE, faction: 'K' };
+    const castle = placeBuilding(w, 0, CASTLE, 10, 10);
+    const P_BUILDER = t(22, 1, 150, 45, 150, 1, { faction: 'P' });
+    const K_BUILDER = t(23, 1, 150, 50, 150, 1, { faction: 'K' });
+    const P_FARM = t(24, 10, 350, 75, 360, 2, { faction: 'P' });
+    const K_FARM = t(25, 10, 350, 75, 360, 2, { faction: 'K' });
+    for (const x of [P_BUILDER, K_BUILDER, P_FARM, K_FARM]) w.types[x.kind] = x;
+    // A King army with the Pirates' builder: the King's Castle trains it, and it builds King buildings.
+    getPlayer(w, 0)!.army = { units: [0, P_BUILDER.kind, -1, -1, -1, -1, -1, -1, -1], base: 'K' };
+    const builder = spawnUnit(w, 0, cellCenterX(15), cellCenterY(15), P_BUILDER);
+    run(w, 1, [
+      { kind: 'train', building: castle.id, type: K_BUILDER.kind },
+      { kind: 'train', building: castle.id, type: P_BUILDER.kind },
+      { kind: 'build', unitIds: [builder.id], type: P_FARM.kind, cx: 18, cy: 18 },
+      { kind: 'build', unitIds: [builder.id], type: K_FARM.kind, cx: 18, cy: 18 },
+    ]);
+    expect(castle.queue).toEqual([P_BUILDER.kind]);
+    expect(bricks(w)).toBe(5000 - 45 - 75);
+    expect(w.units.some((u) => u.kind === K_FARM.kind)).toBe(true);
+  });
+
   it('cannot train past the population cap', () => {
     const w = world(5000);
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);
