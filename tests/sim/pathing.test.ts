@@ -237,7 +237,7 @@ describe('moving on a map', () => {
 
   it('is deterministic (hash pinned; update deliberately when sim rules change)', () => {
     expect(hashWorld(run().w)).toBe(hashWorld(run().w));
-    expect(hashWorld(run().w).toString(16)).toMatchInlineSnapshot(`"5851ec51"`);
+    expect(hashWorld(run().w).toString(16)).toMatchInlineSnapshot(`"7c181295"`);
   });
 });
 

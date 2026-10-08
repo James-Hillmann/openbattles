@@ -114,6 +114,7 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
   Only the second list is ever non-empty: the cells where a Mine can be built. The marking on the
   ground (cracked earth) is already part of the ground tiles; the emulator shows nothing else drawn there
   before a Mine is built. That each site is the top-left of a 2x2 footprint is likely, from where the crack sits.
+- `EVNT` (likely): start spawns per slot and map-start pickups; layout in [skirmish.md](skirmish.md).
 - `MARK` (guess): lists of `L`, u8 type, u8 count, count x (x, y, 0). mp01 has type 0 points along the map
   edges and type 3 points scattered inland. Possibly AI or pickup spots; nothing is drawn at them on load.
 

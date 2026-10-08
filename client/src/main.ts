@@ -3,7 +3,10 @@ import {
   INPUT_DELAY_TICKS,
   TICK_MS,
   cloneWorld,
+  createFog,
   createWorld,
+  isVisible,
+  updateFog,
   fx,
   fxToFloat,
   hashWorld,
@@ -17,6 +20,7 @@ import {
   spreadCells,
   type Fx,
   type MeleeBonusTable,
+  type Fog,
   type ScheduledCommand,
   type UnitType as SimUnitType,
   type TerrainGrid,
@@ -77,6 +81,9 @@ const unitLayer = new Container();
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
+/** Fog of war over unexplored cells (above units, below bars). */
+const fogLayer = new Graphics();
+camera.addChild(fogLayer);
 /** Health bars and the box-select rectangle draw above units. */
 const overlay = new Graphics();
 camera.addChild(overlay);
@@ -112,8 +119,8 @@ let combatBonus: MeleeBonusTable | null = null;
 
 function simType(s: UnitStats | undefined): SimUnitType {
   if (!s) return {};
-  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
-  return { kind: index, speed, hp, priority, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+  const { index, speed, hp, priority, damage, damageRand, cooldown, minRange, maxRange, sight, projectile, moves, layer, role } = s;
+  return { kind: index, speed, hp, priority, moves, layer, role, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
 }
 /** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
 const unitKind = new Map<number, string>();
@@ -185,6 +192,10 @@ function spawnLineups(cx: number, cy: number) {
 let mapSize = { w: 600, h: 440 };
 let mapGrid: TerrainGrid | null = null;
 let minimap: Rgba | undefined;
+/** The local player's fog (presentation only, not part of the lockstep state). */
+let fog: Fog | null = null;
+/** Most common colour of the game's fog texture (FoWTileset), measured from a screenshot. The texture itself isn't drawn yet. */
+const FOG_COLOR = 0x98a8b0;
 /** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
 const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 
@@ -195,6 +206,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
+  fog = createFog(b.width, b.height);
   spawnLineups(mapSize.w / 2, mapSize.h / 2);
   centerOn(mapSize.w / 2, mapSize.h / 2);
 }
@@ -291,11 +303,36 @@ app.canvas.addEventListener('contextmenu', (e) => {
   if (unitIds.length === 0) return;
   // Sprites are anchored near the feet, so hit-test the box above them.
   const enemy = world.units.find(
-    (u) => u.owner !== LOCAL_PLAYER && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
+    (u) => u.owner !== LOCAL_PLAYER && !hiddenByFog(u) && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
   );
   const cmd = enemy ? { kind: 'attack' as const, unitIds, target: enemy.id } : { kind: 'move' as const, unitIds, x: fx(px), y: fx(py) };
   pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd });
 });
+
+// --- Fog of war (sim/src/fog.ts; docs/re-notes/fog.md) --------------------------
+
+/** Enemy units outside our vision aren't drawn. guess: not yet checked in the emulator. */
+function hiddenByFog(u: World['units'][number]): boolean {
+  if (!fog || u.owner === LOCAL_PLAYER || u.cell < 0) return false;
+  return !isVisible(fog, u.cell % fog.width, Math.floor(u.cell / fog.width));
+}
+
+/** Flat grey over every cell no unit has seen yet (the game draws its FoWTileset texture there, with soft edges). */
+function drawFog() {
+  fogLayer.clear();
+  if (!fog) return;
+  for (let cy = 0; cy < fog.height; cy++) {
+    for (let cx = 0; cx < fog.width; cx++) {
+      if (fog.explored[cy * fog.width + cx]) continue;
+      // Merge runs of fogged cells in a row into one rectangle.
+      let end = cx;
+      while (end + 1 < fog.width && !fog.explored[cy * fog.width + end + 1]) end++;
+      fogLayer.rect(cx * CELL_W, cy * CELL_H, (end - cx + 1) * CELL_W, CELL_H);
+      cx = end;
+    }
+  }
+  fogLayer.fill(FOG_COLOR);
+}
 
 // --- Loop: fixed-step sim, interpolated render ---------------------------------
 
@@ -319,6 +356,7 @@ app.ticker.add((t) => {
     const due = pending.filter((c) => c.tick === world.tick);
     for (const c of due) pending.splice(pending.indexOf(c), 1);
     step(world, due);
+    if (fog) updateFog(fog, world, LOCAL_PLAYER);
     tickEl.textContent = String(world.tick);
     hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
   }
@@ -335,8 +373,14 @@ app.ticker.add((t) => {
   }
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   selection.prune((id) => world.units.some((u) => u.id === id));
+  drawFog();
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
+    if (hiddenByFog(u)) {
+      const hidden = unitSprites.get(u.id);
+      if (hidden) hidden.visible = false;
+      continue;
+    }
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
@@ -386,6 +430,7 @@ app.ticker.add((t) => {
       s.scale.x = a.flip ? -1 : 1;
     }
     unitAnim.set(u.id, a);
+    s.visible = true;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.

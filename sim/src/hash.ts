@@ -35,6 +35,9 @@ export function hashWorld(w: World): number {
     mix(u.lastHit);
     mix(u.born);
     mix(u.priority);
+    mix(u.moves);
+    mix(u.layer);
+    mix(u.role);
     mix(u.path.length);
     for (const c of u.path) mix(c);
     if (!w.grid) continue; // bare test worlds have no occupancy or plotters
@@ -61,5 +64,8 @@ export function hashWorld(w: World): number {
     for (const c of w.grid.cells) mix(c);
   }
   if (w.occ) for (const c of w.occ) mix(c);
+  mix(w.players.length);
+  for (const p of w.players) for (const v of [p.id, p.team, p.bricks, p.status, p.start]) mix(v);
+  mix(w.rules ? w.rules.mode : -1);
   return h >>> 0;
 }

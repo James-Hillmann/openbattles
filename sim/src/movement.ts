@@ -38,7 +38,9 @@ const cy = (g: TerrainGrid, c: number) => Math.floor(c / g.width);
 /** Chebyshev distance between two cells (game: 0x020F29F4). */
 const cheb = (g: TerrainGrid, a: number, b: number) =>
   Math.max(Math.abs(cx(g, a) - cx(g, b)), Math.abs(cy(g, a) - cy(g, b)));
-const walkableCell = (g: TerrainGrid, c: number) => isWalkable(g, cx(g, c), cy(g, c));
+const walkableCell = (g: TerrainGrid, u: Unit, c: number) => isWalkable(g, cx(g, c), cy(g, c), u.moves);
+/** Index of cell c in World.occ for u's occupancy layer. */
+const slot = (w: World, u: Unit, c: number) => u.layer * w.grid!.width * w.grid!.height + c;
 
 /** The cell a unit's position is in (game: 0x0205BDE4). */
 export const unitCell = (w: World, u: Unit): number => cellAt(w.grid!, u.x, u.y);
@@ -57,8 +59,8 @@ function findUnit(w: World, id: number): Unit | undefined {
 }
 
 /** The other unit holding cell c, if any. */
-function occupant(w: World, u: Unit | null, c: number): Unit | undefined {
-  const id = w.occ![c]!;
+function occupant(w: World, u: Unit, c: number): Unit | undefined {
+  const id = w.occ![slot(w, u, c)]!;
   if (id === 0 || (u && id === u.id)) return undefined;
   return findUnit(w, id);
 }
@@ -69,9 +71,9 @@ function occupant(w: World, u: Unit | null, c: number): Unit | undefined {
  * and cells another unit holds.
  */
 function claim(w: World, u: Unit, c: number): boolean {
-  if (!walkableCell(w.grid!, c) || occupant(w, u, c)) return false;
-  if (u.cell >= 0 && w.occ![u.cell] === u.id) w.occ![u.cell] = 0;
-  w.occ![c] = u.id;
+  if (!walkableCell(w.grid!, u, c) || occupant(w, u, c)) return false;
+  if (u.cell >= 0 && w.occ![slot(w, u, u.cell)] === u.id) w.occ![slot(w, u, u.cell)] = 0;
+  w.occ![slot(w, u, c)] = u.id;
   u.cell = c;
   return true;
 }
@@ -80,15 +82,15 @@ function claim(w: World, u: Unit, c: number): boolean {
 export function placeUnit(w: World, u: Unit): void {
   if (!w.grid || !w.occ) return;
   const c = unitCell(w, u);
-  if (c >= 0 && c < w.occ.length && w.occ[c] === 0 && walkableCell(w.grid, c)) {
-    w.occ[c] = u.id;
+  if (c >= 0 && c < w.grid.width * w.grid.height && w.occ[slot(w, u, c)] === 0 && walkableCell(w.grid, u, c)) {
+    w.occ[slot(w, u, c)] = u.id;
     u.cell = c;
   }
 }
 
 /** Free a unit's cell (death or removal). */
 export function removeUnit(w: World, u: Unit): void {
-  if (w.occ && u.cell >= 0 && w.occ[u.cell] === u.id) w.occ[u.cell] = 0;
+  if (w.occ && u.cell >= 0 && w.occ[slot(w, u, u.cell)] === u.id) w.occ[slot(w, u, u.cell)] = 0;
   u.cell = -1;
 }
 
@@ -200,7 +202,7 @@ function segmentedUpdate(w: World, u: Unit, m: Mover, goal: number): number {
     const sx = (dx * k) >> 12; // arithmetic shift: rounds toward -inf like the game
     const sy = (dy * k) >> 12;
     const x = cx(g, here) + sx, y = cy(g, here) + sy;
-    const found = ringSearch(g, y * g.width + x, Math.min(len, 5), (c) => walkableCell(g, c) && !occupant(w, u, c));
+    const found = ringSearch(g, y * g.width + x, Math.min(len, 5), (c) => walkableCell(g, u, c) && !occupant(w, u, c));
     if (found >= 0) wp = found;
   }
   m.wp = wp;
@@ -221,7 +223,7 @@ const isMoving = (u: Unit): boolean => u.mv !== null;
  */
 function findBlocker(w: World, u: Unit, m: Mover, only?: Unit): Unit | null | undefined | boolean {
   const g = w.grid!;
-  if (!walkableCell(g, m.blocked)) return only ? true : null;
+  if (!walkableCell(g, u, m.blocked)) return only ? true : null;
   const e = occupant(w, u, m.blocked);
   if (only) return e === only;
   if (!e) return undefined;
@@ -329,7 +331,7 @@ function sidestepStep(w: World, u: Unit, m: Mover, goal: number): number {
     const [ox, oy] = row[SIDE_ENTRY[m.side]!]!;
     const x = cx(g, here) + ox, y = cy(g, here) + oy;
     const c = y * g.width + x;
-    if (isWalkable(g, x, y) && !occupant(w, u, c)) {
+    if (isWalkable(g, x, y, u.moves) && !occupant(w, u, c)) {
       m.wp = c;
       return P_WAYPOINT;
     }
@@ -379,7 +381,7 @@ function sideUpdate(w: World, u: Unit, m: Mover, goal: number): number {
 
 /** Cell cost for the game's path search (0x02082BC4): 200 = impassable. */
 function pathCost(w: World, u: Unit, c: number): number {
-  if (!walkableCell(w.grid!, c)) return 200;
+  if (!walkableCell(w.grid!, u, c)) return 200;
   const e = occupant(w, u, c);
   if (!e) return 1;
   return isMoving(e) ? 3 : 150;

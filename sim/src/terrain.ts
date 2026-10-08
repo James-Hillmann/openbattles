@@ -13,14 +13,30 @@ export interface TerrainGrid {
 }
 
 /**
- * Terrain codes units can stand on. Checked in the emulator: forest (1), water (3)
- * and rock plateaus (5) stop a walking hero at their edge; open (0) and rough (2)
- * ground are walked on. See docs/re-notes/formats.md.
+ * Which terrain codes a unit may enter: bit n set = code n allowed, for codes 0-3
+ * (open, tree, rough, water). Each entity record has one flag byte per code
+ * (+0x16 open, +0x19 tree, +0x17 rough, +0x18 water), read by the game's terrain
+ * check 0x02001510. Codes 4 and 5 (cliff) are never enterable; codes above 5 always
+ * are. See docs/re-notes/skirmish.md.
  */
-export const isWalkableCode = (code: number): boolean => code === 0 || code === 2;
+export type TerrainMask = number;
+/** Foot soldiers, heroes, siege: open and rough ground. Checked in the emulator (formats.md). */
+export const MOVES_GROUND: TerrainMask = 0b0101;
+/** Ships and shipyards: water only. */
+export const MOVES_WATER: TerrainMask = 0b1000;
+/** Gryphon/dragon-type flyers: open, trees, rough ground and water. */
+export const MOVES_FLYING: TerrainMask = 0b1111;
 
-export function isWalkable(g: TerrainGrid, cx: number, cy: number): boolean {
-  return cx >= 0 && cy >= 0 && cx < g.width && cy < g.height && isWalkableCode(g.cells[cy * g.width + cx]!);
+/** Build a mask from an entity record's four terrain flags (+0x16 open, +0x17 rough, +0x18 water, +0x19 tree). */
+export const terrainMask = (open: number, rough: number, water: number, tree: number): TerrainMask =>
+  (open ? 1 : 0) | (tree ? 2 : 0) | (rough ? 4 : 0) | (water ? 8 : 0);
+
+/** The game's per-code check (0x02001510). */
+export const isWalkableCode = (code: number, moves: TerrainMask = MOVES_GROUND): boolean =>
+  code > 5 ? true : code >= 4 ? false : ((moves >> code) & 1) === 1;
+
+export function isWalkable(g: TerrainGrid, cx: number, cy: number, moves: TerrainMask = MOVES_GROUND): boolean {
+  return cx >= 0 && cy >= 0 && cx < g.width && cy < g.height && isWalkableCode(g.cells[cy * g.width + cx]!, moves);
 }
 
 /** Cell containing a world position (px). Positions are never negative on a map. */
@@ -36,12 +52,12 @@ const DY = [-1, 0, 1, 0, -1, 1, 1, -1];
  * Can a unit step from cell (x, y) in direction d? Diagonals may pass between
  * two blocked cells, as in the game's path search (0x02082078 has no corner check).
  */
-function canStep(g: TerrainGrid, x: number, y: number, d: number): boolean {
-  return isWalkable(g, x + DX[d]!, y + DY[d]!);
+function canStep(g: TerrainGrid, x: number, y: number, d: number, moves: TerrainMask): boolean {
+  return isWalkable(g, x + DX[d]!, y + DY[d]!, moves);
 }
 
-/** Every cell a unit standing in one of `starts` can walk to (1 = reachable). */
-export function reachableFrom(g: TerrainGrid, starts: readonly number[]): Uint8Array {
+/** Every cell a unit standing in one of `starts` can move to (1 = reachable). */
+export function reachableFrom(g: TerrainGrid, starts: readonly number[], moves: TerrainMask = MOVES_GROUND): Uint8Array {
   const out = new Uint8Array(g.width * g.height);
   const queue: number[] = [];
   for (const s of starts) if (!out[s]) (out[s] = 1), queue.push(s);
@@ -50,7 +66,7 @@ export function reachableFrom(g: TerrainGrid, starts: readonly number[]): Uint8A
     const x = cur % g.width;
     const y = (cur - x) / g.width;
     for (let d = 0; d < 8; d++) {
-      if (!canStep(g, x, y, d)) continue;
+      if (!canStep(g, x, y, d, moves)) continue;
       const ni = (y + DY[d]!) * g.width + x + DX[d]!;
       if (!out[ni]) (out[ni] = 1), queue.push(ni);
     }
@@ -65,7 +81,14 @@ export function reachableFrom(g: TerrainGrid, starts: readonly number[]): Uint8A
  * reachable area so a click on water or an island still spreads the group
  * along the near shore instead of stacking it on one cell).
  */
-export function spreadCells(g: TerrainGrid, cx: number, cy: number, count: number, allowed?: Uint8Array): number[] {
+export function spreadCells(
+  g: TerrainGrid,
+  cx: number,
+  cy: number,
+  count: number,
+  allowed?: Uint8Array,
+  moves: TerrainMask = MOVES_GROUND,
+): number[] {
   const out: number[] = [];
   const seen = new Uint8Array(g.width * g.height);
   const start = cy * g.width + cx;
@@ -76,7 +99,7 @@ export function spreadCells(g: TerrainGrid, cx: number, cy: number, count: numbe
     const cur = queue[qi]!;
     const x = cur % g.width;
     const y = (cur - x) / g.width;
-    const walk = isWalkable(g, x, y) && (!allowed || allowed[cur] === 1);
+    const walk = isWalkable(g, x, y, moves) && (!allowed || allowed[cur] === 1);
     if (walk) out.push(cur);
     if (out.length > 0 && !walk) continue;
     for (let d = 0; d < 8; d++) {
