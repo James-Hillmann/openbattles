@@ -33,3 +33,14 @@ out/venv/bin/python tools/emu/ramdump.py game.nds out/boot.dst out/ram.bin
   256x384 screenshot) to select it.
 - Bars over units: lowering a unit's HP in RAM (unit +0x1A0, see `docs/re-notes/hud.md`) through
   `emu.memory` and screenshotting is how the lit-cell rule and color bands were measured.
+- Unit frames: King hero and builder idle, walk and timing match our sheets pixel for pixel
+  (see `docs/re-notes/formats.md`, "Unit animation timing"). To repeat:
+
+  ```sh
+  npx tsx extract/cli/sheets.ts 1 k_eng_0 k_eng_1 k_eng_2    # bank 1 = selected, red
+  out/venv/bin/python tools/emu/burst.py game.nds out/game.dst out/walk 120,68 60,150 120
+  out/venv/bin/python tools/emu/track.py out/walk 24 'out/png1/k_eng_*.png'
+  ```
+
+  With the profile from step 1, `Continue` x3 then `Start` (215,175) on the default map gives a King
+  skirmish with the builder at (120,68) and the hero at (144,100) on the bottom screen.

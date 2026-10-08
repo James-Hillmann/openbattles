@@ -55,10 +55,10 @@ The unit and building table. 75,195 bytes decompressed.
 - **+0x00 u16: offset of the entity's name** in the string table at 0xFA08 (confirmed). Each name is
   followed by its sprite or model path, e.g. `K_King` then `Sprites/k_hrm`.
 - +0x04 u16: index within the table. +0x06 u16: a global id (0x182 for `K_King`).
-- **+0x0C u16: move speed** (likely). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
-  819 Gryphon. In the emulator the King and a 410-speed unit both covered about 3.1 cells per second,
-  measured in cells (24x16 px), not pixels. So movement is isotropic in cell space. At 30 updates a
-  second, 410/4096 cells per update gives 3.0 cells/s; the measured 3.1 leaves a 3% gap to explain.
+- **+0x0C u16: move speed** (confirmed). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
+  819 Gryphon. A unit moves exactly speed/4096 cells per game update, as a straight line in cell
+  units (24x16 px). The ~3% extra seen in the emulator comes from the update rate, not the speed;
+  see "Movement speed and update rate" below.
 - +0x5E u16 cost in bricks (King 500, Engineer 50, Swordsman 100), confirmed for the King against the
   in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed the same way.
   +0x60 u16 maybe build time (600, 150, 270). +0x66 u16 projectile id (0xFFFF = melee). guess.
@@ -119,7 +119,14 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
 - **Cells are 24x16 pixels** (3x2 tiles of 8x8), so a 64x64 map is 1536x1024 px. confirmed.
 - Terrain codes in files: 0 open ground, 2 rough ground, 3 water, 5 cliff/plateau. At load the
   game adds **1 = tree** (see Trees). 0 and 3 confirmed from the emulator; 2 and 5 likely, from
-  where they sit on the rendered maps. Passability per code is still open (M2).
+  where they sit on the rendered maps. On mp01, 2 is the sandy ground around the lake and 5 the
+  raised rock plateaus.
+- **Walking (confirmed in the emulator, mp01):** the King was ordered into a forest, onto a plateau
+  and into the lake. Each time he stopped on the nearest open cell next to it (forest edge, the
+  plateau's near side, the shore). He walks on 0 and 2. So 1, 3 and 5 block walking. When the
+  target can't be reached, the unit goes to the closest reachable spot instead of refusing.
+  Building placement rules are still open. How the game picks its path is not decoded; the sim
+  uses its own A* (`sim/src/terrain.ts`), which matches the stopping behaviour above.
 - Ground ids >= 440 are **per-map detail metatiles**: id N reads entry N-440 of
   `BP/DetailTiles_<map>.tbp` (confirmed: with this rule mp01 and mp12 render with zero transparent
   pixels, and seams line up). In the tileset table, entries from 440 up are transparent filler.
@@ -162,15 +169,26 @@ never copy them into the repo.
 ## Unit sprites (confirmed)
 
 - `Sprites/<faction>_<role>_N.NCBR` are PMOC > NCGR-format data holding a **linear 4bpp bitmap**
-  (not 8x8 tiles), 128 px wide for most units.
-- Frames are **24x24**. Walk sheets (`*_1`) are 5x5 frames: rows are facings (back, back-right, right,
-  front-right, front), columns the walk cycle. Left-facing is the right-facing row mirrored.
-  `*_0` is a single 5-frame strip, `*_2` larger frames (probably attack). Heroes split per facing:
-  `k_hrm_w0..w4` walk, `a0..a4` attack, 10 frames each.
-- Palette: `<Faction>Faction.NCLR`, 16 banks of 16 colors. **Banks are team colors**: 0 red, 2 blue,
-  4 green, 6 orange, 8 magenta, 10 grey; each odd bank is the same color with a selection outline.
-  12 and 14 look like build-preview ghosts.
-- `Sprites/Anim0..7.NCER/.NANR` hold one small cell ("Idle") each; not needed to cut frames.
+  (not 8x8 tiles), 128 or 256 px wide.
+- Palette: `KingFaction.NCLR` for **every** faction (the only unit palette in the ROM), 16 banks of 16
+  colors. **Banks are team colors**: 0 red, 2 blue, 4 green, 6 orange, 8 magenta, 10 grey; each odd bank
+  is the same color with a selection outline. 12 and 14 look like build-preview ghosts. On screen the
+  game swaps the outline color (cyan in the file) for yellow on your own selected units.
+- Each entity's sprite comes from the asset path after its name in `Entities.ebp`. The six playable
+  factions have six sprite units each (36 total); their other four movers are 3D models (below).
+  Sprite file prefixes don't always match the entity prefix: Astronauts (`E_`) use `h_`.
+
+| layout | asset suffix | files | frames | confidence |
+|---|---|---|---|---|
+| hero | `_hrm`, `_hrf` | `_w0..4` walk, `_a0..4` attack, one file per facing | 6 x 24 px in a row; idle = walk frame 0 | confirmed (King, emulator) |
+| infantry | `_eng`, `_mel`, `_rgd` | `_0` idle strip (one frame per facing), `_1` walk, `_2` attack | 5 facing rows x 5 frames of 24 px | confirmed (King builder, emulator) |
+| mounted | `_bld_mtd` (shared with the buildings) | the faction's building sheet | 32 px frames, facing rows from y = 96; cols 0-2 walk, 3-7 attack, idle = col 1 | likely (from the animation table; all six sheets line up) |
+
+Facing rows are back, back-right, right, front-right, front; left facings are the right ones mirrored
+(confirmed: a builder walking down-left showed the front-right row flipped).
+
+Units drawn from 3D models (`Models/*.nsbmd` + `.nsbca`, Nitro `BMD0`/`BCA0`), not drawn yet:
+ballista, catapult, gryphon/dragon, giant, ships and transports, and the Astronaut/Alien siege units.
 
 ## Animations (`BP/Animations.abp`, likely)
 
@@ -198,19 +216,74 @@ sprite layouts:
 | 2, 3, 4 | idle 1, walk 5+1, attack 5+1 | `_0` idle row, `_1` walk sheet, `_2` attack sheet | builder, melee, ranged (`_eng`, `_mel`, `_rgd`); which is which is a guess, they differ only in VRAM position |
 | 5 | idle 1, walk 3 ping-pong, attack 5+1 | 32 px frames (`0x8000` flag) | mounted unit |
 
+The start tiles index some VRAM layout we haven't reproduced; the client cuts frames from the sheets
+instead (rows = facings, columns = frames), which matches the emulator for the King hero and builder.
+Two entries look off by one tile (set 2 back-right walk frame 3 is `0x424a` where the pattern says
+`0x4249`; set 4 back-right walk frames 2-4 are one tile early). The King builder's back-right walk in
+the emulator is clean, so either it isn't set 2 or the game doesn't use these as plain offsets. open.
+
 "5+1" means the 5 sheet frames followed by the idle pose as a 6th frame. In sets 2-4 the walk frames
 carry bit `0x4000` and the trailing idle frame doesn't, which fits "bit 14 = walk/attack sheet,
 clear = idle sheet". The client plays walk as frames 0-4 then the idle pose, looped.
 
+## Unit animation timing (confirmed, emulator)
+
+Measured frame by frame with `tools/emu/burst.py` + `track.py` on the King builder and King hero:
+
+- Every walk frame shows for 4 VBlanks (15 fps). Builder: walk frames 0-4 then the idle pose, looped.
+  Hero: walk frames 0-5, looped.
+- The cycle keeps counting when the facing changes mid-walk.
+- On arrival the unit **finishes the current pass** of the walk cycle (up to 5 more frames) before it
+  shows the idle pose. Client: `client/src/unitAnim.ts`.
+- Attack timing (once, ending on idle) and the mounted ping-pong walk come from the animation table
+  and are not yet checked in the emulator.
+
 ## Timing seen in the emulator (likely)
 
-- The battlefield redraws every 2nd VBlank: 30 updates per second.
+- The battlefield usually updates every 2nd VBlank (30 per second), but not always; see below.
 - A walking unit changes animation frame every 4 VBlanks (15 fps). The King hero's 6-frame walk
   loops in about 24 VBlanks (0.4 s).
-- The King hero walks about 66 px/s (132 px in 120 VBlanks), about 2.2 px per update.
-- The sim runs at this 30 Hz rate (`TICK_HZ`), and units move speed/4096 cells per tick, measured
+- The sim runs at 30 Hz (`TICK_HZ`), and units move speed/4096 cells per tick, measured
   as a straight line in cell units (so 24 px across counts the same as 16 px down).
 - Units and buildings are drawn by the 3D engine (main BG0); fog of war is main BG2.
+
+## Movement speed and update rate
+
+**Per-update step (confirmed).** A unit's position is two s32 values in 20.12 pixels (1/4096 px).
+For the King (speed 410) on mp01, each update moved it by exactly:
+
+| direction | dx | dy | length in cells |
+|---|---|---|---|
+| right | 9840 | 0 | 9840/24 = 410 |
+| down | 0 | 6560 | 6560/16 = 410 |
+| down-right, 1:1 in cells | 6957 | 4638 | 410.0 |
+| up-left, 3:5 in cells | -5062 | -5625 | 410.0 |
+
+So the step is speed/4096 cells per update, isotropic in cell space, with no hidden multiplier.
+`tests/sim/movement.test.ts` checks the sim against these numbers.
+
+**Update rate (likely).** The game has no fixed tick. Its main loop (`Game_mainLoop`, see
+function-map.md) does:
+
+1. `t0` = milliseconds now.
+2. Wait for the next VBlank.
+3. Run one game update (`Game_frame`): units move one step.
+4. If less than 20 ms passed since `t0`, wait for one more VBlank.
+
+The 20 ms check is meant to hold the game at 30 updates a second. But `t0` is taken before the
+first wait, so when an update ends just before a VBlank, the next iteration's first wait is short,
+the 20 ms is already used up, and the update after it comes only 1 VBlank later. When an update runs
+long, the gap is 3 VBlanks. Over 1,850 frames of the King walking on mp01 in DeSmuME, the gaps
+between updates were 2 VBlanks 80% of the time, 1 VBlank 13%, and 3 VBlanks 7%: 30.7 updates per
+second on average. That is the ~3% "faster than the table" seen before. (The 66 px/s figure noted
+earlier was a rough screen measurement and is superseded by the RAM values above.)
+
+How often the short gap happens depends on how long each update takes, which depends on how much
+is on screen and how fast the CPU is. DeSmuME's ARM9 timing is not cycle-exact, so the real DS may
+land on a different average. (guess: real hardware is slower per frame, so closer to 30.)
+
+**What we do.** The sim keeps a fixed 30 Hz tick: lockstep needs a fixed rate, and 30 Hz is the
+rate the game's loop aims for. Each tick moves exactly what one game update moves.
 
 ## Template for new sections
 

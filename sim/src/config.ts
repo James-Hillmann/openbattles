@@ -1,6 +1,8 @@
 /**
- * Sim ticks per second. The DS game updates its world every 2nd VBlank
- * (60 Hz / 2 = 30 Hz), seen in the emulator; see docs/re-notes/formats.md.
+ * Sim ticks per second. The DS game's main loop aims for one update every 2nd VBlank
+ * (60 Hz / 2 = 30 Hz) but sometimes runs them 1 VBlank apart, averaging ~30.7 in the
+ * emulator. Lockstep needs a fixed rate, so we use 30; see docs/re-notes/formats.md,
+ * "Movement speed and update rate".
  */
 export const TICK_HZ = 30;
 export const TICK_MS = 1000 / TICK_HZ; // render-side only

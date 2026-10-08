@@ -1,10 +1,9 @@
 import { isPmoc, pmocDecompress } from './pmoc';
 import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTiles } from './map';
 import { decodeChars, decodePalette } from './nitro';
-import { renderMap, renderSheet, type Rgba } from './render';
+import { renderMap, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
 import { renderMinimap } from './minimap';
-import { applyTeamColors } from './teams';
 import { bakeTrees, readTreeTable, type TreeTable } from './trees';
 
 /** Everything the M1 client needs to show one map with units. Built in the worker. */
@@ -15,11 +14,6 @@ export interface MapBundle {
   /** Logical terrain code per cell; will drive pathing in M2. */
   terrain: Uint8Array;
   ground: Rgba;
-  /**
-   * Unit sheets keyed "<sheet>@<bank>". `_1` (walk): 5 rows (back, back-right, right,
-   * front-right, front) x 5 frames of 24x24. `_0` (idle): one row, one 24x24 frame per facing.
-   */
-  units: Record<string, Rgba>;
   /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
   minimap?: Rgba;
 }
@@ -39,16 +33,6 @@ export function tryRomFile(rom: UnpackedRom, path: string): Uint8Array | undefin
 export const listMaps = (rom: UnpackedRom): string[] =>
   rom.files.map((f) => /^Maps\/(.+)\.map$/i.exec(f.path)?.[1]).filter((n): n is string => !!n);
 
-/**
- * Idle + walk sheets and faction palette for the units the client shows, keyed by "<sheet>@<bank>".
- * Even banks are the red/blue teams, odd banks the same team drawn selected (with outline).
- */
-const M1_UNITS = ['k_mel_0', 'k_mel_1'].flatMap((sheet) =>
-  [0, 1, 2, 3].map((bank) => ({ sheet, palette: 'KingFaction.NCLR', bank })),
-);
-/** Team the local player's units use (0 red); its selection outline is yellow. */
-const LOCAL_TEAM = 0;
-
 const treeTables = new WeakMap<UnpackedRom, TreeTable | null>();
 
 /** The game's tree tile lookup, read once per ROM. Null if this game version isn't mapped yet. */
@@ -66,13 +50,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   let metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));
   const detail = tryRomFile(rom, detailTilesPath(name));
   if (detail) metatiles = withDetailTiles(metatiles, parseMetatiles(detail));
-  const units: Record<string, Rgba> = {};
-  for (const u of M1_UNITS) {
-    const sheet = decodeChars(romFile(rom, `Sprites/${u.sheet}.NCBR`));
-    const pal = decodePalette(romFile(rom, u.palette));
-    applyTeamColors(pal, rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, LOCAL_TEAM);
-    units[`${u.sheet}@${u.bank}`] = renderSheet(sheet, pal, u.bank);
-  }
   const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), units, minimap };
+  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap };
 }

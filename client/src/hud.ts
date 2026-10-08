@@ -26,6 +26,11 @@ export class HudView {
     this.canvas.hidden = false;
   }
 
+  /** The HUD's label (name, max HP) for an entity, by internal id (e.g. `K_Swordsman`). */
+  label(id: string): HudBundle['labels'][number] | undefined {
+    return this.hud?.labels.find((l) => l.id === id);
+  }
+
   /** Index into the HUD's entity labels, by internal id (e.g. `K_Swordsman`). */
   entityIndex(id: string): number {
     return this.hud?.labels.findIndex((l) => l.id === id) ?? -1;
