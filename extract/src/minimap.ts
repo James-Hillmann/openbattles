@@ -1,41 +1,77 @@
 import type { UnpackedRom } from './rom';
-import { romFile, tryRomFile } from './bundle';
-import { decodeChars, decodePalette } from './nitro';
-import { blitTile, type Rgba } from './render';
+import { tryRomFile } from './bundle';
+import { decodeChars } from './nitro';
+import type { GameMap } from './map';
+import type { Rgba } from './render';
 
 /**
  * Minimap on the HUD's right panel (see docs/re-notes/hud.md):
- * `<map>miniNT.NCGR` ("no trees", 4bpp, 16x16 tiles) with palette
- * `UI/AllInOne/LS_Maps.NCLR` bank 9, drawn 1:1 at (136,40). A map cell is
- * 1.5 px. The game draws trees itself from the live terrain, as a 4x4 pattern
- * of dark green over tree cells, so chopped trees disappear.
+ * `<map>miniNT.NCGR` ("no trees", 4bpp tiles) drawn 1:1 at (136,40), 1.5 px
+ * per map cell, with a 16-color palette per tileset kept in ARM9. The game
+ * draws trees itself from the live terrain, as a 4x4 pattern in palette
+ * color 5 over tree cells, so chopped trees disappear. Checked against the
+ * emulator on mp01 (King, exact), mp02 (Mars, 3 of 863 pixels off) and
+ * mp03 (Pirate, 4 of 839 off).
  */
 export const MINI_PX_PER_CELL = 1.5;
-const MINI_BANK = 9;
-/** Measured on mp01 (17 of 874 pixels off, all on tree/terrain borders): likely. */
 const TREE_PATTERN = [0b0100, 0b1110, 0b0001, 0b1011];
-/** BGR555 0x11E5 (r 5, g 15, b 4), expanded like the rest of the repo. */
-const TREE_RGB = [5, 15, 4].map((c) => Math.floor((c * 255) / 31)) as [number, number, number];
+const TREE_COLOR = 5;
 
-export function renderMinimap(rom: UnpackedRom, mapName: string, width: number, height: number, terrain: Uint8Array): Rgba | undefined {
+/** ARM9 RAM addresses per game code: 16 BGR555 colors each. */
+const MINIMAP_ADDRS: Record<string, { palettes: Record<string, number>; dots: number }> = {
+  C5SE: {
+    palettes: { KingTileset: 0x0212799c, PirateTileset: 0x021279bc, MarsTileset: 0x021279dc },
+    // Dot colors: 4 red (measured on the red team), 5 blue (likely); 0 green, 1 yellow, 2 magenta, 3 black (team order a guess).
+    dots: 0x0212797c,
+  },
+};
+
+const bgr555 = (c: number): [number, number, number] => [((c & 31) * 255) / 31, (((c >> 5) & 31) * 255) / 31, (((c >> 10) & 31) * 255) / 31].map(Math.floor) as [number, number, number];
+
+function arm9Colors(rom: UnpackedRom, addr: number, n: number): [number, number, number][] {
+  const o = addr - rom.header.arm9.ramAddress;
+  return Array.from({ length: n }, (_, i) => bgr555(rom.arm9[o + 2 * i]! | (rom.arm9[o + 2 * i + 1]! << 8)));
+}
+
+/** Minimap dot color per palette index (see MINIMAP_ADDRS), or undefined for unmapped game versions. */
+export function minimapDotColors(rom: UnpackedRom): [number, number, number][] | undefined {
+  const a = MINIMAP_ADDRS[rom.header.gameCode];
+  return a && arm9Colors(rom, a.dots, 8);
+}
+
+/** Map cell under minimap pixel `p` (same rule on both axes): max(0, floor((2p - 1) / 3)). */
+export const miniCell = (p: number): number => Math.max(0, Math.floor((2 * p - 1) / 3));
+
+/**
+ * Tree cells bordering rough ground to the east or south (edges bits 4 and 6) are left out.
+ * That matches every pixel on mp01 and all but 3-4 per map on mp02/mp03, whose misses sit on such borders: likely.
+ */
+const NO_TREE_EDGES = (1 << 4) | (1 << 6);
+
+export function renderMinimap(rom: UnpackedRom, mapName: string, map: Pick<GameMap, 'tileset' | 'width' | 'height' | 'terrain' | 'edges'>): Rgba | undefined {
+  const { tileset, width, height, terrain, edges } = map;
   const file = tryRomFile(rom, `${mapName}miniNT.NCGR`);
-  if (!file) return undefined;
+  const addr = MINIMAP_ADDRS[rom.header.gameCode]?.palettes[tileset];
+  if (!file || addr === undefined) return undefined;
   const chars = decodeChars(file);
-  const pal = decodePalette(romFile(rom, 'UI/AllInOne/LS_Maps.NCLR'));
+  const pal = arm9Colors(rom, addr, 16);
   const w = Math.ceil(width * MINI_PX_PER_CELL);
   const h = Math.ceil(height * MINI_PX_PER_CELL);
   const out: Rgba = { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) };
-  for (let ty = 0; ty * 8 < h; ty++) {
-    for (let tx = 0; tx * 8 < w; tx++) {
-      if (ty < chars.tilesHigh && tx < chars.tilesWide) blitTile(out, chars, pal, (ty * chars.tilesWide + tx) | (MINI_BANK << 12), tx * 8, ty * 8);
-    }
-  }
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const cx = Math.floor((x * 2) / 3);
-      const cy = Math.floor((y * 2) / 3);
-      if (terrain[cy * width + cx] !== 1 || !((TREE_PATTERN[y & 3]! >> (3 - (x & 3))) & 1)) continue;
-      out.data.set([...TREE_RGB, 255], (y * w + x) * 4);
+      let v: number;
+      const i = miniCell(y) * width + miniCell(x);
+      if (terrain[i] === 1 && !(edges[i]! & NO_TREE_EDGES) && (TREE_PATTERN[y & 3]! >> (3 - (x & 3))) & 1) v = TREE_COLOR;
+      else {
+        // 8x8 tiles, row-major across the sheet.
+        const tx = x >> 3;
+        const ty = y >> 3;
+        if (tx >= chars.tilesWide || ty >= chars.tilesHigh) continue;
+        v = chars.pixels[(ty * chars.tilesWide + tx) * 64 + (y & 7) * 8 + (x & 7)] ?? 0;
+      }
+      if (v === 0) continue;
+      out.data.set([...pal[v]!, 255], (y * w + x) * 4);
     }
   }
   return out;

@@ -162,8 +162,9 @@ function spawnLineups(cx: number, cy: number) {
 let mapSize = { w: 600, h: 440 };
 let mapGrid: TerrainGrid | null = null;
 let minimap: Rgba | undefined;
-/** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
-const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
+/** Minimap dot palette index per player: 4 red (measured), 5 blue (likely). */
+const MINIMAP_DOT_INDEX = [4, 5];
+let minimapDots: [number, number, number][] = [];
 /** Until the sim tracks HP, every unit shows full health: its max HP from Entities.ebp, by entity name. */
 const maxHpOf = (name: string | undefined): number => (name ? (hudView.label(name)?.maxHp ?? 0) : 0);
 
@@ -171,6 +172,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
   minimap = b.minimap;
+  minimapDots = hud.minimapDots ?? [];
   mapSize = { w: b.ground.width, h: b.ground.height };
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
   spawnLineups(mapSize.w / 2, mapSize.h / 2);
@@ -361,7 +363,9 @@ app.ticker.add((t) => {
     bricks: 500,
     minifigs: mine.length,
     minifigCap: Math.max(4, mine.length),
+    // Special units / cap; the sandbox has none.
     star: [0, 0],
+    timeMs: animTime,
     selected: selectedEntity >= 0 ? { entity: selectedEntity, hp: maxHpOf(selectedName) } : undefined,
     minimap: minimap && {
       image: minimap,
@@ -372,7 +376,7 @@ app.ticker.add((t) => {
         w: Math.round(app.screen.width / camera.scale.x / 16),
         h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
       },
-      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[d.owner] ?? [255, 255, 255] })),
+      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: 1, rgb: minimapDots[MINIMAP_DOT_INDEX[d.owner] ?? -1] ?? [255, 255, 255] })),
     },
   });
 });

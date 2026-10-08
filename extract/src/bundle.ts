@@ -50,6 +50,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   let metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));
   const detail = tryRomFile(rom, detailTilesPath(name));
   if (detail) metatiles = withDetailTiles(metatiles, parseMetatiles(detail));
-  const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
+  const minimap = renderMinimap(rom, name, map);
   return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap };
 }
