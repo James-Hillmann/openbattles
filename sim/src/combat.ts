@@ -27,11 +27,35 @@ export function findById<T extends { id: EntityId }>(list: readonly T[], id: Ent
 const cellX = (x: number) => Math.floor(x / (CELL_W << FX_SHIFT));
 const cellY = (y: number) => Math.floor(y / (CELL_H << FX_SHIFT));
 
-/** Squared distance in whole cells, the metric the game's range check uses. */
-export function cellDist2(a: Unit, b: { x: number; y: number }): number {
-  const dx = cellX(a.x) - cellX(b.x);
-  const dy = cellY(a.y) - cellY(b.y);
+/**
+ * A unit's footprint: a building covers `size` x `size` cells from the cell its
+ * position is in (its top-left); everything else is one cell.
+ */
+export function footprint(u: { x: number; y: number; size?: number }): { x0: number; y0: number; size: number } {
+  return { x0: cellX(u.x), y0: cellY(u.y), size: u.size ?? 1 };
+}
+
+/** The footprint cell of `t` nearest to cell (cx, cy): the cell itself when inside. */
+export function nearestFootprintCell(cx: number, cy: number, t: { x: number; y: number; size?: number }): [number, number] {
+  const f = footprint(t);
+  return [Math.min(Math.max(cx, f.x0), f.x0 + f.size - 1), Math.min(Math.max(cy, f.y0), f.y0 + f.size - 1)];
+}
+
+/**
+ * Squared distance in whole cells, the metric the game's range check uses
+ * (0x0207F640): from the attacker's cell to the nearest cell of the target's footprint.
+ */
+export function cellDist2(a: Unit, b: { x: number; y: number; size?: number }): number {
+  const [bx, by] = nearestFootprintCell(cellX(a.x), cellY(a.y), b);
+  const dx = cellX(a.x) - bx;
+  const dy = cellY(a.y) - by;
   return dx * dx + dy * dy;
+}
+
+/** Chebyshev distance from cell (cx, cy) to the nearest cell of a footprint (0 inside). */
+function chebToFootprint(cx: number, cy: number, t: { x: number; y: number; size?: number }): number {
+  const [bx, by] = nearestFootprintCell(cx, cy, t);
+  return Math.max(Math.abs(cx - bx), Math.abs(cy - by));
 }
 
 export function inRange(u: Unit, t: Unit): boolean {
@@ -83,7 +107,7 @@ const SPLASH_FACTOR = [4096, 4096 - 0x333, 4096 - 2 * 0x333];
 function splash(w: World, p: Projectile, cx: number, cy: number): void {
   for (const o of w.units) {
     if (o.owner === p.owner || o.hp === 0) continue;
-    const ring = Math.max(Math.abs(cellX(o.x) - cx), Math.abs(cellY(o.y) - cy));
+    const ring = chebToFootprint(cx, cy, o); // a building is hit through its nearest footprint cell
     if (ring > 2) continue;
     const f = SPLASH_FACTOR[ring]!;
     applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12));
@@ -100,12 +124,14 @@ export function stepProjectiles(w: World): void {
   for (const p of w.projectiles) {
     const t = findById(w.units, p.target);
     if (!t || t.hp === 0) continue;
-    const n = stepToward(p.x, p.y, t.x, t.y, stepBudget(p.type.speed));
+    // Aim at the nearest cell of the target's footprint; a hit is landing in any footprint cell (0x0207ECFC).
+    const [ax, ay] = nearestFootprintCell(cellX(p.x), cellY(p.y), t);
+    const n = stepToward(p.x, p.y, t.size > 1 ? cellCenterX(ax) : t.x, t.size > 1 ? cellCenterY(ay) : t.y, stepBudget(p.type.speed));
     p.x = n.x;
     p.y = n.y;
-    const cx = cellX(t.x);
-    const cy = cellY(t.y);
-    if (cellX(p.x) !== cx || cellY(p.y) !== cy) {
+    const cx = cellX(p.x);
+    const cy = cellY(p.y);
+    if (chebToFootprint(cx, cy, t) !== 0) {
       keep.push(p);
       continue;
     }
@@ -126,19 +152,21 @@ function chase(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
   let gx: Fx;
   let gy: Fx;
+  // A building is approached through its nearest footprint cell, so units attack it from any side.
+  const [tx, ty] = nearestFootprintCell(cellX(u.x), cellY(u.y), t);
   if (a.maxRange > 1 && cellDist2(u, t) > a.maxRange * a.maxRange) {
-    gx = t.x;
-    gy = t.y;
+    gx = t.size > 1 ? cellCenterX(tx) : t.x;
+    gy = t.size > 1 ? cellCenterY(ty) : t.y;
   } else {
-    const dcx = cellX(u.x) - cellX(t.x);
-    const dcy = cellY(u.y) - cellY(t.y);
+    const dcx = cellX(u.x) - tx;
+    const dcy = cellY(u.y) - ty;
     let ox = 0;
     let oy = 0;
     if (dcx === 0 && dcy === 0) ox = u.x < t.x ? -1 : 1;
     else if (Math.abs(dcx) >= Math.abs(dcy)) ox = Math.sign(dcx);
     else oy = Math.sign(dcy);
-    gx = (((cellX(t.x) + ox) * CELL_W + CELL_W / 2) << FX_SHIFT) as Fx;
-    gy = (((cellY(t.y) + oy) * CELL_H + CELL_H / 2) << FX_SHIFT) as Fx;
+    gx = (((tx + ox) * CELL_W + CELL_W / 2) << FX_SHIFT) as Fx;
+    gy = (((ty + oy) * CELL_H + CELL_H / 2) << FX_SHIFT) as Fx;
   }
   if (!w.grid) {
     u.tx = gx;

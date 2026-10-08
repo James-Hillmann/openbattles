@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellCenterX, cellCenterY, createFog, createWorld, isExplored, isVisible, spawnUnit, stampCircle, updateFog, type AttackStats, type TerrainGrid } from '@lbw/sim';
+import { cellCenterX, cellCenterY, createFog, createWorld, isExplored, isVisible, placeBuilding, spawnUnit, stampCircle, updateFog, type AttackStats, type TerrainGrid } from '@lbw/sim';
 
 const open = (w: number, h: number): TerrainGrid => ({ width: w, height: h, cells: new Uint8Array(w * h) });
 const sight = (r: number): AttackStats => ({ damage: 1, damageRand: 0, cooldown: 30, minRange: 0, maxRange: 1, sight: r, projectile: null });
@@ -39,8 +39,8 @@ describe('fog of war', () => {
     expect(isVisible(f, 5, 8)).toBe(true);
     expect(isVisible(f, 5, 9)).toBe(false);
     expect(isExplored(f, 30, 5)).toBe(false); // the enemy's own circle isn't ours
-    // Teleport the unit (placement is the sim's business; fog only reads the cell).
-    u.cell = 5 * 40 + 20;
+    // Teleport the unit (placement is the sim's business; fog only reads the position).
+    u.x = cellCenterX(20);
     updateFog(f, w, 0);
     expect(isVisible(f, 5, 5)).toBe(false);
     expect(isExplored(f, 5, 5)).toBe(true);
@@ -57,5 +57,18 @@ describe('fog of war', () => {
     updateFog(f, w, 0);
     expect(isVisible(f, 20, 9)).toBe(true);
     expect(isVisible(f, 20, 8)).toBe(false);
+  });
+
+  it("a placed building's circle is centred on its footprint, like the castle at mp01's (10, 10) -> (11, 11)", () => {
+    const w = createWorld({ seed: 1, grid: open(40, 40), types: [] });
+    const castle = { kind: 10, role: 7, hp: 1500, cost: 1000, buildTime: 900, size: 3, speed: 0xffff, yield: 0, priority: 10, attack: { ...sight(11), damage: 0, damageRand: 0 } };
+    placeBuilding(w, 0, castle, 10, 10);
+    const f = createFog(40, 40);
+    updateFog(f, w, 0);
+    expect(isVisible(f, 11, 0)).toBe(true);
+    expect(isVisible(f, 8, 0)).toBe(true);
+    expect(isVisible(f, 7, 0)).toBe(false);
+    expect(isVisible(f, 22, 11)).toBe(true);
+    expect(isVisible(f, 23, 11)).toBe(false);
   });
 });
