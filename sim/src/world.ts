@@ -40,6 +40,9 @@ export interface UnitType {
   role?: number;
 }
 
+/** Entities.ebp speed of a building (+0x0C = 0xFFFF): it never moves, so the sim stores 0. */
+const IMMOBILE = 0xffff;
+
 /** HP for units spawned without a type (test fixtures). */
 const DEFAULT_HP = 100;
 
@@ -60,7 +63,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     tx: null,
     ty: null,
     path: [],
-    speed: type.speed ?? DEFAULT_SPEED,
+    speed: type.speed === IMMOBILE ? 0 : type.speed ?? DEFAULT_SPEED,
     kind: type.kind ?? -1,
     hp,
     maxHp: hp,

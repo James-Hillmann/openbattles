@@ -219,7 +219,7 @@ export function combatStep(w: World, u: Unit): void {
   }
   if (!t) return;
   if (!inRange(u, t)) {
-    chase(w, u, t);
+    if (u.speed > 0) chase(w, u, t); // a tower waits for the target to come to it
     return;
   }
   stopMove(w, u);

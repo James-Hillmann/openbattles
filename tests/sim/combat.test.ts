@@ -242,6 +242,48 @@ describe('orders and death', () => {
   });
 });
 
+describe('buildings', () => {
+  // Entities.ebp: a castle has speed 0xFFFF, melee 0 + rand(0), no projectile, sight 11; a tower shoots.
+  const CASTLE: UnitType = { kind: 10, speed: 0xffff, hp: 1500, priority: 10, role: 7, attack: { ...melee(0, 0, 30), sight: 11 } };
+  const TOWER: UnitType = {
+    kind: 16, speed: 0xffff, hp: 400, priority: 40, role: 13,
+    attack: { damage: 0, damageRand: 0, cooldown: 24, minRange: 1, maxRange: 5, sight: 7, projectile: { speed: 2731, minDamage: 35, maxDamage: 45, splash: false } },
+  };
+
+  it('a castle never attacks but keeps its sight', () => {
+    const w = createWorld({ seed: 1 });
+    const castle = spawnUnit(w, 0, ...at(10, 10), CASTLE);
+    const enemy = spawnUnit(w, 1, ...at(11, 10), { hp: 100 });
+    expect(castle.attack).toBeNull();
+    expect(castle.sight).toBe(11);
+    expect(castle.speed).toBe(0);
+    for (let i = 0; i < 100; i++) step(w, []);
+    expect(enemy.hp).toBe(100);
+  });
+
+  it('a tower shoots what comes within its range and never walks after anything', () => {
+    const w = createWorld({ seed: 1 });
+    const tower = spawnUnit(w, 0, ...at(10, 10), TOWER);
+    const far = spawnUnit(w, 1, ...at(10, 16), { hp: 500 }); // 6 cells: outside max range 5
+    for (let i = 0; i < 40; i++) step(w, []);
+    expect(tower.x).toBe(at(10, 10)[0]);
+    expect(tower.tx).toBeNull();
+    expect(far.hp).toBe(500);
+    const near = spawnUnit(w, 1, ...at(10, 14), { hp: 500 });
+    for (let i = 0; i < 40; i++) step(w, []);
+    expect(near.hp).toBeLessThan(500);
+    expect(tower.x).toBe(at(10, 10)[0]);
+  });
+
+  it('a move order does nothing to a building', () => {
+    const w = createWorld({ seed: 1 });
+    const castle = spawnUnit(w, 0, ...at(10, 10), CASTLE);
+    step(w, [{ tick: 0, player: 0, cmd: { kind: 'move', unitIds: [castle.id], x: fx(500), y: fx(300) } }]);
+    step(w, []);
+    expect([castle.x, castle.y]).toEqual([...at(10, 10)]);
+  });
+});
+
 describe('combat determinism', () => {
   function battle(seed: number): World {
     const w = createWorld({ seed });
