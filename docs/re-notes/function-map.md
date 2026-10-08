@@ -32,7 +32,13 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x0205E63C` | ARM | `Unit_inRange` | Range check with +0x6E/+0x6F, or an override range | confirmed | |
 | `0x0207F640` | ARM | `Range_check` | Squared cell distance between footprints vs min^2/max^2 | confirmed | |
 | `0x0206E950` | ARM | `Projectile_hit` | `min + rand(max - min)` from projectile +0x70/+0x72, times defender multiplier | confirmed | |
-| `0x0206E5EC` | ARM | `Projectile_splash?` | Area-damage path when projectile +0x6B is set | guess | |
+| `0x0206E5EC` | ARM | `Projectile_splash` | Rings 0-2 around the impact cell, skips allies, scales min/max by 1.0/0.8/0.6, calls `Projectile_hit` per cell | confirmed | |
+| `0x0206E2xx` | ARM | `Projectile_update` (tail) | After moving: impact when the projectile's cell is inside the target's footprint | confirmed | |
+| `0x0205571C` | ARM | `Mover_step` | Shared unit/projectile movement: step toward goal, snap when the step covers the rest | likely | |
+| `0x0207EC24` | ARM | `Map_cellsInSquare` | Cells within r of a cell (Chebyshev), clipped to the map | confirmed | |
+| `0x0207ECFC` | ARM | `Rect_containsCell` | Cell inside an origin + size footprint | confirmed | |
+| `0x020638A8` | ARM | `Ai_pickTarget` | Picks from search results: in-range first, then priority +0x70 | confirmed | |
+| `0x0205E7D4` | ARM | `Unit_setHp` | Writes HP, damage time +0x1A4, under-attack alert, damaged event 0x2C | likely | |
 | `0x020F1108` | ARM | `Math_rand32` | Nitro SDK `MATH_Rand32` 64-bit LCG | confirmed | Game RNG context at `0x021552F4` +0xC |
 | `0x020832EC` | ARM | `Game_get` | Returns the game object; +0x8B4 is the 30 Hz time counter | confirmed | |
 | `0x020F67C4` | ARM | `Game_mainLoop` | Loop body: read ms, wait VBlank, run `Game_frame`, wait one more VBlank only if under 20 ms since the first read | likely | Source of the uneven update rate; see formats.md "Movement speed and update rate" |

@@ -2,7 +2,7 @@
 
 Game: LEGO Battles (USA, `C5SE`). Found 2026-10-08 by reading ARM9 and watching a real fight in
 DeSmuME (hooks on the attack functions, King vs Wizard Swordsmen/Crossbowmen on The Pond).
-Ported to `sim/src/combat.ts`.
+Ported to `sim/src/combat.ts`; the hit flash is in `client/src/main.ts`.
 
 **DS background:** the game time counter used here ticks at 30 Hz (every 2nd VBlank). Most game
 math is 20.12 fixed point (`x << 12`, 4096 = 1.0); the ARM9 does 64-bit `smull` then shifts right
@@ -83,11 +83,23 @@ Ranged units go through the same cooldown, then spawn a projectile (`0x02050C5C`
 `0x0206E950` deals `min + rand(max - min)` times the defender multiplier to whatever stands in the
 target cell (confirmed, code). No bonus table for projectiles.
 
-Flight (likely, emulator): the projectile follows its target and damage lands when it arrives.
-W_Crossbowman shooting the King: 2 cells away the hit came 2-3 ticks after the shot, 1 tick when
-the King walked towards it, and in the same tick when adjacent. That fits a projectile that flies
-at its speed (+0x0C) and lands once it is within one cell of the target. The hit landed on the
-King while he moved. If the target dies first the projectile does no damage (guess).
+Flight (confirmed: code and emulator). The projectile moves through the same movement routine as
+units (`0x0205571C`): in cell space, at its speed (+0x0C, e.g. CrossbowBolt 2731 = 2/3 cell per
+tick), re-aimed at the target's current position each tick, and its first move happens on the
+tick it is fired. After each move, `0x0206E2xx` hits when the projectile's cell lies inside the
+target's footprint (`0x0207ECFC`), so it lands as soon as it *enters the target's cell*, not
+when it reaches the target's centre. Emulator, W_Crossbowman at the King (positions read from the
+projectile object, +0xEC/+0xF0 in 20.12 px):
+
+| shot | distance | ticks to hit | why |
+|---|---|---|---|
+| straight down, King still | 2 cells | 3 | 32 px at 10.7 px a tick, enters the King's cell on the 3rd move |
+| sideways, King walking in | 2 cells | 1 | 16 px a tick, King stepped into the cell it reached |
+| sideways | adjacent | 0 | its first move, on the firing tick, already enters the King's cell |
+
+The game puts units at cell corners and rounds positions to cells; the sim puts them at cell
+centres and floors, which gives the same cells. If the target dies first the projectile does no
+damage (guess).
 
 ### Splash (`0x0206E5EC`, confirmed by reading the code)
 
@@ -113,6 +125,9 @@ Each unit has an AI component (unit +0x2A0) with a tick counter (+0x48).
 - **Radius:** sight (+0x71) for units; max range (+0x6F) for buildings (role 8-19).
 - **Results** come back 0-5 ticks later (the search is queued). The sim applies them at once
   (guess that this doesn't matter visibly).
+- The sim scans while idle or attacking an enemy it picked itself; not while walking under a move
+  order, and it never drops a target the player ordered (guess: which AI states those orders map
+  to is not traced). Buildings don't exist in the sim yet, so it always searches by sight.
 - **Pick** (`0x020638A8`): drop candidates outside `min range <= d <= sight + max range`. A candidate
   in attack range always beats one that isn't; otherwise higher priority (+0x70) wins. On equal
   terms the earlier candidate stays. The list order is unknown, so the sim breaks ties by nearest,
@@ -150,9 +165,11 @@ can't be matched in a lockstep game anyway. The sim uses its own seeded RNG with
 - The attack animation (`*_2` sheet: 5 rows of facings x 5 frames, then the idle pose) starts
   about when damage lands. likely, from screenshots every 4 VBlanks; the client plays it from
   `lastAttack` at 15 fps.
-- Hit flash (likely, emulator, 4 hits): the whole sprite is drawn as a pale white silhouette
-  starting 2-3 ticks after the HP change and lasting 3 ticks (6 VBlanks). Both the King and the
-  Wizard Swordsman showed the same timing.
+- Hit flash: the unit is drawn with palette bank 12 of `KingFaction.NCLR`, a bank of light greys
+  (confirmed: every flashed pixel in the emulator equals a bank-12 colour after the DS's 5-bit
+  rounding, e.g. 189,197,189 shows as 184,192,184). Timing (likely, emulator, 4 hits on the King
+  and a Wizard Swordsman): starts 4-6 VBlanks after the HP change and lasts 6-7 VBlanks, so about
+  2.5 to 5.5 ticks after the damage tick. The client uses that window.
 
 ## What the sim does that the game may not (guesses to check)
 

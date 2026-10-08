@@ -26,6 +26,8 @@ function syntheticEbp(): Uint8Array {
     v.setUint8(0x6e, 1);
     v.setUint8(0x6f, 1);
     v.setUint8(0x71, 5);
+    v.setUint8(0x5c, 2);
+    v.setUint8(0x70, 15);
   });
   unit(1, (v) => {
     v.setUint16(0x66, 2, true);
@@ -38,6 +40,7 @@ function syntheticEbp(): Uint8Array {
   pv.setUint16(0x0c, 2048, true);
   pv.setUint16(0x70, 15, true);
   pv.setUint16(0x72, 20, true);
+  p[0x6b] = 1;
   recs.push(p);
   // The parser walks the game's fixed record count; pad with empty kind-2 records.
   while (recs.length < 0x227) recs.push(new Uint8Array(0x70).fill(0).map((_, i) => (i === 8 ? 2 : 0)));
@@ -65,9 +68,9 @@ describe('Entities.ebp', () => {
 
   it('reads melee and ranged combat stats', () => {
     expect(findUnitStats(recs, 'T_Melee')).toMatchObject({
-      index: 0, speed: 410, hp: 350, damage: 10, damageRand: 5, cooldown: 30, minRange: 1, maxRange: 1, sight: 5, projectile: null,
+      index: 0, speed: 410, hp: 350, damage: 10, damageRand: 5, cooldown: 30, minRange: 1, maxRange: 1, sight: 5, role: 2, priority: 15, projectile: null,
     });
-    expect(findUnitStats(recs, 'T_Ranged').projectile).toEqual({ speed: 2048, minDamage: 15, maxDamage: 20 });
+    expect(findUnitStats(recs, 'T_Ranged').projectile).toEqual({ speed: 2048, minDamage: 15, maxDamage: 20, splash: true });
   });
 
   it('returns null bonus tables for unknown game versions', () => {
