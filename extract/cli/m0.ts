@@ -3,13 +3,13 @@
  *
  *   npm run m0 -- path/to/legobattles.nds [outDir]
  *
- * Writes the NitroFS files, a decompressed ARM9 + overlays ready for Ghidra,
+ * Writes the NitroFS files (plus PMOC-unwrapped copies under dec/), a decompressed ARM9 + overlays ready for Ghidra,
  * a format inventory, and a memory map telling you which base address to
  * load each binary at. Nothing here leaves your machine.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { hex, unpackRom } from '../src/index';
+import { hex, isPmoc, pmocDecompress, unpackRom } from '../src/index';
 
 const [romPath, outArg] = process.argv.slice(2);
 if (!romPath) {
@@ -28,7 +28,11 @@ const r = unpackRom(rom);
 const h = r.header;
 
 write('header.json', JSON.stringify(h, (_, v) => (typeof v === 'number' && v > 0xffff ? hex(v) : v), 2));
-for (const f of r.files) write(join('fs', f.path), f.data);
+for (const f of r.files) {
+  write(join('fs', f.path), f.data);
+  // Unwrapped copy of every PMOC container, same path under dec/.
+  if (isPmoc(f.data)) write(join('dec', f.path), pmocDecompress(f.data));
+}
 write('arm9.bin', r.arm9);
 for (const ov of r.overlays) write(`overlays/overlay_${String(ov.id).padStart(4, '0')}.bin`, ov.data);
 write(

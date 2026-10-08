@@ -1,13 +1,21 @@
 import { ascii } from './bytes';
+import { isPmoc, pmocDecompress } from './pmoc';
 
 /**
  * Guess a file's format from its first bytes. Standard Nitro SDK formats have
  * 4-char magics (NARC, NCGR, NCLR, NSCR, NANR, NCER, SDAT, BMD0, BTX0, ...).
- * Many games, possibly this one, also use custom formats with no magic; those
- * show up as "?" and are the interesting ones to study in M0/M1.
+ * LEGO Battles wraps most of its data in a PMOC container; for those we report
+ * the inner magic as "PMOC>XXXX". Anything with no magic shows up as "?".
  */
 export function sniff(data: Uint8Array): string {
   if (data.length === 0) return 'empty';
+  if (isPmoc(data)) {
+    try {
+      return `PMOC>${sniff(pmocDecompress(data))}`;
+    } catch {
+      return 'PMOC>(bad)';
+    }
+  }
   if (data.length >= 4) {
     const m = ascii(data, 0, 4);
     if (/^[A-Za-z0-9 ]{4}$/.test(m)) return m;

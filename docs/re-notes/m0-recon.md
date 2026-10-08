@@ -20,7 +20,9 @@ your own dump**; outputs go to `out/`, which is gitignored.
   decompiles garbage, it's probably in the wrong mode: select the bytes and press
   `Ctrl+R` (Set Register) to set `TMode` to 1 for Thumb, 0 for ARM, then `D`.
 - LEGO Battles was developed by **Hellbent Games** (not TT's own studio), so don't
-  assume TT's PC/console formats apply. Expect Nintendo SDK formats plus custom ones.
+  assume TT's PC/console formats apply. Most of its data sits in a custom `PMOC`
+  container (LZ11 chunks); inside are standard Nitro formats plus custom `BP/` tables.
+  See [formats.md](formats.md) for what M0 found.
 
 ## 1. Unpack and inventory
 
@@ -35,6 +37,7 @@ You get:
 |---|---|
 | `out/header.json` | title, game code, ARM9/ARM7 load addresses, table offsets |
 | `out/fs/...` | every NitroFS file, original paths |
+| `out/dec/...` | PMOC files unwrapped, same paths |
 | `out/arm9.bin` | ARM9, decompressed |
 | `out/overlays/overlay_NNNN.bin` + `overlays.json` | overlays, decompressed, with RAM addresses |
 | `out/inventory.md` | file count and bytes grouped by extension and magic |
