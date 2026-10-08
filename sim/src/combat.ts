@@ -149,7 +149,7 @@ function chase(w: World, u: Unit, t: Unit): void {
   const [cx, cy] = cellOf(gx, gy);
   const goal = Math.min(Math.max(cy, 0), w.grid.height - 1) * w.grid.width + Math.min(Math.max(cx, 0), w.grid.width - 1);
   // Keep the plotters' state when only the goal moves, like the game's follow-a-unit move (0x02054710).
-  if (!u.mv) orderMove(w, u, goal);
+  if (!u.mv || u.mv.align) orderMove(w, u, goal);
   u.mv!.goal = goal;
   u.tx = cellCenterX(goal % w.grid.width);
   u.ty = cellCenterY(Math.floor(goal / w.grid.width));
@@ -204,7 +204,7 @@ export function combatStep(w: World, u: Unit): void {
     // Target died or vanished: stop where we are.
     u.target = null;
     u.ordered = false;
-    stopMove(u);
+    stopMove(w, u);
     t = undefined;
   }
   const scanning = t ? !u.ordered : u.tx === null;
@@ -220,7 +220,7 @@ export function combatStep(w: World, u: Unit): void {
     chase(w, u, t);
     return;
   }
-  stopMove(u);
+  stopMove(w, u);
   if (w.tick < u.lastAttack + u.attack.cooldown) return;
   u.lastAttack = w.tick;
   if (u.attack.projectile) {

@@ -580,8 +580,21 @@ export function orderMove(w: World, u: Unit, goal: number): void {
   u.path = [];
 }
 
-/** Drop the move order on the spot. */
-export function stopMove(u: Unit): void {
+/**
+ * Drop the move order on the spot. A unit that stepped past a blocked corner
+ * stands in a cell it does not hold (see `seek`); it keeps an aligning-only
+ * order so it finishes walking into its own cell instead of staying on top
+ * of the corner cell's occupant (guess: not seen in the game; keeps one unit per cell).
+ */
+export function stopMove(w: World, u: Unit): void {
+  if (w.grid && u.cell >= 0 && u.cell !== unitCell(w, u)) {
+    if (!u.mv?.align) u.mv = { ...newMover(u.cell), align: true };
+    u.mv.goal = u.cell;
+    u.tx = cellCenterX(cx(w.grid, u.cell));
+    u.ty = cellCenterY(cy(w.grid, u.cell));
+    u.path = [];
+    return;
+  }
   u.mv = null;
   u.tx = u.ty = null;
   u.path = [];
@@ -610,5 +623,11 @@ export function moveOnMap(w: World, u: Unit): void {
     if (!(r === P_GOAL && s === ARRIVED)) return;
     m.align = true; // arrived: start centring this same tick
   }
-  if (seek(w, u, m, unitCell(w, u), false, true) === ARRIVED) stopMove(u);
+  // Centre on the cell the unit holds. After a corner step (see `seek`) that is next to the
+  // cell it stands in, so this also walks it off the corner cell's occupant.
+  if (seek(w, u, m, u.cell >= 0 ? u.cell : unitCell(w, u), false, true) === ARRIVED) {
+    u.mv = null;
+    u.tx = u.ty = null;
+    u.path = [];
+  }
 }
