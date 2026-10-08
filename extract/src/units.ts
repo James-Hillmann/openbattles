@@ -2,10 +2,14 @@ import { u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
 import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
+import { buildModelUnits, type ModelUnit } from './modelSprites';
+import type { ModelClips } from './modelClips';
 
 export interface EntityInfo {
   /** Record index in the table. */
   index: number;
+  /** Entity index (+0x04): the key the game's per-entity tables use (combat bonuses, model clips). */
+  entityIndex: number;
   /** Global id (+0x06). */
   id: number;
   name: string;
@@ -23,12 +27,12 @@ export function parseEntities(ebp: Uint8Array | readonly EntityRecord[]): Entity
   const recs = ebp instanceof Uint8Array ? parseEntityRecords(ebp) : ebp;
   return recs
     .filter((r) => r.kind === 0)
-    .map((r) => ({ index: r.index, id: u16(r.raw, 6), name: r.name, asset: r.sprite, speed: u16(r.raw, 0x0c) }));
+    .map((r) => ({ index: r.index, entityIndex: u16(r.raw, 4), id: u16(r.raw, 6), name: r.name, asset: r.sprite, speed: u16(r.raw, 0x0c) }));
 }
 
 /**
  * The three sprite layouts units use, by asset suffix. Everything else that moves
- * (siege, flyers, ships, the Giant) is a 3D model under Models/ and isn't drawn yet.
+ * (siege, flyers, ships, the Giant) is a 3D model under Models/, drawn by modelSprites.ts.
  *
  * - `hero` (`_hrm`, `_hrf`, also campaign heroes): one file per facing, `_w0..4` walk and `_a0..4`
  *   attack, 6 frames of 24 px in a row. Idle is walk frame 0 (confirmed in the emulator).
@@ -60,8 +64,15 @@ export interface UnitSprite {
   name: string;
   speed: number;
   layout: SpriteLayout;
-  /** Frame size in px (square). */
-  frame: number;
+  /** Frame size in px. */
+  frameW: number;
+  frameH: number;
+  /** Facing rows: 5 (back, back-right, right, front-right, front); left facings are mirrored. */
+  rows: number;
+  mirrored: boolean;
+  /** Pixel in the frame that sits on the unit's position. */
+  anchorX: number;
+  anchorY: number;
   atlas: Rgba;
   idle: number;
   /** Looped while moving. The game finishes the current pass before going idle. */
@@ -165,7 +176,13 @@ export function buildUnitSprites(
         name: e.name,
         speed: e.speed,
         layout,
-        frame: c.frame,
+        frameW: c.frame,
+        frameH: c.frame,
+        rows: FACINGS,
+        mirrored: true,
+        // Feet 5 px above the frame's bottom edge (24 px: the old 0.8 anchor; 32 px: guess).
+        anchorX: c.frame / 2,
+        anchorY: c.frame - 5,
         atlas: { width, height, data },
         idle: c.idle,
         walk: c.walk,
@@ -195,22 +212,26 @@ export const FACTIONS = [
 ] as const;
 
 export interface UnitBundle {
-  /** Every sprite unit of the playable factions, for each requested team bank. */
+  /** Sprite units of the playable factions, for each requested team bank. */
   sprites: UnitSprite[];
-  /** Units drawn from 3D models (siege, flyers, ships). Listed so the client can say what is missing. */
-  models: EntityInfo[];
+  /** Units drawn from 3D models, for each requested team bank. */
+  models: ModelUnit[];
+  /** Movers we couldn't draw (model missing or not decodable). */
+  missing: EntityInfo[];
   /** Combat and movement stats per entity name, for every sprite unit (see docs/re-notes/combat.md). */
   stats: Record<string, UnitStats>;
 }
 
 /**
  * Read the entity table and build sprite atlases for the playable factions' units.
- * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`).
+ * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`); `clipsFor` gives a
+ * model unit's animation clips (e.g. `modelClips` from ARM9).
  */
 export function buildUnitBundle(
   file: (path: string) => Uint8Array | undefined,
   banks: readonly number[],
   fixPalette?: (pal: Uint8Array) => void,
+  clipsFor: (e: EntityInfo) => ModelClips | null = () => null,
 ): UnitBundle {
   const need = (p: string) => {
     const d = file(p);
@@ -226,14 +247,15 @@ export function buildUnitBundle(
     const d = file(p);
     return d ? decodeChars(d) : undefined;
   }, palette, banks, playable);
+  const modelUnits = entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/'));
+  // Models take the team colors only; odd ("selected") banks are drawn with an outline instead.
+  const models = buildModelUnits(modelUnits, file, palette, banks.filter((b) => b % 2 === 0), clipsFor);
   const stats: Record<string, UnitStats> = {};
-  for (const name of new Set(sprites.map((s) => s.name))) {
+  const names = [...sprites, ...models].map((s) => s.name);
+  for (const name of new Set(names)) {
     const rec = records.find((r) => r.name === name);
     if (rec?.kind === 0) stats[name] = unitStats(records, rec);
   }
-  return {
-    sprites,
-    stats,
-    models: entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/')),
-  };
+  const drawn = new Set(names);
+  return { sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

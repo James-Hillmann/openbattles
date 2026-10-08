@@ -53,7 +53,7 @@ describe('unit atlases', () => {
   const sheet = (w: number, h: number, v: number) => ({ tilesWide: w / 8, tilesHigh: h / 8, bpp: 4 as const, pixels: new Uint8Array(w * h).fill(v) });
 
   it('packs infantry idle, walk and attack into facing rows', () => {
-    const e: EntityInfo = { index: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
+    const e: EntityInfo = { index: 0, entityIndex: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
     // Idle strip = index 1, walk sheet = 2, attack sheet = 3.
     const files: Record<string, ReturnType<typeof sheet>> = {
       'Sprites/x_mel_0.NCBR': sheet(128, 32, 1),
@@ -69,7 +69,7 @@ describe('unit atlases', () => {
     const out = buildUnitSprites([e], (p) => files[p], pal, [0, 2]);
     expect(out.map((s) => s.key)).toEqual(['X_Mel@0', 'X_Mel@2']);
     const s = out[0]!;
-    expect([s.atlas.width, s.atlas.height, s.frame]).toEqual([11 * 24, 5 * 24, 24]);
+    expect([s.atlas.width, s.atlas.height, s.frameW, s.frameH, s.rows]).toEqual([11 * 24, 5 * 24, 24, 24, 5]);
     const px = (col: number, row: number) => s.atlas.data[((row * 24 + 12) * s.atlas.width + col * 24 + 12) * 4];
     expect([px(0, 0), px(1, 4), px(5, 2), px(6, 1), px(10, 3)]).toEqual([1, 2, 2, 3, 3]);
     expect(s.walk).toEqual([1, 2, 3, 4, 5, 0]);

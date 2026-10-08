@@ -189,8 +189,57 @@ never copy them into the repo.
 Facing rows are back, back-right, right, front-right, front; left facings are the right ones mirrored
 (confirmed: a builder walking down-left showed the front-right row flipped).
 
-Units drawn from 3D models (`Models/*.nsbmd` + `.nsbca`, Nitro `BMD0`/`BCA0`), not drawn yet:
-ballista, catapult, gryphon/dragon, giant, ships and transports, and the Astronaut/Alien siege units.
+Units drawn from 3D models: see "3D models" below.
+
+### Where sprites sit (emulator, C5SE)
+
+Measured by reading unit positions (unit +0xEC/+0xF0, 20.12 px) next to the sprite frames found on
+screen with `track.py`, for idle units on one screen:
+
+- A 24 px frame (King builder, King hero) is drawn with its left edge 12 px and its top 15 px from the
+  point the position maps to. Both units gave the same offset. confirmed (relative).
+- A 32 px mounted frame (King knight) sits 4 px further left and 8 px further up than a 24 px frame
+  for the same position. confirmed. The client's anchors (12, 19) and (16, 27) keep that difference.
+- A ballista's model origin lands on that same point (fitted to within about 1 px). likely.
+- Units at rest sat on multiples of 24 x 16 px (cell corners in our tile grid), e.g. (264, 240) and
+  (192, 288). How that lines up with our sim's cell centres is open (open-questions.md).
+
+## 3D models (`Models/*.nsbmd` + `.nsbca`)
+
+The siege units, flyers, ships and the Giant are Nitro 3D models (`BMD0`) with one joint animation
+each (`BCA0`). Decoders: `extract/src/nsbmd.ts`, `extract/src/nsbca.ts`; renderer
+`extract/src/raster.ts`, `extract/src/modelSprites.ts`. Both formats are the standard Nintendo SDK
+ones; what's specific to this game:
+
+| finding | confidence |
+|---|---|
+| Each `.nsbca` holds **one long animation** per model (e.g. 91 frames for the King ballista, 99 for the dragon); the game plays sub-ranges of it (next section). | confirmed |
+| The model's **size comes from the animation**: it scales the top object (ballista 11.96, catapult 0.45, dragon 0.42 on the body...). The bind pose alone gives sizes from 3 to 80 units. With the animation applied every unit model lands on one world scale. | confirmed |
+| Camera: orthographic, looking down **45°**, **1 px per world unit**. Fitted against the King ballista, catapult and dragon (silhouette overlap 0.74-0.87 against the emulator, pitch 40/45/50 and scale 0.95/1/1.05 tried; 45° and 1.0 won for all three). | confirmed |
+| Facing: models turn to their direction of travel **measured in map cells** (24 x 16 px), with the model's +Z axis pointing that way. Ballista moving left fitted yaw 260°, catapult 250°, dragon 270° (direction in cells: about 255°). | confirmed |
+| Team colors: texture palette entries 0-15 hold `KingFaction.NCLR` bank 2 (blue); the game swaps in the owner's bank (a red King ballista on screen). | confirmed |
+| A selected model gets a 1 px outline in the selection color (yellow for your own units). | confirmed (seen); exact pixels guess |
+| Joint animation rotations come as either a pivot-compressed matrix (same scheme as model objects) or a "basis" matrix in 10 bytes: five cells in the top 13 bits of five s16, a sixth cell (13-bit signed) spread over their low 3 bits (word 4's first, then words 0-3), the last row from a cross product. All 4389 basis entries the unit animations use come out orthonormal. | confirmed |
+| Animation frames advance **one per 2 VBlanks** (30 fps; the controller's frame counter in RAM, with the odd repeated frame when the game lags). | confirmed |
+
+The game turns models smoothly; the client draws 32 facings and renders each pose on first use.
+
+## Model animation clips (ARM9, confirmed)
+
+Found by watching the model's animation object in RAM (frame counter as 20.12 at its +0) and the
+write that sets it (`0x0203B720`: frame = controller base + local counter):
+
+- Each model unit has three animation controllers: **0 idle, 1 move, 2 attack** (built at
+  `0x0200D584`/`0x0200D5B8`/`0x0200D5EC` with clip numbers 0, 1, 2).
+- A clip is 3 bytes: first frame, end frame (exclusive), and a byte that is always 1. `first == end`
+  holds one pose (the King ballista's idle is frame 0, its attack stance frame 60).
+- `0x0200D188` gets a clip: `0x0200CE5C` maps the entity index (`Entities.ebp` +0x04) to a clip-set
+  number with a compare tree (unknown indices get set 0), then a pointer table at `0x02142864` gives
+  that set's 5 clips (only the first 3 are used).
+- Seen: the King dragon plays frames 50-87 hovering (idle), 0-39 flying (move), 50-87 again while
+  attacking (the fire comes from a particle effect). The ballista's controllers sat on 0 and 60.
+- The client reads the table from the user's ARM9 at load (`extract/src/modelClips.ts`, which runs
+  the compare tree with a tiny ARM interpreter) rather than shipping the numbers.
 
 ## Animations (`BP/Animations.abp`, likely)
 
@@ -237,8 +286,7 @@ Measured frame by frame with `tools/emu/burst.py` + `track.py` on the King build
 - The cycle keeps counting when the facing changes mid-walk.
 - On arrival the unit **finishes the current pass** of the walk cycle (up to 5 more frames) before it
   shows the idle pose. Client: `client/src/unitAnim.ts`.
-- Attack timing (once, ending on idle) and the mounted ping-pong walk come from the animation table
-  and are not yet checked in the emulator.
+- The mounted ping-pong walk comes from the animation table and is not yet checked frame by frame.
 
 ## Timing seen in the emulator (likely)
 
