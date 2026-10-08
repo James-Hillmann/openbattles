@@ -6,6 +6,7 @@ import {
   createWorld,
   isVisible,
   updateFog,
+  visionCell,
   fx,
   fxToFloat,
   hashWorld,
@@ -424,8 +425,9 @@ app.canvas.addEventListener('contextmenu', (e) => {
 
 /** Enemy units outside our vision aren't drawn. guess: not yet checked in the emulator. */
 function hiddenByFog(u: World['units'][number]): boolean {
-  if (!fog || u.owner === localPlayer || u.cell < 0) return false;
-  return !isVisible(fog, u.cell % fog.width, Math.floor(u.cell / fog.width));
+  if (!fog || u.owner === localPlayer) return false;
+  const [cx, cy] = visionCell(u);
+  return !isVisible(fog, cx, cy);
 }
 
 /** Flat grey over every cell no unit has seen yet (the game draws its FoWTileset texture there, with soft edges). */

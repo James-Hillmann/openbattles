@@ -1,4 +1,5 @@
 import type { PlayerId, Unit, World } from './state';
+import { cellOf } from './terrain';
 
 /**
  * Fog of war, as the game's `User::FogCircle` manager does it (0x020A15B8).
@@ -75,13 +76,25 @@ const sightOf = (u: Unit): number => u.sight;
 export function updateFog(f: Fog, w: World, player: PlayerId): void {
   f.visible.fill(0);
   for (const u of w.units) {
-    if (u.owner !== player || u.hp <= 0 || u.cell < 0) continue;
+    if (u.owner !== player || u.hp <= 0) continue;
     const r = sightOf(u);
     if (r === 0) continue;
-    stampCircle(f, f.visible, u.cell % f.width, Math.floor(u.cell / f.width), r);
+    const [cx, cy] = visionCell(u);
+    stampCircle(f, f.visible, cx, cy, r);
   }
   for (let i = 0; i < f.visible.length; i++) if (f.visible[i]) f.explored[i] = 1;
 }
+
+/**
+ * The cell a unit's vision circle is centred on: the cell it stands in, or for a
+ * building the middle of its footprint (the castle at mp01's (10, 10) has its
+ * circle at (11, 11) in RAM). Read from the position, which buildings also have.
+ */
+export const visionCell = (u: Unit): [number, number] => {
+  const [cx, cy] = cellOf(u.x, u.y);
+  const mid = u.size >> 1;
+  return [cx + mid, cy + mid];
+};
 
 export const isVisible = (f: Fog, cx: number, cy: number): boolean =>
   cx >= 0 && cy >= 0 && cx < f.width && cy < f.height && f.visible[cy * f.width + cx] === 1;

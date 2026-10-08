@@ -1,6 +1,6 @@
 import { cellCenterX, cellCenterY, isWalkableCode, type TerrainGrid } from './terrain';
 import type { EntityId, EntityType, Player, PlayerId, Unit, World } from './state';
-import { orderMove, unitCell } from './movement';
+import { orderMove, stopMove, unitCell } from './movement';
 import { findById } from './combat';
 
 /**
@@ -223,6 +223,7 @@ export function orderHarvest(w: World, player: PlayerId, ids: readonly EntityId[
   if (g.cells[tree] !== TERRAIN_TREE) return;
   for (const u of ownBuilders(w, player, ids)) {
     u.target = null;
+    stopMove(w, u); // a new order replaces the walk in progress (our rule)
     u.job = u.carrying ? { kind: 'deliver', tree, drop: 0 } : { kind: 'chop', tree, timer: CHOP_TICKS };
   }
 }
@@ -247,18 +248,19 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !canPlace(w, t, cx, cy)) return;
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
-  for (const u of builders) setBuildJob(u, site);
+  for (const u of builders) setBuildJob(w, u, site);
 }
 
-function setBuildJob(u: Unit, site: Unit): void {
+function setBuildJob(w: World, u: Unit, site: Unit): void {
   u.target = null;
+  stopMove(w, u); // a new order replaces the walk in progress (our rule)
   u.job = { kind: 'build', site: site.id };
 }
 
 export function orderConstruct(w: World, player: PlayerId, ids: readonly EntityId[], site: EntityId): void {
   const s = findById(w.units, site);
   if (!s || s.owner !== player || !isBuilding(s) || isFinished(s)) return;
-  for (const u of ownBuilders(w, player, ids)) setBuildJob(u, s);
+  for (const u of ownBuilders(w, player, ids)) setBuildJob(w, u, s);
 }
 
 export function orderTrain(w: World, player: PlayerId, building: EntityId, type: number): void {

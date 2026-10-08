@@ -2,16 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   CELL_H,
   CELL_W,
+  cellCenterX,
+  cellCenterY,
   createWorld,
   fx,
   hashWorld,
   meleeBonus,
+  placeBuilding,
   replay,
   spawnUnit,
   step,
   type AttackStats,
+  type EntityType,
   type InputLog,
   type MeleeBonusTable,
+  type TerrainGrid,
   type UnitType,
   type World,
 } from '@lbw/sim';
@@ -273,6 +278,30 @@ describe('buildings', () => {
     for (let i = 0; i < 40; i++) step(w, []);
     expect(near.hp).toBeLessThan(500);
     expect(tower.x).toBe(at(10, 10)[0]);
+  });
+
+  // A 3x3 castle, as placeBuilding puts it on a map (position = top-left cell).
+  const CASTLE3: EntityType = { kind: 10, role: 7, hp: 1500, cost: 1000, buildTime: 900, size: 3, speed: 0xffff, yield: 0, priority: 10, attack: CASTLE.attack! };
+  const open30 = (): TerrainGrid => ({ width: 30, height: 30, cells: new Uint8Array(900) });
+
+  for (const [side, sx, sy] of [['right', 16, 11], ['below', 11, 16], ['left', 6, 11], ['above', 11, 6]] as const) {
+    it(`melee reaches and hits a castle from the ${side}: range is to the nearest footprint cell`, () => {
+      const w = createWorld({ seed: 1, grid: open30(), types: [CASTLE3] });
+      const c = placeBuilding(w, 1, CASTLE3, 10, 10);
+      const s = spawnUnit(w, 0, cellCenterX(sx), cellCenterY(sy), SWORDSMAN);
+      step(w, [{ tick: 0, player: 0, cmd: { kind: 'attack', unitIds: [s.id], target: c.id } }]);
+      for (let i = 0; i < 400; i++) step(w, []);
+      expect(c.hp).toBeLessThan(1500);
+    });
+  }
+
+  it('an arrow lands as soon as it enters any footprint cell', () => {
+    const w = createWorld({ seed: 1, grid: open30(), types: [CASTLE3] });
+    const c = placeBuilding(w, 1, CASTLE3, 10, 10);
+    spawnUnit(w, 0, cellCenterX(16), cellCenterY(12), ARCHER); // 4 cells right of the footprint's right column
+    step(w, [{ tick: 0, player: 0, cmd: { kind: 'attack', unitIds: [2], target: c.id } }]);
+    for (let i = 0; i < 60; i++) step(w, []);
+    expect(c.hp).toBeLessThan(1500);
   });
 
   it('a move order does nothing to a building', () => {
