@@ -166,9 +166,11 @@ const SCAN_PHASE = 2;
  */
 function pickTarget(w: World, u: Unit): Unit | undefined {
   const a = u.attack!;
-  const sight2 = a.sight * a.sight;
+  // Buildings (role 8-19, i.e. towers) search their max range instead of their sight (likely: code).
+  const sight = u.role >= 8 && u.role <= 19 ? a.maxRange : u.sight;
+  const sight2 = sight * sight;
   const min2 = a.minRange * a.minRange;
-  const far = a.sight + a.maxRange;
+  const far = sight + a.maxRange;
   let best: Unit | undefined;
   let bestIn = false;
   let bestD = 0;
