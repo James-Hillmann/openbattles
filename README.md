@@ -1,6 +1,6 @@
-# LEGO Battles Web
+# OpenBattles
 
-A browser reimplementation of LEGO Battles (DS, 2009) with 1v1 online play.
+An unofficial browser reimplementation of LEGO Battles (DS, 2009) with 1v1 online play.
 Behavior is reverse-engineered and rebuilt in TypeScript; nothing from the
 original game ships in this repo. **You load your own ROM dump in the browser**
 and assets are extracted locally.
@@ -48,3 +48,9 @@ npm run m0 -- path/to/your.nds   # M0 recon: unpack into ./out (gitignored)
 - M3 Lockstep: two browsers in one room, in sync
 - M4 Faithful rules for one faction
 - M5 Full skirmish
+
+## Legal
+
+OpenBattles is an unofficial fan project, not affiliated with or endorsed by the LEGO Group,
+Warner Bros. Games, TT Games, Hellbent Games, or Nintendo. It contains no game code or assets;
+you need your own legally obtained copy of the game.

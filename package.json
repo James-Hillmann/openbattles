@@ -1,5 +1,5 @@
 {
-  "name": "lego-battles-web",
+  "name": "openbattles",
   "private": true,
   "type": "module",
   "workspaces": ["sim", "extract", "server", "client"],
