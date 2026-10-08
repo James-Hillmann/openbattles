@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FX_ONE, fx, fxDiv, fxLen, fxMul, fxRatio, fxToFloat, fxToInt, isqrt } from '@lbw/sim';
+import { FX_ONE, fx, fxDiv, fxLen, fxMul, fxMulDiv, fxRatio, fxToFloat, fxToInt, isqrt } from '@lbw/sim';
 
 describe('fixed point', () => {
   it('multiplies and divides exactly', () => {
@@ -13,6 +13,12 @@ describe('fixed point', () => {
     expect(fxMul(a, FX_ONE)).toBe(a);
     expect(fxToInt(fxMul(fx(200), fx(150)))).toBe(30000);
   });
+  it('fxMulDiv keeps precision when the ratio is small', () => {
+    // 1000 * (1/3000) = 1/3; going through a Q16.16 ratio first would lose ~0.2%.
+    expect(fxMulDiv(fx(1000), fx(1), fx(3000))).toBe(fxRatio(1, 3));
+    expect(fxMulDiv(fx(-7), fx(1), fx(2))).toBe(fxRatio(-7, 2));
+  });
+
   it('isqrt is exact', () => {
     for (const n of [0, 1, 2, 3, 4, 15, 16, 17, 1 << 30, 2 ** 52 - 1]) {
       const r = isqrt(n);

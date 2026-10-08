@@ -1,4 +1,4 @@
-import { fxAdd, fxDiv, fxLen, fxMul, fxRaw, type Fx } from './fixed';
+import { fxAdd, fxLen, fxMulDiv, fxRaw, type Fx } from './fixed';
 import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
@@ -89,9 +89,10 @@ function moveUnit(u: Unit, g: TerrainGrid | null): void {
       else u.tx = u.ty = null;
       continue;
     }
-    const k = fxDiv(budget, dist48);
-    u.x = fxAdd(u.x, fxMul(dx, k));
-    u.y = fxAdd(u.y, fxMul(dy, k));
+    // Scale by budget/dist in one go. A Q16.16 ratio budget/dist is tiny on long moves and truncating it
+    // made units slower the farther away their target was (0.4% at 20 cells).
+    u.x = fxAdd(u.x, fxMulDiv(dx, budget, dist48));
+    u.y = fxAdd(u.y, fxMulDiv(dy, budget, dist48));
     break;
   }
 }
