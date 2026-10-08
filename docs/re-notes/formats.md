@@ -162,6 +162,29 @@ never copy them into the repo.
   12 and 14 look like build-preview ghosts.
 - `Sprites/Anim0..7.NCER/.NANR` hold one small cell ("Idle") each; not needed to cut frames.
 
+## Animations (`BP/Animations.abp`, likely)
+
+PMOC > 2580 bytes of back-to-back records, no header. Parses exactly to 180 records:
+12 animation sets (ids 0-5 and 17-22, the second group repeats the first) x 3 animations x 5 facings.
+
+| offset | size | meaning | confidence |
+|---|---|---|---|
+| 0 | 1 | animation set id | confirmed (structure) |
+| 1 | 1 | animation: 0 idle, 1 walk, 2 attack | likely |
+| 2 | 1 | play mode: 0 loop, 1 ping-pong?, 2 once? | guess |
+| 3 | 1 | facing 0-4 (back, back-right, right, front-right, front) | likely |
+| 4 | 1 | frame count n | confirmed |
+| 5 | 1 | always `0xA1` | confirmed |
+| 6 | 2n | per frame: u16 start tile in the sheet (8x8 tiles, row-major). Bits 14/15 look like a frame-size class (0x8000 frames step 4 tiles = 32 px; others step 3 = 24 px) | guess |
+
+## Timing seen in the emulator (likely)
+
+- The battlefield redraws every 2nd VBlank: 30 updates per second.
+- A walking unit changes animation frame every 4 VBlanks (15 fps). The King hero's 6-frame walk
+  loops in about 24 VBlanks (0.4 s).
+- The King hero walks about 66 px/s (132 px in 120 VBlanks), about 2.2 px per update.
+- Units and buildings are drawn by the 3D engine (main BG0); fog of war is main BG2.
+
 ## Template for new sections
 
 ### `<ext or name>` (magic `____`)
