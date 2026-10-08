@@ -12,7 +12,8 @@ import {
   type ScheduledCommand,
   type World,
 } from '@lbw/sim';
-import { FRAME, type MapBundle, type Rgba } from '@lbw/extract';
+import { FACINGS, FACTIONS, type MapBundle, type Rgba, type UnitBundle, type UnitSprite } from '@lbw/extract';
+import { animate, attack, facing, type AnimState } from './unitAnim';
 import { mountRomPanel } from './romPanel';
 
 const LOCAL_PLAYER = 0;
@@ -60,50 +61,82 @@ function textureFrom(img: Rgba): Texture {
   return t;
 }
 
-/** frames[row][col]: rows are facings (back, back-right, right, front-right, front), cols the walk cycle. */
-type Frames = Texture[][];
-interface UnitTextures {
-  walk: Frames;
-  /** One frame per facing row. */
-  idle: Texture[];
+/** One unit type in one team color: frames[row][col], rows are facings, cols atlas columns. */
+interface UnitType {
+  sprite: UnitSprite;
+  frames: Texture[][];
 }
-let teamFrames: UnitTextures[] = [];
+/** By "<entity name>@<bank>". */
+const unitTypes = new Map<string, UnitType>();
+/** Entity names per faction prefix, in table order (hero, hero F, builder, melee, ranged, mounted). */
+let factionUnits = new Map<string, string[]>();
+/** Render-side only: which unit type each sim unit is. The sim doesn't know unit types yet. */
+const unitKind = new Map<number, string>();
 const unitSprites = new Map<number, Sprite>();
-/** Last facing row per unit, so idle units keep looking where they walked. */
-const unitRow = new Map<number, number>();
-/** When each walking unit started walking, so its cycle begins at frame 0 like in the game. */
-const walkStart = new Map<number, number>();
+const unitAnim = new Map<number, { state: AnimState; row: number; flip: boolean }>();
+const factionPick: [string, string] = ['K', 'A'];
 
-function cutFrames(sheet: Texture, rows: number, cols: number): Frames {
-  return Array.from({ length: rows }, (_, row) =>
-    Array.from({ length: cols }, (_, col) => new Texture({ source: sheet.source, frame: new Rectangle(col * FRAME, row * FRAME, FRAME, FRAME) })),
-  );
+function onUnits(u: UnitBundle) {
+  unitTypes.clear();
+  factionUnits = new Map();
+  for (const s of u.sprites) {
+    const tex = textureFrom(s.atlas);
+    const cols = s.atlas.width / s.frame;
+    const frames = Array.from({ length: FACINGS }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => new Texture({ source: tex.source, frame: new Rectangle(col * s.frame, row * s.frame, s.frame, s.frame) })),
+    );
+    unitTypes.set(s.key, { sprite: s, frames });
+    const prefix = s.name.slice(0, 1);
+    const list = factionUnits.get(prefix) ?? [];
+    if (!list.includes(s.name)) list.push(s.name);
+    factionUnits.set(prefix, list);
+  }
+  mountFactionPickers(u);
 }
 
-/**
- * The game advances unit animation frames every 4 VBlanks (60/4 = 15 fps),
- * measured in the emulator. Render-side only.
- */
-const ANIM_FRAME_MS = (4 * 1000) / 60;
-
-/**
- * Walk cycle for 24 px units, from BP/Animations.abp: the 5 walk frames, then
- * the idle pose as a 6th frame, looped. -1 means "the idle frame for this facing".
- */
-const WALK_CYCLE = [0, 1, 2, 3, 4, -1];
-
-function onMap(b: MapBundle) {
-  ground.texture = textureFrom(b.ground);
-  teamFrames = TEAM_BANK.map((bank) => ({
-    walk: cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!), 5, 5),
-    idle: cutFrames(textureFrom(b.units[`k_mel_0@${bank}`]!), 1, 5)[0]!,
-  }));
+/** Spawn each player's faction lineup: every sprite unit type once, at its real speed. */
+function spawnLineups(cx: number, cy: number) {
+  world = createWorld({ seed: 1234 });
+  unitKind.clear();
+  for (let p = 0; p < 2; p++) {
+    const names = factionUnits.get(factionPick[p]!) ?? [];
+    names.forEach((name, i) => {
+      const t = unitTypes.get(`${name}@${TEAM_BANK[p]}`);
+      const u = spawnUnit(world, p, fx(cx - 90 + i * 36), fx(cy + (p === 0 ? -50 : 50)), t?.sprite.speed);
+      unitKind.set(u.id, name);
+    });
+  }
+  if (!factionUnits.size) resetWorld(cx, cy);
+  prev = cloneWorld(world);
+  pending.length = 0;
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
-  unitRow.clear();
-  walkStart.clear();
-  resetWorld(b.ground.width / 2, b.ground.height / 2);
-  centerOn(b.ground.width / 2, b.ground.height / 2);
+  unitAnim.clear();
+}
+
+let mapSize = { w: 600, h: 440 };
+function onMap(b: MapBundle) {
+  ground.texture = textureFrom(b.ground);
+  mapSize = { w: b.ground.width, h: b.ground.height };
+  spawnLineups(mapSize.w / 2, mapSize.h / 2);
+  centerOn(mapSize.w / 2, mapSize.h / 2);
+}
+
+function mountFactionPickers(u: UnitBundle) {
+  const el = document.getElementById('factions')!;
+  const opts = FACTIONS.map((f) => `<option value="${f.prefix}">${f.name}</option>`).join('');
+  el.innerHTML = `
+    <label>You <select data-p="0">${opts}</select></label>
+    <label>Opponent <select data-p="1">${opts}</select></label>
+    <p class="muted">Not drawn yet (3D models): ${u.models.map((m) => m.name).join(', ')}</p>`;
+  el.querySelectorAll<HTMLSelectElement>('select').forEach((sel) => {
+    const p = Number(sel.dataset.p);
+    sel.value = factionPick[p]!;
+    sel.addEventListener('change', () => {
+      factionPick[p] = sel.value;
+      spawnLineups(mapSize.w / 2, mapSize.h / 2);
+    });
+  });
 }
 
 // --- Camera: drag with left mouse, or arrow keys / WASD ------------------------
@@ -126,7 +159,12 @@ window.addEventListener('pointermove', (e) => {
   camera.y = e.clientY - drag.y;
 });
 const keys = new Set<string>();
-window.addEventListener('keydown', (e) => keys.add(e.key.toLowerCase()));
+window.addEventListener('keydown', (e) => {
+  keys.add(e.key.toLowerCase());
+  // F: preview the attack animation on your units (combat itself isn't in the sim yet).
+  if (e.key.toLowerCase() === 'f' && !e.repeat) attackQueued = true;
+});
+let attackQueued = false;
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 app.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -159,14 +197,6 @@ app.canvas.addEventListener('contextmenu', (e) => {
 const tickEl = document.getElementById('tick')!;
 const hashEl = document.getElementById('hash')!;
 
-/** Facing row + mirror from a movement vector (sprites natively face right). */
-function facing(dx: number, dy: number): { row: number; flip: boolean } {
-  const a = Math.atan2(dy, dx); // render-side only; never feeds the sim
-  const oct = Math.round(a / (Math.PI / 4)); // -4..4, 0 = right, 2 = down
-  const rowByOct: Record<number, number> = { [-4]: 2, [-3]: 1, [-2]: 0, [-1]: 1, 0: 2, 1: 3, 2: 4, 3: 3, 4: 2 };
-  return { row: rowByOct[oct] ?? 4, flip: Math.abs(oct) >= 3 };
-}
-
 let acc = 0;
 let animTime = 0;
 app.ticker.add((t) => {
@@ -194,35 +224,33 @@ app.ticker.add((t) => {
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
-    const frames = teamFrames[u.owner];
-    if (!frames) {
+    const type = unitTypes.get(`${unitKind.get(u.id)}@${TEAM_BANK[u.owner]}`);
+    if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[u.owner] ?? 0xffffff);
       continue;
     }
     let s = unitSprites.get(u.id);
     if (!s) {
-      s = new Sprite(frames.idle[4]!);
-      s.anchor.set(0.5, 0.8);
+      s = new Sprite(type.frames[4]![type.sprite.idle]!);
+      // Feet 5 px above the frame's bottom edge (guess for 32 px frames; 24 px matches the old 0.8 anchor).
+      s.anchor.set(0.5, (type.sprite.frame - 5) / type.sprite.frame);
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
+    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: 4, flip: false };
     const moving = u.x !== p.x || u.y !== p.y;
-    if (moving) {
-      const f = facing(u.x - p.x, u.y - p.y);
-      s.scale.x = f.flip ? -1 : 1;
-      if (!walkStart.has(u.id)) walkStart.set(u.id, animTime);
-      const frame = Math.floor((animTime - walkStart.get(u.id)!) / ANIM_FRAME_MS);
-      const col = WALK_CYCLE[frame % WALK_CYCLE.length]!;
-      s.texture = col < 0 ? frames.idle[f.row]! : frames.walk[f.row]![col]!;
-      unitRow.set(u.id, f.row);
-    } else {
-      s.texture = frames.idle[unitRow.get(u.id) ?? 4]!;
-      walkStart.delete(u.id);
-    }
+    if (moving) Object.assign(a, facing(u.x - p.x, u.y - p.y));
+    if (attackQueued && u.owner === LOCAL_PLAYER) a.state = attack(animTime);
+    const r = animate(type.sprite, a.state, moving, animTime);
+    a.state = r.state;
+    unitAnim.set(u.id, a);
+    s.texture = type.frames[a.row]![r.col]!;
+    s.scale.x = a.flip ? -1 : 1;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
   }
+  attackQueued = false;
   unitLayer.sortableChildren = true;
 });
 
-mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap);
+mountRomPanel(document.getElementById('rom') as HTMLInputElement, document.getElementById('rominfo')!, onMap, onUnits);
