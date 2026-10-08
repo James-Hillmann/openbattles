@@ -33,7 +33,8 @@ export class HudView {
 
   update(state: TopScreenState): void {
     if (!this.hud) return;
-    const key = JSON.stringify(state);
+    // The minimap image only changes with the map, and setBundle() resets `shown` then.
+    const key = JSON.stringify({ ...state, minimap: state.minimap && { ...state.minimap, image: undefined } });
     if (key === this.shown) return;
     this.shown = key;
     const img = composeTopScreen(this.hud, state);

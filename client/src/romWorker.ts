@@ -44,7 +44,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       if (!rom) throw new Error('No ROM loaded');
       const bundle = buildMapBundle(rom, e.data.name);
       const hud = buildHudBundle(rom, HUD_PORTRAITS);
-      const transfer = [bundle.ground.data.buffer, ...Object.values(bundle.units).map((u) => u.data.buffer)];
+      const transfer = [bundle.ground.data.buffer, ...Object.values(bundle.units).map((u) => u.data.buffer), ...(bundle.minimap ? [bundle.minimap.data.buffer] : [])];
       post({ type: 'map', bundle, hud }, transfer as Transferable[]);
     }
   } catch (err) {

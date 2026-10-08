@@ -3,6 +3,7 @@ import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTile
 import { decodeChars, decodePalette } from './nitro';
 import { renderMap, renderSheet, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
+import { renderMinimap } from './minimap';
 import { applyTeamColors } from './teams';
 import { bakeTrees, readTreeTable, type TreeTable } from './trees';
 
@@ -19,6 +20,8 @@ export interface MapBundle {
    * front-right, front) x 5 frames of 24x24. `_0` (idle): one row, one 24x24 frame per facing.
    */
   units: Record<string, Rgba>;
+  /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
+  minimap?: Rgba;
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
@@ -70,5 +73,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
     applyTeamColors(pal, rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, LOCAL_TEAM);
     units[`${u.sheet}@${u.bank}`] = renderSheet(sheet, pal, u.bank);
   }
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), units };
+  const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
+  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), units, minimap };
 }

@@ -114,11 +114,15 @@ function unitTextures(b: MapBundle, bank: number): UnitTextures {
 }
 
 let sandboxEntity = -1;
+let minimap: Rgba | undefined;
+/** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
+const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   teamFrames = TEAM_BANK.map((bank) => ({ normal: unitTextures(b, bank), selected: unitTextures(b, bank + 1) }));
   hudView.setBundle(hud);
+  minimap = b.minimap;
   sandboxEntity = hudView.entityIndex(SANDBOX_ENTITY);
   sandboxHp = hud.labels[sandboxEntity]?.maxHp ?? 0;
   selection.ids.clear();
@@ -299,6 +303,17 @@ app.ticker.add((t) => {
     minifigCap: Math.max(4, mine.length),
     star: [0, 0],
     selected: firstSelected && sandboxEntity >= 0 ? { entity: sandboxEntity, hp: sandboxHp } : undefined,
+    minimap: minimap && {
+      image: minimap,
+      // World px -> minimap px: 1.5 px per 24x16 cell, i.e. x / 16 and y * 3 / 32.
+      view: {
+        x: Math.floor(-camera.x / camera.scale.x / 16),
+        y: Math.floor((-camera.y / camera.scale.y) * 3 / 32),
+        w: Math.round(app.screen.width / camera.scale.x / 16),
+        h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
+      },
+      dots: drawn.map((u) => ({ x: Math.floor(u.x / 16), y: Math.floor((u.y * 3) / 32), size: 1, rgb: MINIMAP_DOT[u.owner] ?? [255, 255, 255] })),
+    },
   });
 });
 

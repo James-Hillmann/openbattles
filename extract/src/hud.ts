@@ -33,6 +33,8 @@ export const HUD_LAYOUT = {
   /** Name: glyph cells top at y 16, x = (216 - text width) >> 1 (fits "King" and "Builder"). */
   nameY: 16,
   nameSpan: 216,
+  /** Minimap panel, 96x96; the map image sits 1:1 at its top-left (confirmed on mp01). */
+  minimap: { x: 136, y: 40, w: 96, h: 96 },
   /** Status bar: icons at y 168, numbers on the tile grid at y 176. */
   icons: { bricks: 8, minifigs: 88, star: 160, y: 168 },
   counters: { bricks: 24, minifigs: 104, star: 176, y: 176 },
@@ -119,6 +121,16 @@ export interface TopScreenState {
   star: [number, number];
   /** The selected entity, if any: index into `labels`, and its current HP. */
   selected?: { entity: number; hp: number };
+  minimap?: MinimapState;
+}
+
+/** Minimap contents, all in minimap pixels (map px * 1.5 / cell size, i.e. x / 16, y * 3 / 32). */
+export interface MinimapState {
+  image: Rgba;
+  /** The battlefield view: a 1 px white frame (16x18 for the DS's 256x192 view). */
+  view?: { x: number; y: number; w: number; h: number };
+  /** Units are 1 px, buildings 2x2 (castle measured). */
+  dots: { x: number; y: number; size: number; rgb: [number, number, number] }[];
 }
 
 function draw(out: Rgba, img: Rgba, px: number, py: number): void {
@@ -141,10 +153,38 @@ function drawDigits(out: Rgba, hud: HudBundle, text: string, x: number, y: numbe
   }
 }
 
+function drawMinimap(out: Rgba, m: MinimapState): void {
+  const P = HUD_LAYOUT.minimap;
+  const put = (x: number, y: number, rgb: readonly number[]) => {
+    if (x < 0 || y < 0 || x >= P.w || y >= P.h) return;
+    out.data.set([rgb[0]!, rgb[1]!, rgb[2]!, 255], ((P.y + y) * TOP_W + P.x + x) * 4);
+  };
+  const img = m.image;
+  for (let y = 0; y < Math.min(img.height, P.h); y++) {
+    for (let x = 0; x < Math.min(img.width, P.w); x++) {
+      const o = (y * img.width + x) * 4;
+      if (img.data[o + 3]) put(x, y, [img.data[o]!, img.data[o + 1]!, img.data[o + 2]!]);
+    }
+  }
+  for (const d of m.dots) for (let dy = 0; dy < d.size; dy++) for (let dx = 0; dx < d.size; dx++) put(d.x + dx, d.y + dy, d.rgb);
+  const v = m.view;
+  if (v) {
+    const white = [255, 255, 255];
+    for (let x = v.x; x < v.x + v.w; x++) {
+      put(x, v.y, white);
+      put(x, v.y + v.h - 1, white);
+    }
+    for (let y = v.y; y < v.y + v.h; y++) {
+      put(v.x, y, white);
+      put(v.x + v.w - 1, y, white);
+    }
+  }
+}
+
 /** Name text color: sub BG palette bank 0 color 14 (white 0x7FFF). */
 const NAME_RGB: [number, number, number] = [255, 255, 255];
 
-/** Compose the whole 256x192 top screen. The minimap box is left empty. */
+/** Compose the whole 256x192 top screen. */
 export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   const out: Rgba = { width: TOP_W, height: TOP_H, data: hud.frame.data.slice() };
   const L = HUD_LAYOUT;
@@ -154,6 +194,7 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   drawDigits(out, hud, String(s.bricks), L.counters.bricks, L.counters.y);
   drawDigits(out, hud, `${s.minifigs}/${s.minifigCap}`, L.counters.minifigs, L.counters.y);
   drawDigits(out, hud, `${s.star[0]}/${s.star[1]}`, L.counters.star, L.counters.y);
+  if (s.minimap) drawMinimap(out, s.minimap);
   const label = s.selected ? hud.labels[s.selected.entity] : undefined;
   if (s.selected && label) {
     const p = hud.portraits[label.id];
