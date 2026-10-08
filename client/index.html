@@ -14,13 +14,16 @@
       td, th { border-bottom: 1px solid #2a2a2a; padding: 2px 4px; text-align: left; }
       code { color: #9cf; }
       .muted { color: #888; }
+      .err { color: #f77; }
+      select { margin: 8px 0; }
+      canvas { image-rendering: pixelated; }
     </style>
   </head>
   <body>
     <div id="stage"></div>
     <aside id="side">
       <h2>Sandbox</h2>
-      <p class="muted">Right-click to move your units (blue). Tick <code id="tick">0</code>, hash <code id="hash">-</code></p>
+      <p class="muted">Right-click to move your units (red). Drag or WASD to pan, wheel to zoom. Tick <code id="tick">0</code>, hash <code id="hash">-</code></p>
       <h2>Your ROM</h2>
       <p class="muted">Pick your own LEGO Battles dump. It is read locally in a worker and never uploaded.</p>
       <input id="rom" type="file" accept=".nds" />
