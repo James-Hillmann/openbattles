@@ -28,6 +28,8 @@ interface Ob {
   online(): boolean;
   local(): number;
   issueMove(x: number, y: number): void;
+  issueEconomy(): void;
+  units(): unknown[];
   desynced(): unknown;
 }
 const ob = <T>(page: Page, f: (o: Ob) => T) => page.evaluate(`(${f.toString()})(window.__ob)`) as Promise<T>;
@@ -79,7 +81,8 @@ async function main() {
     // (a really hidden tab gets no animation frames; here the render loop just stops ticking).
     await b!.evaluate(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
       document.dispatchEvent(new Event('visibilitychange'));`);
-    // Both sides give orders while the match runs.
+    // Both sides give orders while the match runs. With a ROM: train a Builder and chop a tree too.
+    if (ROM) for (const p of [a!, b!]) await ob(p, (o) => o.issueEconomy());
     for (let i = 0; i < 4; i++) {
       await ob(a!, (o) => o.issueMove(400, 300));
       await ob(b!, (o) => o.issueMove(150, 120));
@@ -99,6 +102,11 @@ async function main() {
       compared++;
     }
     if (await ob(a!, (o) => o.desynced())) fail('relay reported a desync');
+    if (ROM) {
+      const after = await Promise.all([a!, b!].map((p) => ob(p, (o) => o.units().length)));
+      console.log('units on each side after training', after);
+      if (after[0] !== after[1] || after[0]! < units[0]! + 2) fail(`expected a trained Builder per side, got ${after}`);
+    }
     console.log(`two tabs agree on all ${compared} hashes through tick ${TICKS}`);
   } finally {
     await browser.close();

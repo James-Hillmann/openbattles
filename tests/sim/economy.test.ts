@@ -154,6 +154,19 @@ describe('economy', () => {
     expect([Math.floor(u.x / 65536 / 24), Math.floor(u.y / 65536 / 16)]).toEqual([11, 13]);
   });
 
+  it('a building only trains its own units: the Castle makes Builders, not Swordsmen or Farms', () => {
+    const w = world(5000);
+    const castle = placeBuilding(w, 0, CASTLE, 10, 10);
+    const SWORDSMAN = t(3, 2, 350, 100, 270, 1);
+    w.types[SWORDSMAN.kind] = SWORDSMAN;
+    run(w, 1, [
+      { kind: 'train', building: castle.id, type: SWORDSMAN.kind },
+      { kind: 'train', building: castle.id, type: FARM.kind },
+    ]);
+    expect(castle.queue).toHaveLength(0);
+    expect(bricks(w)).toBe(5000);
+  });
+
   it('cannot train past the population cap', () => {
     const w = world(5000);
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);

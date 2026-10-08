@@ -1,4 +1,4 @@
-import type { HudBundle, MapBundle, UnitBundle } from '@lbw/extract';
+import type { HudBundle, MapBundle, Rgba, UnitBundle } from '@lbw/extract';
 import type { RomSummary, WorkerRequest, WorkerResponse } from './romWorker';
 
 /** What the rest of the client can ask of the loaded ROM. */
@@ -11,6 +11,9 @@ export interface RomControl {
   loadUnits(teams: number[], localTeam: number): Promise<void>;
   /** Lock the map picker (an online match chose the map). */
   lockMap(name: string | null): void;
+  /** Ask for the ground redrawn with this terrain; `onGround` gets it. */
+  rebake(name: string, terrain: Uint8Array): void;
+  onGround: ((name: string, ground: Rgba) => void) | null;
   /** Called whenever a ROM finishes loading. */
   onLoaded: (() => void) | null;
 }
@@ -57,6 +60,8 @@ export function mountRomPanel(
       pick.disabled = name !== null;
       if (name) pick.value = name;
     },
+    rebake: (name, terrain) => send({ type: 'ground', name, terrain: terrain.slice() }),
+    onGround: null,
     onLoaded: null,
   };
 
@@ -82,6 +87,8 @@ export function mountRomPanel(
       pick.addEventListener('change', () => pickMap(pick!.value));
       pickMap(pick.value);
       ctl.onLoaded?.();
+    } else if (msg.type === 'ground') {
+      ctl.onGround?.(msg.name, msg.ground);
     } else if (msg.type === 'units') {
       onUnits(msg.units);
       unitWaiters.shift()?.();

@@ -94,6 +94,10 @@ export interface EntityType {
   yield: number;
   priority: number;
   attack: AttackStats | null;
+  /** Terrain mask, occupancy layer and sight for units this type spawns (see Unit). */
+  moves?: TerrainMask;
+  layer?: number;
+  sight?: number;
 }
 
 /**

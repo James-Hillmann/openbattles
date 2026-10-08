@@ -104,5 +104,10 @@ export function sanitizeCommand(x: unknown): Command | null {
   const c = x as Record<string, unknown>;
   if (c.kind === 'move' && isIds(c.unitIds) && isInt(c.x) && isInt(c.y)) return { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx };
   if (c.kind === 'attack' && isIds(c.unitIds) && isInt(c.target)) return { kind: 'attack', unitIds: [...c.unitIds], target: c.target };
+  if (c.kind === 'harvest' && isIds(c.unitIds) && isInt(c.cx) && isInt(c.cy)) return { kind: 'harvest', unitIds: [...c.unitIds], cx: c.cx, cy: c.cy };
+  if (c.kind === 'build' && isIds(c.unitIds) && isInt(c.type) && isInt(c.cx) && isInt(c.cy))
+    return { kind: 'build', unitIds: [...c.unitIds], type: c.type, cx: c.cx, cy: c.cy };
+  if (c.kind === 'construct' && isIds(c.unitIds) && isInt(c.site)) return { kind: 'construct', unitIds: [...c.unitIds], site: c.site };
+  if (c.kind === 'train' && isInt(c.building) && isInt(c.type)) return { kind: 'train', building: c.building, type: c.type };
   return null;
 }

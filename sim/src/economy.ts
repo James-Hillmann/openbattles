@@ -51,6 +51,22 @@ export const ROLE_LUMBER_MILL = 8;
 export const ROLE_MINE = 9;
 export const ROLE_FARM = 10;
 
+export const ROLE_BARRACKS = 11;
+export const ROLE_STABLES = 12;
+export const ROLE_SHIPYARD = 16;
+
+/**
+ * Unit roles each production building trains, by building role. Castle (hero, builder) and
+ * Barracks (melee, ranged, mounted) are confirmed from their build strips in the emulator;
+ * Stables (the star units) and Shipyard (transport) are a guess from their icons and costs.
+ */
+export const TRAINS: Readonly<Record<number, readonly number[]>> = {
+  [ROLE_BASE]: [ROLE_HERO, ROLE_BUILDER],
+  [ROLE_BARRACKS]: [2, 3, 4],
+  [ROLE_STABLES]: [ROLE_SIEGE],
+  [ROLE_SHIPYARD]: [ROLE_TRANSPORT],
+};
+
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
 export const isFinished = (u: Unit): boolean => u.progress >= u.buildTime;
 
@@ -250,7 +266,9 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const t = w.types[type];
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
-  if (t.role >= ROLE_BASE || b.queue.length >= QUEUE_MAX) return;
+  if (!(TRAINS[b.role] ?? []).includes(t.role) || b.queue.length >= QUEUE_MAX) return;
+  // One hero at a time: the Castle only offers it while the hero is down. guess
+  if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
   if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;
   if (takesStar(t.role) && starsUsed(w, player) + 1 > starCap(w, player)) return;
   if (!spendBricks(p, t.cost)) return;

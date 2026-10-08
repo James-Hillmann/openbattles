@@ -69,6 +69,11 @@ describe('sanitizeCommand', () => {
   it('keeps well-formed commands and strips extra fields', () => {
     expect(sanitizeCommand({ kind: 'move', unitIds: [1, 2], x: 5, y: -3, junk: 1 })).toEqual({ kind: 'move', unitIds: [1, 2], x: 5, y: -3 });
     expect(sanitizeCommand({ kind: 'attack', unitIds: [1], target: 9 })).toEqual({ kind: 'attack', unitIds: [1], target: 9 });
+    expect(sanitizeCommand({ kind: 'harvest', unitIds: [1], cx: 4, cy: 5, x: 1 })).toEqual({ kind: 'harvest', unitIds: [1], cx: 4, cy: 5 });
+    expect(sanitizeCommand({ kind: 'build', unitIds: [1], type: 13, cx: 4, cy: 5 })).toEqual({ kind: 'build', unitIds: [1], type: 13, cx: 4, cy: 5 });
+    expect(sanitizeCommand({ kind: 'construct', unitIds: [1], site: 7 })).toEqual({ kind: 'construct', unitIds: [1], site: 7 });
+    expect(sanitizeCommand({ kind: 'train', building: 7, type: 2 })).toEqual({ kind: 'train', building: 7, type: 2 });
+    expect(sanitizeCommand({ kind: 'train', building: 7, type: 2.5 })).toBeNull();
   });
   it('drops anything the sim could choke on', () => {
     for (const bad of [null, 3, 'move', {}, { kind: 'move', unitIds: [1], x: 1.5, y: 0 }, { kind: 'move', unitIds: 'all', x: 0, y: 0 },
