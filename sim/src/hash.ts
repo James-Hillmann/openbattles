@@ -30,7 +30,11 @@ export function hashWorld(w: World): number {
     mix(u.hp);
     mix(u.maxHp);
     mix(u.target);
+    mix(u.ordered ? 1 : 0);
     mix(u.lastAttack);
+    mix(u.lastHit);
+    mix(u.born);
+    mix(u.priority);
     mix(u.path.length);
     for (const c of u.path) mix(c);
   }

@@ -1,9 +1,10 @@
-import { fxAdd, fxLen, fxMulDiv, fxRaw, type Fx } from './fixed';
+import { type Fx } from './fixed';
 import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
-import { NEVER, combatStep, findById, projectileDamage } from './combat';
+import { NEVER, combatStep, findById, stepProjectiles } from './combat';
+import { stepBudget, stepToward } from './motion';
 import type { AttackStats, MeleeBonusTable, PlayerId, Unit, World } from './state';
 import { cellCenterX, cellCenterY, cellOf, findPath, reachableFrom, simplifyPath, spreadCells, type TerrainGrid } from './terrain';
 
@@ -23,6 +24,7 @@ export interface UnitType {
   speed?: number;
   hp?: number;
   attack?: AttackStats | null;
+  priority?: number;
 }
 
 /** HP for units spawned without a type (test fixtures). */
@@ -44,7 +46,11 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     maxHp: hp,
     attack: type.attack ?? null,
     target: null,
+    ordered: false,
     lastAttack: NEVER,
+    lastHit: NEVER,
+    born: w.tick,
+    priority: type.priority ?? 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   return u;
@@ -54,7 +60,10 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
   switch (cmd.kind) {
     case 'move': {
       const units = w.units.filter((u) => u.owner === player && cmd.unitIds.includes(u.id));
-      for (const u of units) u.target = null;
+      for (const u of units) {
+        u.target = null;
+        u.ordered = false;
+      }
       if (w.grid) planGroupMove(w.grid, units, cmd.x, cmd.y);
       else
         for (const u of units) {
@@ -68,7 +77,10 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
       const t = findById(w.units, cmd.target);
       if (!t || t.owner === player) break;
       for (const u of w.units) {
-        if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) u.target = t.id;
+        if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) {
+          u.target = t.id;
+          u.ordered = true;
+        }
       }
       break;
     }
@@ -102,25 +114,6 @@ function planGroupMove(g: TerrainGrid, units: readonly Unit[], x: Fx, y: Fx): vo
   });
 }
 
-/**
- * The game moves units in cell space: a cell is 24x16 px, but a unit covers the
- * same number of cells per tick in any direction, so it is faster in px going
- * sideways than up/down. We measure distance in 48ths of a cell (48 = lcm(24,16)):
- * 1 px across = 2/48 cell, 1 px down = 3/48 cell.
- * Moves (x, y) toward (tx, ty) by at most `budget` (48ths of a cell, Fx).
- */
-function stepToward(x: Fx, y: Fx, tx: Fx, ty: Fx, budget: Fx): { x: Fx; y: Fx; arrived: boolean; left: Fx } {
-  const dx = (tx - x) as Fx;
-  const dy = (ty - y) as Fx;
-  const dist48 = fxLen((dx * 2) as Fx, (dy * 3) as Fx);
-  if (dist48 <= budget) return { x: tx, y: ty, arrived: true, left: (budget - dist48) as Fx };
-  // Scale by budget/dist in one go. A Q16.16 ratio budget/dist is tiny on long moves and truncating it
-  // made units slower the farther away their target was (0.4% at 20 cells).
-  return { x: fxAdd(x, fxMulDiv(dx, budget, dist48)), y: fxAdd(y, fxMulDiv(dy, budget, dist48)), arrived: false, left: 0 as Fx };
-}
-
-/** speed/4096 cell = speed*48/4096 48ths = speed*768 in Fx raw units. */
-const stepBudget = (speed: number): Fx => fxRaw(speed * 768);
 
 function moveUnit(u: Unit, g: TerrainGrid | null): void {
   let budget = stepBudget(u.speed);
@@ -137,25 +130,6 @@ function moveUnit(u: Unit, g: TerrainGrid | null): void {
     if (wp !== undefined) u.path.shift();
     else u.tx = u.ty = null;
   }
-}
-
-/** Projectiles home on their target and hit on arrival; they fizzle if it is gone. */
-function stepProjectiles(w: World): void {
-  const keep = [];
-  for (const p of w.projectiles) {
-    const t = findById(w.units, p.target);
-    if (!t || t.hp === 0) continue;
-    const n = stepToward(p.x, p.y, t.x, t.y, stepBudget(p.type.speed));
-    p.x = n.x;
-    p.y = n.y;
-    if (!n.arrived) {
-      keep.push(p);
-      continue;
-    }
-    const dmg = projectileDamage(w, p);
-    t.hp = t.hp > dmg ? t.hp - dmg : 0;
-  }
-  w.projectiles = keep;
 }
 
 /** Advance one tick. `cmds` must all be scheduled for `w.tick`. */
