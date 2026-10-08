@@ -38,7 +38,7 @@ describe('determinism', () => {
   it('final state hash is pinned (update deliberately when sim rules change)', () => {
     const w = setup(log.seed);
     replay(w, log);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"eb3ab02a"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"72d361da"`);
   });
 
   it('moves the same number of cells per tick in every direction', () => {

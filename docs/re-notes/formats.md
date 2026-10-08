@@ -119,7 +119,14 @@ Then sections `EVNT`, `TRIG`, `MARK`, `MINE`, each closed by its reversed tag, a
 - **Cells are 24x16 pixels** (3x2 tiles of 8x8), so a 64x64 map is 1536x1024 px. confirmed.
 - Terrain codes in files: 0 open ground, 2 rough ground, 3 water, 5 cliff/plateau. At load the
   game adds **1 = tree** (see Trees). 0 and 3 confirmed from the emulator; 2 and 5 likely, from
-  where they sit on the rendered maps. Passability per code is still open (M2).
+  where they sit on the rendered maps. On mp01, 2 is the sandy ground around the lake and 5 the
+  raised rock plateaus.
+- **Walking (confirmed in the emulator, mp01):** the King was ordered into a forest, onto a plateau
+  and into the lake. Each time he stopped on the nearest open cell next to it (forest edge, the
+  plateau's near side, the shore). He walks on 0 and 2. So 1, 3 and 5 block walking. When the
+  target can't be reached, the unit goes to the closest reachable spot instead of refusing.
+  Building placement rules are still open. How the game picks its path is not decoded; the sim
+  uses its own A* (`sim/src/terrain.ts`), which matches the stopping behaviour above.
 - Ground ids >= 440 are **per-map detail metatiles**: id N reads entry N-440 of
   `BP/DetailTiles_<map>.tbp` (confirmed: with this rule mp01 and mp12 render with zero transparent
   pixels, and seams line up). In the tileset table, entries from 440 up are transparent filler.

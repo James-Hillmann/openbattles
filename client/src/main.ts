@@ -9,7 +9,14 @@ import {
   hashWorld,
   spawnUnit,
   step,
+  CELL_H,
+  CELL_W,
+  cellCenterX,
+  cellCenterY,
+  reachableFrom,
+  spreadCells,
   type ScheduledCommand,
+  type TerrainGrid,
   type World,
 } from '@lbw/sim';
 import { FRAME, type MapBundle, type Rgba } from '@lbw/extract';
@@ -24,10 +31,23 @@ let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
 const pending: ScheduledCommand[] = [];
 
-function resetWorld(cx: number, cy: number) {
-  world = createWorld({ seed: 1234 });
-  for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
-  for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+function resetWorld(cx: number, cy: number, grid: TerrainGrid | null = null) {
+  world = createWorld({ seed: 1234, grid });
+  if (grid) {
+    // Stand each team on walkable cells near a point left/right of centre.
+    // Keep a team on one landmass: spread only over cells reachable from the first one found.
+    const team = (px: number, owner: number) => {
+      const [x, y] = [Math.floor(px / CELL_W), Math.floor(cy / CELL_H)];
+      const first = spreadCells(grid, x, y, 1);
+      for (const c of spreadCells(grid, x, y, 4, reachableFrom(grid, first)))
+        spawnUnit(world, owner, cellCenterX(c % grid.width), cellCenterY(Math.floor(c / grid.width)));
+    };
+    team(cx - 120, 0);
+    team(cx + 120, 1);
+  } else {
+    for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
+    for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+  }
   prev = cloneWorld(world);
   pending.length = 0;
 }
@@ -102,7 +122,7 @@ function onMap(b: MapBundle) {
   unitSprites.clear();
   unitRow.clear();
   walkStart.clear();
-  resetWorld(b.ground.width / 2, b.ground.height / 2);
+  resetWorld(b.ground.width / 2, b.ground.height / 2, { width: b.width, height: b.height, cells: b.terrain });
   centerOn(b.ground.width / 2, b.ground.height / 2);
 }
 
