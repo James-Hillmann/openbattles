@@ -64,8 +64,8 @@ export function stampCircle(f: Fog, grid: Uint8Array, cx: number, cy: number, r:
   }
 }
 
-/** Sight radius in cells (entity +0x71), carried in the unit's attack stats. */
-const sightOf = (u: Unit): number => u.attack?.sight ?? 0;
+/** Sight radius in cells (entity +0x71). Buildings see too: a castle's 11 cells is the circle around the start. */
+const sightOf = (u: Unit): number => u.sight;
 
 /**
  * Recompute `visible` from the player's units and add it to `explored`. The game

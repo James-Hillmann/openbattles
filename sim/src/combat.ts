@@ -149,7 +149,7 @@ function chase(w: World, u: Unit, t: Unit): void {
   const [cx, cy] = cellOf(gx, gy);
   const goal = Math.min(Math.max(cy, 0), w.grid.height - 1) * w.grid.width + Math.min(Math.max(cx, 0), w.grid.width - 1);
   // Keep the plotters' state when only the goal moves, like the game's follow-a-unit move (0x02054710).
-  if (!u.mv) orderMove(w, u, goal);
+  if (!u.mv || u.mv.align) orderMove(w, u, goal);
   u.mv!.goal = goal;
   u.tx = cellCenterX(goal % w.grid.width);
   u.ty = cellCenterY(Math.floor(goal / w.grid.width));
@@ -166,9 +166,11 @@ const SCAN_PHASE = 2;
  */
 function pickTarget(w: World, u: Unit): Unit | undefined {
   const a = u.attack!;
-  const sight2 = a.sight * a.sight;
+  // Buildings (role 8-19, i.e. towers) search their max range instead of their sight (likely: code).
+  const sight = u.role >= 8 && u.role <= 19 ? a.maxRange : u.sight;
+  const sight2 = sight * sight;
   const min2 = a.minRange * a.minRange;
-  const far = a.sight + a.maxRange;
+  const far = sight + a.maxRange;
   let best: Unit | undefined;
   let bestIn = false;
   let bestD = 0;
@@ -204,7 +206,7 @@ export function combatStep(w: World, u: Unit): void {
     // Target died or vanished: stop where we are.
     u.target = null;
     u.ordered = false;
-    stopMove(u);
+    stopMove(w, u);
     t = undefined;
   }
   const scanning = t ? !u.ordered : u.tx === null;
@@ -217,10 +219,10 @@ export function combatStep(w: World, u: Unit): void {
   }
   if (!t) return;
   if (!inRange(u, t)) {
-    chase(w, u, t);
+    if (u.speed > 0) chase(w, u, t); // a tower waits for the target to come to it
     return;
   }
-  stopMove(u);
+  stopMove(w, u);
   if (w.tick < u.lastAttack + u.attack.cooldown) return;
   u.lastAttack = w.tick;
   if (u.attack.projectile) {

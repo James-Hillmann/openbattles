@@ -173,6 +173,10 @@ can't be matched in a lockstep game anyway. The sim uses its own seeded RNG with
 
 ## What the sim does that the game may not (guesses to check)
 
+- Units and buildings whose record has no melee damage, no random damage and no projectile
+  (castles, farms, mills, barracks...) never attack: the sim drops their attack stats at spawn.
+  The formula above would otherwise give them max(1, bonus) a swing. Likely, not watched.
+
 - Auto-target ties go to the nearest, then lowest id.
 - Without pathing, melee units walk to the cell beside the target on the side they come from.
 - Damage multiplier fixed at 1.0.

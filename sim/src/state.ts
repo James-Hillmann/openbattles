@@ -24,8 +24,10 @@ export interface Unit {
   kind: number;
   hp: number;
   maxHp: number;
-  /** Null for units that can't attack. Static per unit type. */
+  /** Null for units that can't attack (no damage and no projectile, e.g. a castle). Static per unit type. */
   attack: AttackStats | null;
+  /** Sight radius in cells (entity +0x71): fog of war vision, and how far the unit looks for enemies. Static per unit type. */
+  sight: number;
   /** Unit being attacked or chased, or null. */
   target: EntityId | null;
   /** True when `target` came from a player's attack order rather than the unit's own scan. */
