@@ -3,6 +3,7 @@ import {
   applyTeamColors,
   buildHudBundle,
   buildMapBundle,
+  FLASH_BANK,
   buildUnitBundle,
   hex,
   listMaps,
@@ -16,9 +17,9 @@ import {
 
 /**
  * Palette banks the sandbox draws: 0 red (you), 2 blue (opponent); bank + 1 is
- * the same team selected, with its outline.
+ * the same team selected, with its outline; FLASH_BANK for the hit flash.
  */
-const TEAM_BANKS = [0, 1, 2, 3];
+const TEAM_BANKS = [0, 1, 2, 3, FLASH_BANK];
 /** Team whose selection outline is yellow (the local player's, red). */
 const LOCAL_TEAM = 0;
 

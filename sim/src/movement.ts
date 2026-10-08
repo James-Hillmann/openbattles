@@ -1,5 +1,6 @@
 import { CELL_H, CELL_W } from './config';
-import { fxAdd, fxLen, fxMulDiv, fxRaw, fxToInt, type Fx } from './fixed';
+import { fxToInt, type Fx } from './fixed';
+import { stepBudget, stepToward } from './motion';
 import type { Mover, Unit, World } from './state';
 import { cellCenterX, cellCenterY, isWalkable, type TerrainGrid } from './terrain';
 
@@ -93,23 +94,6 @@ export function removeUnit(w: World, u: Unit): void {
 
 // ---------------------------------------------------------------- seeker
 
-/**
- * The game moves units in cell space: a cell is 24x16 px, but a unit covers the
- * same number of cells per tick in any direction, so it is faster in px going
- * sideways than up/down. We measure distance in 48ths of a cell (48 = lcm(24,16)):
- * 1 px across = 2/48 cell, 1 px down = 3/48 cell.
- * Moves (x, y) toward (tx, ty) by at most `budget` (48ths of a cell, Fx).
- * Scaling by budget/dist in one go keeps long moves exact (a Q16.16 ratio would not).
- */
-export function stepToward(x: Fx, y: Fx, tx: Fx, ty: Fx, budget: Fx): { x: Fx; y: Fx; arrived: boolean } {
-  const dx = (tx - x) as Fx;
-  const dy = (ty - y) as Fx;
-  const dist48 = fxLen((dx * 2) as Fx, (dy * 3) as Fx);
-  if (dist48 <= budget) return { x: tx, y: ty, arrived: true };
-  return { x: fxAdd(x, fxMulDiv(dx, budget, dist48)), y: fxAdd(y, fxMulDiv(dy, budget, dist48)), arrived: false };
-}
-/** speed/4096 cell = speed*48/4096 48ths = speed*768 in Fx raw units. */
-export const stepBudget = (speed: number): Fx => fxRaw(speed * 768);
 
 /**
  * Aligned = within the middle of the cell: 6..17 px across, 6..9 px down,

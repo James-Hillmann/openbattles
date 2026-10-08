@@ -1,12 +1,13 @@
-import { fxAdd, fxLen, fxMulDiv, fxRaw, type Fx } from './fixed';
+import { type Fx } from './fixed';
 import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
-import { NEVER, combatStep, findById, projectileDamage } from './combat';
+import { NEVER, combatStep, findById, stepProjectiles } from './combat';
+import { stepBudget, stepToward } from './motion';
 import type { AttackStats, MeleeBonusTable, PlayerId, Unit, World } from './state';
 import { cellOf, reachableFrom, spreadCells, type TerrainGrid } from './terrain';
-import { moveOnMap, orderMove, placeUnit, removeUnit, stepBudget, stepToward } from './movement';
+import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 
 export interface WorldInit {
   seed: number;
@@ -25,6 +26,7 @@ export interface UnitType {
   speed?: number;
   hp?: number;
   attack?: AttackStats | null;
+  priority?: number;
 }
 
 /** HP for units spawned without a type (test fixtures). */
@@ -46,9 +48,13 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     maxHp: hp,
     attack: type.attack ?? null,
     target: null,
+    ordered: false,
     lastAttack: NEVER,
     cell: -1,
     mv: null,
+    lastHit: NEVER,
+    born: w.tick,
+    priority: type.priority ?? 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   placeUnit(w, u);
@@ -59,7 +65,10 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
   switch (cmd.kind) {
     case 'move': {
       const units = w.units.filter((u) => u.owner === player && cmd.unitIds.includes(u.id));
-      for (const u of units) u.target = null;
+      for (const u of units) {
+        u.target = null;
+        u.ordered = false;
+      }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
       else
         for (const u of units) {
@@ -73,7 +82,10 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
       const t = findById(w.units, cmd.target);
       if (!t || t.owner === player) break;
       for (const u of w.units) {
-        if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) u.target = t.id;
+        if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) {
+          u.target = t.id;
+          u.ordered = true;
+        }
       }
       break;
     }
@@ -107,25 +119,6 @@ function moveUnit(u: Unit): void {
   u.x = n.x;
   u.y = n.y;
   if (n.arrived) u.tx = u.ty = null;
-}
-
-/** Projectiles home on their target and hit on arrival; they fizzle if it is gone. */
-function stepProjectiles(w: World): void {
-  const keep = [];
-  for (const p of w.projectiles) {
-    const t = findById(w.units, p.target);
-    if (!t || t.hp === 0) continue;
-    const n = stepToward(p.x, p.y, t.x, t.y, stepBudget(p.type.speed));
-    p.x = n.x;
-    p.y = n.y;
-    if (!n.arrived) {
-      keep.push(p);
-      continue;
-    }
-    const dmg = projectileDamage(w, p);
-    t.hp = t.hp > dmg ? t.hp - dmg : 0;
-  }
-  w.projectiles = keep;
 }
 
 /** Advance one tick. `cmds` must all be scheduled for `w.tick`. */

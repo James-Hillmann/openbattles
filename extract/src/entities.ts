@@ -1,3 +1,5 @@
+import { u16 } from './bytes';
+
 /**
  * BP/Entities.ebp (BPNZ): the game's unit, building and projectile table.
  * Layout and field meanings are in docs/re-notes/formats.md ("BPNZ") and
@@ -16,6 +18,8 @@ export interface ProjectileStats {
   /** Damage is min + rand(max - min): max itself is never rolled. */
   minDamage: number;
   maxDamage: number;
+  /** +0x6B: hits a 5x5 cell area with falloff instead of one cell. */
+  splash: boolean;
 }
 
 export interface EntityRecord {
@@ -43,13 +47,16 @@ export interface UnitStats {
   /** Attack range in cells, compared as squared Euclidean cell distance (+0x6E/+0x6F). */
   minRange: number;
   maxRange: number;
-  /** Sight radius in cells (+0x71). guess. */
+  /** Sight radius in cells (+0x71): how far the unit looks for enemies. */
   sight: number;
+  /** Role (+0x5C): 0 hero, 1 builder, 2 melee, 3 ranged, ... 7-19 buildings. */
+  role: number;
+  /** Target priority (+0x70): auto-targeting prefers higher. */
+  priority: number;
   /** Null for melee units. */
   projectile: ProjectileStats | null;
 }
 
-const u16 = (b: Uint8Array, o: number) => b[o]! | (b[o + 1]! << 8);
 
 function cString(b: Uint8Array, o: number): string {
   let s = '';
@@ -82,7 +89,7 @@ export function parseEntityRecords(ebp: Uint8Array): EntityRecord[] {
 export function projectileStats(rec: EntityRecord): ProjectileStats {
   if (rec.kind !== 1) throw new Error(`${rec.name} is not a projectile`);
   const r = rec.raw;
-  return { speed: u16(r, 0x0c), minDamage: u16(r, 0x70), maxDamage: u16(r, 0x72) };
+  return { speed: u16(r, 0x0c), minDamage: u16(r, 0x70), maxDamage: u16(r, 0x72), splash: r[0x6b] !== 0 };
 }
 
 export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): UnitStats {
@@ -101,6 +108,8 @@ export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): Uni
     minRange: r[0x6e]!,
     maxRange: r[0x6f]!,
     sight: r[0x71]!,
+    role: r[0x5c]!,
+    priority: r[0x70]!,
     projectile: proj === MELEE ? null : projectileStats(recs[proj]!),
   };
 }

@@ -28,8 +28,16 @@ export interface Unit {
   attack: AttackStats | null;
   /** Unit being attacked or chased, or null. */
   target: EntityId | null;
+  /** True when `target` came from a player's attack order rather than the unit's own scan. */
+  ordered: boolean;
   /** Tick of the last attack (also when the attack animation starts). */
   lastAttack: number;
+  /** Tick of the last damage taken (drives the client's white hit flash), or NEVER. */
+  lastHit: number;
+  /** Tick the unit was spawned. Sets the phase of its once-a-second target scan. */
+  born: number;
+  /** Target priority (+0x70): enemies scanning for a target prefer higher. Static per unit type. */
+  priority: number;
   /** Map cell this unit holds in World.occ (y * width + x), or -1. */
   cell: number;
   /** Active move order on a map (game: MoveUnitAction), or null. */
@@ -71,7 +79,7 @@ export interface AttackStats {
   /** Cells, compared as squared distance between unit cells. */
   minRange: number;
   maxRange: number;
-  /** Idle units pick up enemies this many cells away. */
+  /** Units look for enemies this many cells away (squared cell distance). */
   sight: number;
   /** Null for melee. */
   projectile: ProjectileType | null;
@@ -82,6 +90,8 @@ export interface ProjectileType {
   /** Damage is minDamage + rand(maxDamage - minDamage). */
   minDamage: number;
   maxDamage: number;
+  /** Damages every enemy within 2 cells of the impact, less further out. */
+  splash: boolean;
 }
 
 export interface Projectile {
