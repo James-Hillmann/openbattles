@@ -6,7 +6,7 @@ Game code `C5SE`. Ported in `sim/src/skirmish.ts`, `sim/src/rules.ts` and
 
 Class names come from RTTI strings: `MultiplayerMissionBase` (one per skirmish
 map), `Sim::GameRuleManager`, `Sim::Team`, `Sim::CollectableItem`,
-`Sim::ContinentManager`, `User::FogCircle`.
+`Sim::ContinentManager`, `User::FogCircle` (fog.md).
 
 ## Options screen (confirmed)
 
@@ -127,10 +127,6 @@ flood fill with the unit's own mask instead.
 
 ## Not covered yet
 
-- Fog of war. It is grey stone texture on main BG2 (`FoWTileset.NCGR`); the
-  revealed area grows as units walk (minimap shows a circle of about 11 cells
-  around the start). The visibility grid wasn't found in RAM: the per-cell and
-  per-bit grids we searched for didn't match. `User::FogCircle` (20 instances)
-  is the lead. **open**
+- Fog of war: see [fog.md](fog.md).
 - Buildings' footprints. The sim gives a building its record's cell only. **guess**
 - Pickups and what they give; brick income.

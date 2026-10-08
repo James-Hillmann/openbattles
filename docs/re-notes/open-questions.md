@@ -23,10 +23,11 @@
 | Off-by-one start tiles in `Animations.abp` sets 2 and 4 | see formats.md "Animations" | open |
 | Entity record size: fixed 0x7C (units.ts) or per kind 0x7C/0x74/0x70 (entities.ts)? | both parsers pass their tests and agree on the sprite units; reconcile into one parser | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
-| Minimap: fog-of-war reveal radius, other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
+| Minimap: other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
 | What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
 | Fog of war: visibility grid, reveal radius, does it re-fog | `User::FogCircle`; BG2 + `FoWTileset.NCGR`; see skirmish.md | open |
 | Hero defeat in the emulator | heroes regenerate; needs a real fight to watch `Rules_onUnitDestroyed` | open |
 | Building footprints | not in record +0x10..+0x13 (0xFF); `0x02001170` returns w/h per entity | open |
 | What pickups (`CollectableItem`, blueprint 8) give | 10 per skirmish map from EVNT | open |
+| Fog: main-view texture and edge tiles, minimap fog, which units set the circle widen flags, whether enemies are hidden outside vision | see fog.md | open |

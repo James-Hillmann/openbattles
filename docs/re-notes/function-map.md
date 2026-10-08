@@ -62,6 +62,11 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020753D4` | ARM | `GameRuleManager_ctor` | Registers six event listeners; +4 = win mode (0 hero, 1 units, 2 bricks) | confirmed (mode values) | Pointer at `0x02155084` |
 | `0x02075750` | ARM | `Rules_onUnitDestroyed` | Mode 0: no hero left -> defeated; modes 1-2: eliminated -> defeated | likely | |
 | `0x02075808` | ARM | `Rules_isEliminated` | No units and no affordable production building | likely | Thresholds 50/100/250 |
+| `0x020A15B8` | Thumb | `Fog_update` | Clears the visible grid, stamps every vision circle, stamps moved circles into the explored grid | likely | Result matches RAM |
+| `0x020A1694` | Thumb | `Fog_stampCircle` | Filled midpoint circle of cells, four row spans per step | confirmed | Port matches RAM cell for cell |
+| `0x020A1650` | Thumb | `Fog_span` | Sets or clears one clipped row span in a BitArray2D | likely | |
+| `0x020EEB04` | ARM | `BitArray2D_test` | Bit x of row y (row pointer table at +0x14) | likely | |
+| `0x020EEB3C` | ARM | `BitArray2D_set` | Sets or clears bit x of row y | likely | |
 | `0x02075B9C` | ARM | `Rules_onBricks` | Mode 2: >= 10000 bricks wins, others lose | confirmed | |
 | `0x02075DAC` | ARM | `Rules_oneSideLeft` | All remaining players allied | likely | |
 | `0x02086750` | ARM | `Team_setStatus` | Team +0x9C: 0 playing, 1 defeated, 2 won, 3 lost | likely | |
