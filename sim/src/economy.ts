@@ -353,13 +353,19 @@ function stepConstruction(w: World, s: Unit): void {
 }
 
 /** First free walkable cell around the spot below a building's bottom row, by Chebyshev rings. */
+/** Nearest free, walkable ground cell to (cx, cy) by Chebyshev rings, or -1 within `radius`. */
+export function freeCellNear(w: World, cx: number, cy: number, radius: number): number {
+  const g = w.grid!;
+  for (let r = 0; r <= radius; r++) for (const c of ring(g, cx, cy, r)) if (freeFor(w, c, null)) return c;
+  return -1;
+}
+
 function exitCell(w: World, b: Unit): number {
   const g = w.grid!;
   const o = originCell(w, b);
   const cx = cellX(g, o) + (b.size >> 1);
   const cy = cellY(g, o) + b.size;
-  for (let r = 0; r < 8; r++) for (const c of ring(g, cx, cy, r)) if (freeFor(w, c, null)) return c;
-  return -1;
+  return freeCellNear(w, cx, cy, 7);
 }
 
 function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {

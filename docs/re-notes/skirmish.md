@@ -50,6 +50,12 @@ first hero, first builder and first base record spawn; everything else is
 dropped. **Confirmed** on mp01: off gives castle + 1 builder + King, at the first
 records' cells; on gives all six (castle, farm, barracks, 2 builders, King).
 
+**Records on blocked cells** (guess): on mp29, slot 0's second builder record
+(12, 51) lies inside its own castle's footprint (3x3 at (11, 50)); no other map has
+such a record. The sim moves that unit to the nearest free cell (Chebyshev rings,
+row-major), as production does for a building's exit. Not seen in the emulator:
+mp29 is locked on a fresh profile.
+
 The hero record also sets the player's start point (camera), once per player
 (`0x020A3CEC`, stored at map +0x234).
 

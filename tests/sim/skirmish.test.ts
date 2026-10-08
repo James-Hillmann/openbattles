@@ -82,6 +82,26 @@ describe('skirmish start', () => {
   });
 });
 
+describe('start records on blocked cells', () => {
+  // mp29, slot 0: the second builder record (12, 51) is inside the 3x3 castle at (11, 50).
+  const MP29: StartSpawn[] = [
+    [6, 50, 0, 10], [11, 50, 0, 7], [14, 50, 0, 11], [10, 51, 0, 1], [12, 51, 0, 1], [8, 53, 0, 0],
+  ].map(([x, y, slot, role]) => ({ x: x!, y: y!, slot: slot!, role: role!, index: 0 }));
+  const SIZED: Record<number, UnitType> = { ...TYPES, 7: { hp: 1500, speed: 0, size: 3 }, 10: { hp: 350, speed: 0, size: 2 }, 11: { hp: 750, speed: 0, size: 2 } };
+
+  it('a builder whose record sits inside its castle spawns on the nearest free cell (guess)', () => {
+    // Own grid: footprints are written into the grid, and OPEN64 is shared with the pinned-hash test below.
+    const w = createSkirmish({ seed: 1, grid: grid(Array.from({ length: 64 }, () => '.'.repeat(64))) }, MP29, { ...opts(0, true), slots: [0], typeFor: (_p, role) => SIZED[role] ?? null });
+    const builders = w.units.filter((u) => u.role === 1);
+    expect(builders).toHaveLength(2);
+    expect(builders.every((u) => u.cell >= 0)).toBe(true);
+    const [x, y] = cellOf(builders[1]!.x, builders[1]!.y);
+    // Nearest free cell by Chebyshev rings, row-major: ring 2 around (12, 51) starts at (10, 49).
+    expect([x, y]).toEqual([10, 49]);
+    expect(isWalkableCode(w.grid!.cells[y * 64 + x]!)).toBe(true);
+  });
+});
+
 describe('win and loss', () => {
   it('"Defeat the enemy\'s Hero": losing the hero loses, the other player wins', () => {
     const w = createSkirmish({ seed: 1, grid: OPEN64 }, MP01, opts(0, true));
