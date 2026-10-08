@@ -1,0 +1,16 @@
+# Render Blueprint: one free web service that serves the built client and the relay on one port.
+# Players load their own ROM in the browser; nothing from the game is built or uploaded here.
+services:
+  - type: web
+    name: openbattles
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "1"

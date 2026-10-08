@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import type { Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   BANKS,
@@ -41,7 +42,9 @@ interface Room {
 }
 
 export interface RelayOptions {
-  port: number;
+  /** Listen on its own port, or share an existing HTTP server (hosting serves the client on the same port). */
+  port?: number;
+  server?: Server;
   /** Match seed; relay-side randomness is fine, the sim only ever sees the number. */
   seed?: () => number;
   /** Room code generator (tests pin it). */
@@ -76,7 +79,7 @@ export function startRelay(opts: RelayOptions): WebSocketServer {
   const seed = opts.seed ?? (() => randomInt(0x7fffffff));
   const newCode = opts.code ?? randomCode;
   const maxPlayers = Math.min(TEAM_COLORS, opts.maxPlayers ?? ROOM_SIZE);
-  const wss = new WebSocketServer({ port: opts.port, maxPayload: MAX_PAYLOAD });
+  const wss = new WebSocketServer(opts.server ? { server: opts.server, maxPayload: MAX_PAYLOAD } : { port: opts.port, maxPayload: MAX_PAYLOAD });
 
   const players = (r: Room) => r.seats.filter((s): s is Seat => s !== null).map((s) => s.player);
   const broadcastLobby = (r: Room) => {
