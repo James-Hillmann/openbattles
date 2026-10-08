@@ -18,8 +18,10 @@
 | Projectile flight: homing or fixed aim point, splash (+0x6B) | homes, hits on entering the target cell; splash 5x5 at 100/80/60% (combat.md) | **answered** |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | 20.12 for positions (cells), damage and multipliers | **answered** |
-| How to draw the 3D-model units (siege, flyers, ships, Giant) | `Models/*.nsbmd` + `.nsbca` are standard Nitro 3D; need a model + joint-animation decoder and the game's camera angle | open |
-| Mounted units' draw anchor (32 px frames) | the client puts the feet 5 px above the frame bottom, like 24 px units; measure a Knight in the emulator | open |
+| How to draw the 3D-model units (siege, flyers, ships, Giant) | decoded, camera fitted, clips read from ARM9 (formats.md "3D models") | **answered** |
+| Mounted units' draw anchor (32 px frames) | 4 px left and 8 px up of a 24 px frame for the same position (formats.md "Where sprites sit") | **answered** |
+| Where unit positions sit relative to our cell centres | the game's idle units sat on 24 x 16 px multiples while our sim parks them on cell centres; sprites are drawn 15 px below their frame top from that point (ours: 19). Needs a check against map tiles | open |
+| Model selection outline: exact shape | the client draws a 1 px ring; compare pixels with a selected ballista | open |
 | Off-by-one start tiles in `Animations.abp` sets 2 and 4 | see formats.md "Animations" | open |
 | Entity record size: fixed 0x7C (units.ts) or per kind 0x7C/0x74/0x70 (entities.ts)? | both parsers pass their tests and agree on the sprite units; reconcile into one parser | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
