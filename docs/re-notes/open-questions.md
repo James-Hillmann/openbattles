@@ -14,4 +14,7 @@
 | Does combat use randomness? | find the game RNG (often an LCG `x = x * A + C`); see who calls it from combat code | open |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | look for `>> 12` vs `>> 16` after multiplies | open |
+| How to draw the 3D-model units (siege, flyers, ships, Giant) | `Models/*.nsbmd` + `.nsbca` are standard Nitro 3D; need a model + joint-animation decoder and the game's camera angle | open |
+| Mounted units' draw anchor (32 px frames) | the client puts the feet 5 px above the frame bottom, like 24 px units; measure a Knight in the emulator | open |
+| Off-by-one start tiles in `Animations.abp` sets 2 and 4 | see formats.md "Animations" | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |

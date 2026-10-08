@@ -169,15 +169,26 @@ never copy them into the repo.
 ## Unit sprites (confirmed)
 
 - `Sprites/<faction>_<role>_N.NCBR` are PMOC > NCGR-format data holding a **linear 4bpp bitmap**
-  (not 8x8 tiles), 128 px wide for most units.
-- Frames are **24x24**. Walk sheets (`*_1`) are 5x5 frames: rows are facings (back, back-right, right,
-  front-right, front), columns the walk cycle. Left-facing is the right-facing row mirrored.
-  `*_0` is a single 5-frame strip, `*_2` larger frames (probably attack). Heroes split per facing:
-  `k_hrm_w0..w4` walk, `a0..a4` attack, 10 frames each.
-- Palette: `<Faction>Faction.NCLR`, 16 banks of 16 colors. **Banks are team colors**: 0 red, 2 blue,
-  4 green, 6 orange, 8 magenta, 10 grey; each odd bank is the same color with a selection outline.
-  12 and 14 look like build-preview ghosts.
-- `Sprites/Anim0..7.NCER/.NANR` hold one small cell ("Idle") each; not needed to cut frames.
+  (not 8x8 tiles), 128 or 256 px wide.
+- Palette: `KingFaction.NCLR` for **every** faction (the only unit palette in the ROM), 16 banks of 16
+  colors. **Banks are team colors**: 0 red, 2 blue, 4 green, 6 orange, 8 magenta, 10 grey; each odd bank
+  is the same color with a selection outline. 12 and 14 look like build-preview ghosts. On screen the
+  game swaps the outline color (cyan in the file) for yellow on your own selected units.
+- Each entity's sprite comes from the asset path after its name in `Entities.ebp`. The six playable
+  factions have six sprite units each (36 total); their other four movers are 3D models (below).
+  Sprite file prefixes don't always match the entity prefix: Astronauts (`E_`) use `h_`.
+
+| layout | asset suffix | files | frames | confidence |
+|---|---|---|---|---|
+| hero | `_hrm`, `_hrf` | `_w0..4` walk, `_a0..4` attack, one file per facing | 6 x 24 px in a row; idle = walk frame 0 | confirmed (King, emulator) |
+| infantry | `_eng`, `_mel`, `_rgd` | `_0` idle strip (one frame per facing), `_1` walk, `_2` attack | 5 facing rows x 5 frames of 24 px | confirmed (King builder, emulator) |
+| mounted | `_bld_mtd` (shared with the buildings) | the faction's building sheet | 32 px frames, facing rows from y = 96; cols 0-2 walk, 3-7 attack, idle = col 1 | likely (from the animation table; all six sheets line up) |
+
+Facing rows are back, back-right, right, front-right, front; left facings are the right ones mirrored
+(confirmed: a builder walking down-left showed the front-right row flipped).
+
+Units drawn from 3D models (`Models/*.nsbmd` + `.nsbca`, Nitro `BMD0`/`BCA0`), not drawn yet:
+ballista, catapult, gryphon/dragon, giant, ships and transports, and the Astronaut/Alien siege units.
 
 ## Animations (`BP/Animations.abp`, likely)
 
@@ -205,9 +216,27 @@ sprite layouts:
 | 2, 3, 4 | idle 1, walk 5+1, attack 5+1 | `_0` idle row, `_1` walk sheet, `_2` attack sheet | builder, melee, ranged (`_eng`, `_mel`, `_rgd`); which is which is a guess, they differ only in VRAM position |
 | 5 | idle 1, walk 3 ping-pong, attack 5+1 | 32 px frames (`0x8000` flag) | mounted unit |
 
+The start tiles index some VRAM layout we haven't reproduced; the client cuts frames from the sheets
+instead (rows = facings, columns = frames), which matches the emulator for the King hero and builder.
+Two entries look off by one tile (set 2 back-right walk frame 3 is `0x424a` where the pattern says
+`0x4249`; set 4 back-right walk frames 2-4 are one tile early). The King builder's back-right walk in
+the emulator is clean, so either it isn't set 2 or the game doesn't use these as plain offsets. open.
+
 "5+1" means the 5 sheet frames followed by the idle pose as a 6th frame. In sets 2-4 the walk frames
 carry bit `0x4000` and the trailing idle frame doesn't, which fits "bit 14 = walk/attack sheet,
 clear = idle sheet". The client plays walk as frames 0-4 then the idle pose, looped.
+
+## Unit animation timing (confirmed, emulator)
+
+Measured frame by frame with `tools/emu/burst.py` + `track.py` on the King builder and King hero:
+
+- Every walk frame shows for 4 VBlanks (15 fps). Builder: walk frames 0-4 then the idle pose, looped.
+  Hero: walk frames 0-5, looped.
+- The cycle keeps counting when the facing changes mid-walk.
+- On arrival the unit **finishes the current pass** of the walk cycle (up to 5 more frames) before it
+  shows the idle pose. Client: `client/src/unitAnim.ts`.
+- Attack timing (once, ending on idle) and the mounted ping-pong walk come from the animation table
+  and are not yet checked in the emulator.
 
 ## Timing seen in the emulator (likely)
 
