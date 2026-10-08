@@ -23,8 +23,13 @@ out/venv/bin/python tools/emu/ramdump.py game.nds out/boot.dst out/ram.bin
 2. Tap Single Player twice, then the second option twice. That opens the skirmish map picker.
 3. Use the arrows at (208,135) to pick a map, then tap Continue (215,165) four times.
 
+On The Pond (default map) with the default CPU, the Wizard's swordsmen reach your King about
+6000 frames after the match starts, which makes a handy combat test.
+
 ## What's been checked this way
 
 - Trees: the baked ground and terrain layers in RAM match `bakeTrees()` on mp01, mp02 and mp03
   (see `docs/re-notes/formats.md`, "Trees").
+- Combat: melee damage, random rolls and cooldowns logged with exec hooks on `0x02050B70` and
+  `0x02050BC4` (`desmume.memory.register_exec`) match `sim/src/combat.ts` (see docs/re-notes/combat.md).
 - The map renderer is pixel-exact against the bottom screen, apart from sprites and fog of war.

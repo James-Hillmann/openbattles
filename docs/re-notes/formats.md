@@ -46,23 +46,24 @@ Each chunk is a Nintendo LZ11 stream that decodes to at most 0x1000 bytes
 
 The unit and building table. 75,195 bytes decompressed.
 
-- `BPNZ` magic, then fixed-size records of **0x7C bytes** starting at offset 4.
-  Confirmed by the loader in ARM9 walking the buffer in 0x7C steps (function map: `Bp_buildEntities`).
-- Record byte **+0x08 is an entity kind**: the loader switches on values 0, 1 and 2,
-  creating a different object type for each (probably unit / building / other).
+- `BPNZ` magic, then 0x227 records starting at offset 4. **Record size depends on the kind byte at +0x08**:
+  0x7C for kind 0 (units and buildings), 0x74 for kind 1 (projectiles), 0x70 for kind 2 (pickups and
+  mission items). Confirmed by the loader's switch (`Bp_buildEntities`); the walk ends exactly at the
+  string table (0xFA08). Parser: `extract/src/entities.ts`.
 - Records contain many `0xA1` / `0xA2A2` filler bytes, likely "unset" markers from
   the export tool. Treat as padding until proven otherwise.
 - **+0x00 u16: offset of the entity's name** in the string table at 0xFA08 (confirmed). Each name is
   followed by its sprite or model path, e.g. `K_King` then `Sprites/k_hrm`.
-- +0x04 u16: index within the table. +0x06 u16: a global id (0x182 for `K_King`).
+- +0x04 u16: entity index (confirmed; keys the combat bonus tables). +0x06 u16: a global id (0x182 for `K_King`).
 - **+0x0C u16: move speed** (likely). 410 for King, Engineer and Swordsman, 478 Archer, 614 Knight,
   819 Gryphon. In the emulator the King and a 410-speed unit both covered about 3.1 cells per second,
   measured in cells (24x16 px), not pixels. So movement is isotropic in cell space. At 30 updates a
   second, 410/4096 cells per update gives 3.0 cells/s; the measured 3.1 leaves a 3% gap to explain.
 - +0x5E u16 cost in bricks (King 500, Engineer 50, Swordsman 100), confirmed for the King against the
-  in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed the same way.
-  +0x60 u16 maybe build time (600, 150, 270). +0x66 u16 projectile id (0xFFFF = melee). guess.
-- +0x6F u8 attack range in cells? (1 melee, 5 Archer, 7 Ballista). +0x70 u8 damage? guess.
+  in-game hero card (500). +0x62 u16 hit points (King 1000), confirmed in the emulator.
+  +0x60 u16 maybe build time (600, 150, 270), guess.
+- **Combat fields +0x66..+0x71** (projectile, damage, random damage, cooldown, range, sight): see
+  [combat.md](combat.md). Damage, random damage, cooldown and HP are confirmed in the emulator.
 - +0x14 u8 looks like a unit class (guess): 2 builder, 3 melee and heroes, 4 ranged, 5 siege/flying,
   6 transport ship, 7 production buildings, 4 towers, 8 mine. +0x15 u8 is 3 for melee, 2 ranged,
   1 builder, 4 siege; 0 for buildings. Neither selects the animation set (below).

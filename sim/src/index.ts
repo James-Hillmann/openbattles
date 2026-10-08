@@ -4,5 +4,6 @@ export * from './config';
 export * from './state';
 export * from './commands';
 export * from './world';
+export * from './combat';
 export * from './hash';
 export * from './replay';

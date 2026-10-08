@@ -2,7 +2,9 @@ import type { Fx } from './fixed';
 import type { EntityId, PlayerId } from './state';
 
 /** Everything a player can do. These are what lockstep sends over the wire. */
-export type Command = { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx };
+export type Command =
+  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx }
+  | { kind: 'attack'; unitIds: EntityId[]; target: EntityId };
 
 /** A command stamped with who issued it and the tick it executes on. */
 export interface ScheduledCommand {

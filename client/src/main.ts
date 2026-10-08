@@ -1,6 +1,7 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 import {
   INPUT_DELAY_TICKS,
+  NEVER,
   TICK_MS,
   cloneWorld,
   createWorld,
@@ -9,10 +10,12 @@ import {
   hashWorld,
   spawnUnit,
   step,
+  type MeleeBonusTable,
   type ScheduledCommand,
+  type UnitType,
   type World,
 } from '@lbw/sim';
-import { FRAME, type MapBundle, type Rgba } from '@lbw/extract';
+import { FRAME, type MapBundle, type Rgba, type UnitStats } from '@lbw/extract';
 import { mountRomPanel } from './romPanel';
 
 const LOCAL_PLAYER = 0;
@@ -24,10 +27,17 @@ let world: World = createWorld({ seed: 1234 });
 let prev: World = cloneWorld(world);
 const pending: ScheduledCommand[] = [];
 
-function resetWorld(cx: number, cy: number) {
-  world = createWorld({ seed: 1234 });
-  for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60));
-  for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60));
+function unitType(s: UnitStats | undefined): UnitType {
+  if (!s) return {};
+  const { index, speed, hp, damage, damageRand, cooldown, minRange, maxRange, sight, projectile } = s;
+  return { kind: index, speed, hp, attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile } };
+}
+
+function resetWorld(cx: number, cy: number, type: UnitType = {}, bonus: MeleeBonusTable | null = null) {
+  world = createWorld({ seed: 1234, bonus });
+  // Two squads far enough apart (more than 5 cells, the sight radius) that nobody fights until ordered.
+  for (let i = 0; i < 4; i++) spawnUnit(world, 0, fx(cx - 120 + i * 28), fx(cy - 60), type);
+  for (let i = 0; i < 4; i++) spawnUnit(world, 1, fx(cx + 40 + i * 28), fx(cy + 60), type);
   prev = cloneWorld(world);
   pending.length = 0;
 }
@@ -47,6 +57,7 @@ const unitLayer = new Container();
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
+fallback.zIndex = 1e9; // projectiles and health bars draw over sprites
 
 // --- Map + sprites from the ROM ---------------------------------------------
 
@@ -64,6 +75,7 @@ function textureFrom(img: Rgba): Texture {
 type Frames = Texture[][];
 interface UnitTextures {
   walk: Frames;
+  attack: Frames;
   /** One frame per facing row. */
   idle: Texture[];
 }
@@ -91,18 +103,23 @@ const ANIM_FRAME_MS = (4 * 1000) / 60;
  * the idle pose as a 6th frame, looped. -1 means "the idle frame for this facing".
  */
 const WALK_CYCLE = [0, 1, 2, 3, 4, -1];
+/** Attack: same shape, played once from the tick the hit lands (docs/re-notes/combat.md). */
+const ATTACK_CYCLE = [0, 1, 2, 3, 4, -1];
+/** Sim ticks per animation frame: 30 Hz sim, 15 fps animation. */
+const TICKS_PER_FRAME = 2;
 
 function onMap(b: MapBundle) {
   ground.texture = textureFrom(b.ground);
   teamFrames = TEAM_BANK.map((bank) => ({
     walk: cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!), 5, 5),
+    attack: cutFrames(textureFrom(b.units[`k_mel_2@${bank}`]!), 5, 5),
     idle: cutFrames(textureFrom(b.units[`k_mel_0@${bank}`]!), 1, 5)[0]!,
   }));
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
   unitRow.clear();
   walkStart.clear();
-  resetWorld(b.ground.width / 2, b.ground.height / 2);
+  resetWorld(b.ground.width / 2, b.ground.height / 2, unitType(b.stats['k_mel']), b.combatBonus);
   centerOn(b.ground.width / 2, b.ground.height / 2);
 }
 
@@ -142,16 +159,21 @@ app.canvas.addEventListener('wheel', (e) => {
   camera.y = Math.round(sy - wy * s);
 });
 
-// --- Input: right-click moves your units ---------------------------------------
+// --- Input: right-click an enemy to attack it, anywhere else to move ----------
 
 app.canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   const r = app.canvas.getBoundingClientRect();
   // Quantize pointer input to whole world pixels before it enters the sim.
-  const x = fx(Math.round((e.clientX - r.left - camera.x) / camera.scale.x));
-  const y = fx(Math.round((e.clientY - r.top - camera.y) / camera.scale.y));
+  const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
+  const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
   const unitIds = world.units.filter((u) => u.owner === LOCAL_PLAYER).map((u) => u.id);
-  pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd: { kind: 'move', unitIds, x, y } });
+  // Sprites are 24x24 anchored near the feet, so hit-test that box.
+  const enemy = world.units.find(
+    (u) => u.owner !== LOCAL_PLAYER && Math.abs(fxToFloat(u.x) - px) <= 12 && fxToFloat(u.y) - py <= 19 && py - fxToFloat(u.y) <= 5,
+  );
+  const cmd = enemy ? { kind: 'attack' as const, unitIds, target: enemy.id } : { kind: 'move' as const, unitIds, x: fx(px), y: fx(py) };
+  pending.push({ tick: world.tick + INPUT_DELAY_TICKS, player: LOCAL_PLAYER, cmd });
 });
 
 // --- Loop: fixed-step sim, interpolated render ---------------------------------
@@ -190,6 +212,12 @@ app.ticker.add((t) => {
 
   const alpha = acc / TICK_MS;
   fallback.clear();
+  for (const [id, s] of unitSprites) {
+    if (world.units.some((u) => u.id === id)) continue;
+    s.destroy();
+    unitSprites.delete(id);
+  }
+  for (const p of world.projectiles) fallback.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   for (const u of world.units) {
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
@@ -207,7 +235,16 @@ app.ticker.add((t) => {
       unitSprites.set(u.id, s);
     }
     const moving = u.x !== p.x || u.y !== p.y;
-    if (moving) {
+    const attackFrame = u.lastAttack === NEVER ? -1 : Math.floor((world.tick - 1 - u.lastAttack + alpha) / TICKS_PER_FRAME);
+    const target = u.target === null ? undefined : world.units.find((t) => t.id === u.target);
+    if (attackFrame >= 0 && attackFrame < ATTACK_CYCLE.length) {
+      const f = target ? facing(target.x - u.x, target.y - u.y) : { row: unitRow.get(u.id) ?? 4, flip: s.scale.x < 0 };
+      s.scale.x = f.flip ? -1 : 1;
+      const col = ATTACK_CYCLE[attackFrame]!;
+      s.texture = col < 0 ? frames.idle[f.row]! : frames.attack[f.row]![col]!;
+      unitRow.set(u.id, f.row);
+      walkStart.delete(u.id);
+    } else if (moving) {
       const f = facing(u.x - p.x, u.y - p.y);
       s.scale.x = f.flip ? -1 : 1;
       if (!walkStart.has(u.id)) walkStart.set(u.id, animTime);
@@ -221,6 +258,12 @@ app.ticker.add((t) => {
     }
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
+    if (u.hp < u.maxHp) {
+      // Placeholder health bar until the HUD work draws the game's own.
+      const w = 14;
+      fallback.rect(Math.round(x) - w / 2, Math.round(y) - 22, w, 2).fill(0x202020);
+      fallback.rect(Math.round(x) - w / 2, Math.round(y) - 22, Math.max(1, Math.round((w * u.hp) / u.maxHp)), 2).fill(0x5ad35a);
+    }
   }
   unitLayer.sortableChildren = true;
 });
