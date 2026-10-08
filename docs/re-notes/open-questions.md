@@ -18,3 +18,6 @@
 | Mounted units' draw anchor (32 px frames) | the client puts the feet 5 px above the frame bottom, like 24 px units; measure a Knight in the emulator | open |
 | Off-by-one start tiles in `Animations.abp` sets 2 and 4 | see formats.md "Animations" | open |
 | Relay hosting | Fly.io / Railway / home box; decide in M3 | open |
+| Minimap: fog-of-war reveal radius, other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
+| What the HUD's red-star counter ("0/0") counts | changes icon when a unit is selected | open |
+| Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |

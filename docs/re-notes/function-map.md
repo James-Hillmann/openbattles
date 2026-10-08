@@ -30,6 +30,12 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x02089E40` | ARM | `Game_frame` | One game update; called once per loop iteration | likely | Units move one step per call |
 | `0x020599D4` | ARM | `Unit_setPosition` | Stores x, y (20.12 px) at unit +0xEC / +0xF0 | likely | |
 | `0x02080EF4` | ARM | `Path_astar?` | References the string `AstarSearch.cpp` | guess | Pathfinding lives near here; start M4 movement work from this |
+| `0x0203A8BC` | ARM | `Unit_showsBars` | Decides whether a unit gets bars this frame: units when selected (via the object at +0xF4) or when +0x1D4 > 0; buildings at HP <= 32% | likely (unit/building cases confirmed in the emulator) | |
+| `0x0203AA60` | ARM | (per-unit draw loop) | Calls `Unit_drawBars` for every unit that `Unit_showsBars` accepts | likely | |
+| `0x0203B698` | ARM | (team palette setup) | Picks each team's palette bank via the table at `0x02127E30`, patches colors 12-14 from `0x02127E48` | likely | Effect confirmed in VRAM |
+| `0x0203BED0` | ARM | `Unit_drawBars` | Health bar (+ hero charge bar) over a unit, as untextured 3D quads | confirmed | Rules in docs/re-notes/hud.md |
+| `0x0203C264` | ARM | (bar layout) | Bar width/cell count and screen position | likely | |
+| `0x0203C480` | ARM | (bar polygons) | Emits the bar's quads; colors packed to BGR555 at `0x0203C640` | likely | |
 
 ## Notes
 

@@ -3,6 +3,7 @@ import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTile
 import { decodeChars, decodePalette } from './nitro';
 import { renderMap, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
+import { renderMinimap } from './minimap';
 import { bakeTrees, readTreeTable, type TreeTable } from './trees';
 
 /** Everything the M1 client needs to show one map with units. Built in the worker. */
@@ -13,6 +14,8 @@ export interface MapBundle {
   /** Logical terrain code per cell; will drive pathing in M2. */
   terrain: Uint8Array;
   ground: Rgba;
+  /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
+  minimap?: Rgba;
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
@@ -47,5 +50,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   let metatiles = parseMetatiles(romFile(rom, metatilePath(map.tileset)));
   const detail = tryRomFile(rom, detailTilesPath(name));
   if (detail) metatiles = withDetailTiles(metatiles, parseMetatiles(detail));
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles) };
+  const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
+  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap };
 }

@@ -28,6 +28,11 @@ out/venv/bin/python tools/emu/ramdump.py game.nds out/boot.dst out/ram.bin
 - Trees: the baked ground and terrain layers in RAM match `bakeTrees()` on mp01, mp02 and mp03
   (see `docs/re-notes/formats.md`, "Trees").
 - The map renderer is pixel-exact against the bottom screen, apart from sprites and fog of war.
+- HUD: the top screen we compose (frame, icons, counters, portrait, name, HP) matches the emulator pixel for
+  pixel with the King and with the Builder selected. Tap a unit at its bottom-screen position (y - 192 in the
+  256x384 screenshot) to select it.
+- Bars over units: lowering a unit's HP in RAM (unit +0x1A0, see `docs/re-notes/hud.md`) through
+  `emu.memory` and screenshotting is how the lit-cell rule and color bands were measured.
 - Unit frames: King hero and builder idle, walk and timing match our sheets pixel for pixel
   (see `docs/re-notes/formats.md`, "Unit animation timing"). To repeat:
 

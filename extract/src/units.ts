@@ -208,8 +208,15 @@ export interface UnitBundle {
   models: EntityInfo[];
 }
 
-/** Read the entity table and build sprite atlases for the playable factions' units. */
-export function buildUnitBundle(file: (path: string) => Uint8Array | undefined, banks: readonly number[]): UnitBundle {
+/**
+ * Read the entity table and build sprite atlases for the playable factions' units.
+ * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`).
+ */
+export function buildUnitBundle(
+  file: (path: string) => Uint8Array | undefined,
+  banks: readonly number[],
+  fixPalette?: (pal: Uint8Array) => void,
+): UnitBundle {
   const need = (p: string) => {
     const d = file(p);
     if (!d) throw new Error(`File not in ROM: ${p}`);
@@ -217,11 +224,13 @@ export function buildUnitBundle(file: (path: string) => Uint8Array | undefined, 
   };
   const entities = parseEntities(need('BP/Entities.ebp'));
   const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name);
+  const palette = decodePalette(need(UNIT_PALETTE));
+  fixPalette?.(palette);
   return {
     sprites: buildUnitSprites(entities, (p) => {
       const d = file(p);
       return d ? decodeChars(d) : undefined;
-    }, decodePalette(need(UNIT_PALETTE)), banks, playable),
+    }, palette, banks, playable),
     models: entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/')),
   };
 }
