@@ -2,6 +2,7 @@ import { ascii, u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
 import { parseEntityRecords, unitStats, type UnitStats } from './entities';
+import { buildModelSprites } from './modelSprites';
 
 /**
  * Entity blueprints (BP/Entities.ebp, after PMOC): `BPNZ`, then 0x7C-byte records,
@@ -41,7 +42,8 @@ export function parseEntities(ebp: Uint8Array): EntityInfo[] {
 
 /**
  * The three sprite layouts units use, by asset suffix. Everything else that moves
- * (siege, flyers, ships, the Giant) is a 3D model under Models/ and isn't drawn yet.
+ * (siege, flyers, ships, the Giant) is a 3D model under Models/, pre-rendered by
+ * modelSprites.ts into the same atlas shape (layout `model`).
  *
  * - `hero` (`_hrm`, `_hrf`, also campaign heroes): one file per facing, `_w0..4` walk and `_a0..4`
  *   attack, 6 frames of 24 px in a row. Idle is walk frame 0 (confirmed in the emulator).
@@ -52,9 +54,9 @@ export function parseEntities(ebp: Uint8Array): EntityInfo[] {
  *   per facing; cols 0-2 walk (played 0,1,2,1), 3-7 attack, idle is col 1 (from BP/Animations.abp
  *   set 5; not yet seen in the emulator).
  */
-export type SpriteLayout = 'hero' | 'infantry' | 'mounted';
+export type SpriteLayout = 'hero' | 'infantry' | 'mounted' | 'model';
 
-export function spriteLayout(asset: string): SpriteLayout | null {
+export function spriteLayout(asset: string): Exclude<SpriteLayout, 'model'> | null {
   if (!asset.startsWith('Sprites/')) return null;
   if (asset.endsWith('_bld_mtd')) return 'mounted';
   if (/_(eng|mel|rgd)$/.test(asset)) return 'infantry';
@@ -73,8 +75,19 @@ export interface UnitSprite {
   name: string;
   speed: number;
   layout: SpriteLayout;
-  /** Frame size in px (square). */
-  frame: number;
+  /** Frame size in px. */
+  frameW: number;
+  frameH: number;
+  /**
+   * Facing rows. Sprites: 5 (back, back-right, right, front-right, front), left facings mirrored.
+   * Models: `rows` evenly spaced turns, row 0 facing away (up), going counter-clockwise (row
+   * rows/4 faces left), never mirrored.
+   */
+  rows: number;
+  mirrored: boolean;
+  /** Pixel in the frame that sits on the unit's position. */
+  anchorX: number;
+  anchorY: number;
   atlas: Rgba;
   idle: number;
   /** Looped while moving. The game finishes the current pass before going idle. */
@@ -93,7 +106,7 @@ interface Cell {
   rowStep: number;
 }
 
-function cells(asset: string, layout: SpriteLayout): { frame: number; cols: Cell[]; idle: number; walk: number[]; attack: number[] } {
+function cells(asset: string, layout: Exclude<SpriteLayout, 'model'>): { frame: number; cols: Cell[]; idle: number; walk: number[]; attack: number[] } {
   const p = asset; // e.g. Sprites/k_mel
   switch (layout) {
     case 'hero': {
@@ -178,7 +191,13 @@ export function buildUnitSprites(
         name: e.name,
         speed: e.speed,
         layout,
-        frame: c.frame,
+        frameW: c.frame,
+        frameH: c.frame,
+        rows: FACINGS,
+        mirrored: true,
+        // Feet 5 px above the frame's bottom edge (24 px: the old 0.8 anchor; 32 px: guess).
+        anchorX: c.frame / 2,
+        anchorY: c.frame - 5,
         atlas: { width, height, data },
         idle: c.idle,
         walk: c.walk,
@@ -203,10 +222,10 @@ export const FACTIONS = [
 ] as const;
 
 export interface UnitBundle {
-  /** Every sprite unit of the playable factions, for each requested team bank. */
+  /** Every unit of the playable factions, sprite or pre-rendered model, for each requested team bank. */
   sprites: UnitSprite[];
-  /** Units drawn from 3D models (siege, flyers, ships). Listed so the client can say what is missing. */
-  models: EntityInfo[];
+  /** Movers we couldn't draw (model missing or not decodable). */
+  missing: EntityInfo[];
   /** Combat and movement stats per entity name, for every sprite unit (see docs/re-notes/combat.md). */
   stats: Record<string, UnitStats>;
 }
@@ -233,15 +252,17 @@ export function buildUnitBundle(
     const d = file(p);
     return d ? decodeChars(d) : undefined;
   }, palette, banks, playable);
+  const modelUnits = entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/'));
+  sprites.push(...buildModelSprites(modelUnits, file, palette, banks));
+  // Keep table order (hero first ... ships last) for the sandbox lineup.
+  const order = new Map(entities.map((e) => [e.name, e.index]));
+  sprites.sort((a, b) => order.get(a.name)! - order.get(b.name)!);
   const records = parseEntityRecords(need('BP/Entities.ebp'));
   const stats: Record<string, UnitStats> = {};
   for (const name of new Set(sprites.map((s) => s.name))) {
     const rec = records.find((r) => r.name === name);
     if (rec?.kind === 0) stats[name] = unitStats(records, rec);
   }
-  return {
-    sprites,
-    stats,
-    models: entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/')),
-  };
+  const drawn = new Set(sprites.map((s) => s.name));
+  return { sprites, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

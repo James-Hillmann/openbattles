@@ -22,9 +22,9 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FACINGS, FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FACTIONS, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
-import { animate, attack, facing, type AnimState } from './unitAnim';
+import { animate, attack, facing, modelRow, type AnimState } from './unitAnim';
 import { mountRomPanel } from './romPanel';
 import { Selection, type Pickable } from './selection';
 
@@ -100,7 +100,7 @@ interface UnitType {
 }
 /** By "<entity name>@<bank>". */
 const unitTypes = new Map<string, UnitType>();
-/** Entity names per faction prefix, in table order (hero, hero F, builder, melee, ranged, mounted). */
+/** Entity names per faction prefix, in table order (heroes, builder, melee, ranged, mounted, siege, ship). */
 let factionUnits = new Map<string, string[]>();
 /** Sim stats per entity name, from Entities.ebp. */
 let unitStats: Record<string, UnitStats> = {};
@@ -124,9 +124,9 @@ function onUnits(u: UnitBundle) {
   unitStats = u.stats;
   for (const s of u.sprites) {
     const tex = textureFrom(s.atlas);
-    const cols = s.atlas.width / s.frame;
-    const frames = Array.from({ length: FACINGS }, (_, row) =>
-      Array.from({ length: cols }, (_, col) => new Texture({ source: tex.source, frame: new Rectangle(col * s.frame, row * s.frame, s.frame, s.frame) })),
+    const cols = s.atlas.width / s.frameW;
+    const frames = Array.from({ length: s.rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => new Texture({ source: tex.source, frame: new Rectangle(col * s.frameW, row * s.frameH, s.frameW, s.frameH) })),
     );
     unitTypes.set(s.key, { sprite: s, frames });
     const prefix = s.name.slice(0, 1);
@@ -195,7 +195,7 @@ function mountFactionPickers(u: UnitBundle) {
   el.innerHTML = `
     <label>You <select data-p="0">${opts}</select></label>
     <label>Opponent <select data-p="1">${opts}</select></label>
-    <p class="muted">Not drawn yet (3D models): ${u.models.map((m) => m.name).join(', ')}</p>`;
+    ${u.missing.length ? `<p class="muted">Not drawn: ${u.missing.map((m) => m.name).join(', ')}</p>` : ''}`;
   el.querySelectorAll<HTMLSelectElement>('select').forEach((sel) => {
     const p = Number(sel.dataset.p);
     sel.value = factionPick[p]!;
@@ -340,20 +340,22 @@ app.ticker.add((t) => {
     }
     let s = unitSprites.get(u.id);
     if (!s) {
-      s = new Sprite(type.frames[4]![type.sprite.idle]!);
-      // Feet 5 px above the frame's bottom edge (guess for 32 px frames; 24 px matches the old 0.8 anchor).
-      s.anchor.set(0.5, (type.sprite.frame - 5) / type.sprite.frame);
+      s = new Sprite(type.frames[0]![type.sprite.idle]!);
+      s.anchor.set(type.sprite.anchorX / type.sprite.frameW, type.sprite.anchorY / type.sprite.frameH);
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
     }
-    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: 4, flip: false, swing: u.lastAttack };
+    const isModel = !type.sprite.mirrored;
+    // Start facing the camera: sprite row 4 (front), model row rows/2 (turned 180 degrees).
+    const a = unitAnim.get(u.id) ?? { state: { mode: 'idle' } as AnimState, row: isModel ? type.sprite.rows / 2 : 4, flip: false, swing: u.lastAttack };
+    const face = (dx: number, dy: number) => (isModel ? { row: modelRow(dx, dy, type.sprite.rows), flip: false } : facing(dx, dy));
     const moving = u.x !== p.x || u.y !== p.y;
-    if (moving) Object.assign(a, facing(u.x - p.x, u.y - p.y));
+    if (moving) Object.assign(a, face(u.x - p.x, u.y - p.y));
     if (u.lastAttack !== a.swing) {
       // The sim just attacked: face the target and play one swing.
       a.swing = u.lastAttack;
       const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
-      if (target) Object.assign(a, facing(target.x - u.x, target.y - u.y));
+      if (target) Object.assign(a, face(target.x - u.x, target.y - u.y));
       a.state = attack(animTime);
     }
     const r = animate(type.sprite, a.state, moving, animTime);
@@ -364,7 +366,7 @@ app.ticker.add((t) => {
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.
-    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - type.sprite.frame / 2, Math.round(y) - (type.sprite.frame - 5), u.hp, u.maxHp);
+    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - type.sprite.anchorX, Math.round(y) - type.sprite.anchorY, u.hp, u.maxHp);
   }
   unitLayer.sortableChildren = true;
   drawn = nextDrawn;

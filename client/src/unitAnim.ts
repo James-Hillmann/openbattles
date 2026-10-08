@@ -60,3 +60,13 @@ export function facing(dx: number, dy: number): { row: number; flip: boolean } {
   const rowByOct: Record<number, number> = { [-4]: 2, [-3]: 1, [-2]: 0, [-1]: 1, 0: 2, 1: 3, 2: 4, 3: 3, 4: 2 };
   return { row: rowByOct[oct] ?? 4, flip: Math.abs(oct) >= 3 };
 }
+
+/**
+ * Pre-rendered model row for a movement vector in pixels. Models turn to face their
+ * direction of travel measured in map cells (24x16 px), which matched the emulator
+ * to within 2 degrees. Row 0 faces up, counting counter-clockwise.
+ */
+export function modelRow(dx: number, dy: number, rows: number): number {
+  const yaw = Math.atan2(-dx / 24, -dy / 16); // render-side only
+  return (((Math.round((yaw / (2 * Math.PI)) * rows) % rows) + rows) % rows);
+}
