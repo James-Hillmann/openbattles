@@ -21,8 +21,9 @@ math is 20.12 fixed point (`x << 12`, 4096 = 1.0); the ARM9 does 64-bit `smull` 
 | +0x6D | u8 | cooldown in ticks between attacks (King 20, Swordsman 30, Archer 24) | confirmed |
 | +0x6E | u8 | minimum range in cells (1 for all units) | confirmed (code) |
 | +0x6F | u8 | maximum range in cells (melee 1, Archer 5, Catapult 8) | confirmed (code) |
-| +0x70 | u8 | grows with unit cost (Swordsman 15, Knight 20, Catapult 55). Maybe score/XP | guess |
-| +0x71 | u8 | sight radius in cells (5 melee, 7 ranged, 8 siege, 11 base) | guess |
+| +0x5C | u8 | role: 0 hero, 1 builder, 2 melee, 3 ranged, 4 mounted, 5 transport, 6 siege/special, 7 base, 8 lumber mill, 9 mine, 10 farm, 11 barracks, 12 special production, 13-15 tower levels, 16 shipyard, 17 bridge, 18 gate, 19 wall | likely (switches in targeting and damage code; names match) |
+| +0x70 | u8 | target priority for auto-targeting: higher is picked first (hero 30, builder 11, Swordsman 15, Archer 18, Knight 20, towers 40, Ballista 45, Catapult 55, Gryphon 65, base 10, other buildings 2-8) | confirmed (code) |
+| +0x71 | u8 | sight radius in cells: how far idle units look for enemies (5 melee, 7 ranged, 8 siege, 11 base) | confirmed (code) |
 
 The hero card's lightning-bolt rating presumably summarizes damage; not checked.
 
@@ -33,7 +34,7 @@ Archers, towers, siege and ships point +0x66 at one of these (`Arrow`, `Crossbow
 | offset | type | meaning | confidence |
 |---|---|---|---|
 | +0x0C | u16 | flight speed, 1/4096 cell per tick like unit speed (Arrow 2048) | likely |
-| +0x6B | u8 | nonzero = area damage path (`0x0206E5EC`), not ported | likely |
+| +0x6B | u8 | 1 = splash damage (Boulder, TBoulder, OgreBoulder, Fireball, TFireball, AirFireball, ICannonBall, PCannonBall, PlasmaBall, LaserCannon, Gift) | confirmed (code) |
 | +0x6C, +0x6E | u16 | always equal to +0x70/+0x72 in this ROM; not read by the hit code we traced | guess |
 | +0x70 | u16 | min damage | confirmed (code) |
 | +0x72 | u16 | max damage, exclusive: damage = min + rand(max - min) | confirmed (code) |
@@ -76,12 +77,59 @@ infantry; melee units get +10 against ranged units and +10/+15 against mounted/f
 Only the first 40 entity indexes have attacker classes (heroes and early units of each faction),
 so many later units get no bonus at all. Looks like an unfinished spreadsheet in the shipped game.
 
-## Ranged hit (likely)
+## Ranged hit
 
-Ranged units go through the same cooldown, then spawn a projectile (`0x02050C5C`, not traced in
-detail). On impact `0x0206E950` deals `min + rand(max - min)` times the defender multiplier.
-No bonus table for projectiles. We assume the projectile homes on its target and fizzles if the
-target dies first (guess; matches what's on screen, not checked in code).
+Ranged units go through the same cooldown, then spawn a projectile (`0x02050C5C`). On impact
+`0x0206E950` deals `min + rand(max - min)` times the defender multiplier to whatever stands in the
+target cell (confirmed, code). No bonus table for projectiles.
+
+Flight (likely, emulator): the projectile follows its target and damage lands when it arrives.
+W_Crossbowman shooting the King: 2 cells away the hit came 2-3 ticks after the shot, 1 tick when
+the King walked towards it, and in the same tick when adjacent. That fits a projectile that flies
+at its speed (+0x0C) and lands once it is within one cell of the target. The hit landed on the
+King while he moved. If the target dies first the projectile does no damage (guess).
+
+### Splash (`0x0206E5EC`, confirmed by reading the code)
+
+Projectiles with +0x6B = 1 damage an area instead of one cell:
+
+1. For ring `r` = 0, 1, 2: take every map cell in the square `r` cells around the impact cell
+   (Chebyshev distance, clipped to the map). A cell already hit by a smaller ring is skipped, so
+   the area is 5x5 cells and each cell is hit once.
+2. Skip cells whose occupant is on the shooter's team or an ally.
+3. Factor `f = 1.0 - 0.2 * r` in 20.12: 4096, 3277, 2458 (1.0, 0.8, 0.6).
+4. `min' = (min * f) >> 12`, `max' = (max * f) >> 12`, then the normal hit: `min' + rand(max' - min')`.
+
+The game holds one unit per cell; the sim lets units share cells, so every enemy unit in a cell
+takes its own hit.
+
+## Auto-targeting (`0x02063680`..`0x02063AF0`, confirmed by reading the code)
+
+Each unit has an AI component (unit +0x2A0) with a tick counter (+0x48).
+
+- **When:** a unit scans when `(counter + 0x1C) % 30 == 0`: once a second, first at age 2 ticks,
+  so units spawned together scan together. It scans while idle, moving or attacking (AI states
+  1-4) but not in states 5-6 (likely: dead/garrisoned).
+- **Radius:** sight (+0x71) for units; max range (+0x6F) for buildings (role 8-19).
+- **Results** come back 0-5 ticks later (the search is queued). The sim applies them at once
+  (guess that this doesn't matter visibly).
+- **Pick** (`0x020638A8`): drop candidates outside `min range <= d <= sight + max range`. A candidate
+  in attack range always beats one that isn't; otherwise higher priority (+0x70) wins. On equal
+  terms the earlier candidate stays. The list order is unknown, so the sim breaks ties by nearest,
+  then lowest id (guess).
+
+## Cheat flags (likely, not ported)
+
+Three flag bytes in a global settings block (`0x020092A8` returns it) change combat for the local
+player only: +0x01 makes the hero kill in one melee hit, +0x0D makes the hero take no damage,
++0x11 doubles splash damage (capped at 0xFFFF). These look like the unlockable extras. They're
+off in a normal skirmish and would desync online play, so the sim ignores them.
+
+## Taking damage (`0x0205E7D4`)
+
+Sets HP and records the time at unit +0x1A4. If the unit wasn't hit in the last 450 ticks (15 s),
+it raises an "under attack" alert (likely). It also posts event `0x2C` (damaged; likely what
+starts the hit flash).
 
 ## Range check (`0x0205E63C` -> `0x0207F640`, confirmed by reading the code)
 
@@ -102,10 +150,12 @@ can't be matched in a lockstep game anyway. The sim uses its own seeded RNG with
 - The attack animation (`*_2` sheet: 5 rows of facings x 5 frames, then the idle pose) starts
   about when damage lands. likely, from screenshots every 4 VBlanks; the client plays it from
   `lastAttack` at 15 fps.
-- Hit units flash white a few frames after the hit. Not ported.
+- Hit flash (likely, emulator, 4 hits): the whole sprite is drawn as a pale white silhouette
+  starting 2-3 ticks after the HP change and lasting 3 ticks (6 VBlanks). Both the King and the
+  Wizard Swordsman showed the same timing.
 
 ## What the sim does that the game may not (guesses to check)
 
-- Idle units auto-attack the nearest enemy within sight (+0x71). Tie: lower id.
+- Auto-target ties go to the nearest, then lowest id.
 - Without pathing, melee units walk to the cell beside the target on the side they come from.
 - Damage multiplier fixed at 1.0.
