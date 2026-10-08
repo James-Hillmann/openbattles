@@ -62,23 +62,46 @@ function textureFrom(img: Rgba): Texture {
 
 /** frames[row][col]: rows are facings (back, back-right, right, front-right, front), cols the walk cycle. */
 type Frames = Texture[][];
-let teamFrames: Frames[] = [];
+interface UnitTextures {
+  walk: Frames;
+  /** One frame per facing row. */
+  idle: Texture[];
+}
+let teamFrames: UnitTextures[] = [];
 const unitSprites = new Map<number, Sprite>();
 /** Last facing row per unit, so idle units keep looking where they walked. */
 const unitRow = new Map<number, number>();
+/** When each walking unit started walking, so its cycle begins at frame 0 like in the game. */
+const walkStart = new Map<number, number>();
 
-function cutFrames(sheet: Texture): Frames {
-  return Array.from({ length: 5 }, (_, row) =>
-    Array.from({ length: 5 }, (_, col) => new Texture({ source: sheet.source, frame: new Rectangle(col * FRAME, row * FRAME, FRAME, FRAME) })),
+function cutFrames(sheet: Texture, rows: number, cols: number): Frames {
+  return Array.from({ length: rows }, (_, row) =>
+    Array.from({ length: cols }, (_, col) => new Texture({ source: sheet.source, frame: new Rectangle(col * FRAME, row * FRAME, FRAME, FRAME) })),
   );
 }
 
+/**
+ * The game advances unit animation frames every 4 VBlanks (60/4 = 15 fps),
+ * measured in the emulator. Render-side only.
+ */
+const ANIM_FRAME_MS = (4 * 1000) / 60;
+
+/**
+ * Walk cycle for 24 px units, from BP/Animations.abp: the 5 walk frames, then
+ * the idle pose as a 6th frame, looped. -1 means "the idle frame for this facing".
+ */
+const WALK_CYCLE = [0, 1, 2, 3, 4, -1];
+
 function onMap(b: MapBundle) {
   ground.texture = textureFrom(b.ground);
-  teamFrames = TEAM_BANK.map((bank) => cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!)));
+  teamFrames = TEAM_BANK.map((bank) => ({
+    walk: cutFrames(textureFrom(b.units[`k_mel_1@${bank}`]!), 5, 5),
+    idle: cutFrames(textureFrom(b.units[`k_mel_0@${bank}`]!), 1, 5)[0]!,
+  }));
   for (const s of unitSprites.values()) s.destroy();
   unitSprites.clear();
   unitRow.clear();
+  walkStart.clear();
   resetWorld(b.ground.width / 2, b.ground.height / 2);
   centerOn(b.ground.width / 2, b.ground.height / 2);
 }
@@ -178,7 +201,7 @@ app.ticker.add((t) => {
     }
     let s = unitSprites.get(u.id);
     if (!s) {
-      s = new Sprite(frames[4]![0]!);
+      s = new Sprite(frames.idle[4]!);
       s.anchor.set(0.5, 0.8);
       unitLayer.addChild(s);
       unitSprites.set(u.id, s);
@@ -187,10 +210,14 @@ app.ticker.add((t) => {
     if (moving) {
       const f = facing(u.x - p.x, u.y - p.y);
       s.scale.x = f.flip ? -1 : 1;
-      s.texture = frames[f.row]![Math.floor(animTime / 120) % 5]!;
+      if (!walkStart.has(u.id)) walkStart.set(u.id, animTime);
+      const frame = Math.floor((animTime - walkStart.get(u.id)!) / ANIM_FRAME_MS);
+      const col = WALK_CYCLE[frame % WALK_CYCLE.length]!;
+      s.texture = col < 0 ? frames.idle[f.row]! : frames.walk[f.row]![col]!;
       unitRow.set(u.id, f.row);
     } else {
-      s.texture = frames[unitRow.get(u.id) ?? 4]![0]!;
+      s.texture = frames.idle[unitRow.get(u.id) ?? 4]!;
+      walkStart.delete(u.id);
     }
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;

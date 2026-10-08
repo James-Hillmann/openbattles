@@ -13,7 +13,10 @@ export interface MapBundle {
   /** Logical terrain code per cell; will drive pathing in M2. */
   terrain: Uint8Array;
   ground: Rgba;
-  /** Unit walk sheets: 5 rows (back, back-right, right, front-right, front) x 5 frames of 24x24. */
+  /**
+   * Unit sheets keyed "<sheet>@<bank>". `_1` (walk): 5 rows (back, back-right, right,
+   * front-right, front) x 5 frames of 24x24. `_0` (idle): one row, one 24x24 frame per facing.
+   */
   units: Record<string, Rgba>;
 }
 
@@ -32,11 +35,10 @@ export function tryRomFile(rom: UnpackedRom, path: string): Uint8Array | undefin
 export const listMaps = (rom: UnpackedRom): string[] =>
   rom.files.map((f) => /^Maps\/(.+)\.map$/i.exec(f.path)?.[1]).filter((n): n is string => !!n);
 
-/** Walk sheet + faction palette for the units M1 shows, keyed by "<sheet>@<bank>". */
-const M1_UNITS = [
-  { sheet: 'k_mel_1', palette: 'KingFaction.NCLR', bank: 0 },
-  { sheet: 'k_mel_1', palette: 'KingFaction.NCLR', bank: 2 },
-];
+/** Idle + walk sheets and faction palette for the units the client shows, keyed by "<sheet>@<bank>". */
+const M1_UNITS = ['k_mel_0', 'k_mel_1'].flatMap((sheet) =>
+  [0, 2].map((bank) => ({ sheet, palette: 'KingFaction.NCLR', bank })),
+);
 
 const treeTables = new WeakMap<UnpackedRom, TreeTable | null>();
 

@@ -1,4 +1,5 @@
-import { fx, fxAdd, fxDiv, fxLen, fxMul, type Fx } from './fixed';
+import { fxAdd, fxDiv, fxLen, fxMul, fxRaw, type Fx } from './fixed';
+import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
@@ -12,8 +13,8 @@ export function createWorld({ seed }: WorldInit): World {
   return { tick: 0, rng: makeRng(seed), nextId: 1, units: [] };
 }
 
-export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx): Unit {
-  const u: Unit = { id: w.nextId++, owner, x, y, tx: null, ty: null, speed: fx(4) };
+export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, speed = DEFAULT_SPEED): Unit {
+  const u: Unit = { id: w.nextId++, owner, x, y, tx: null, ty: null, speed };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   return u;
 }
@@ -31,18 +32,26 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
   }
 }
 
+/**
+ * The game moves units in cell space: a cell is 24x16 px, but a unit covers the
+ * same number of cells per tick in any direction, so it is faster in px going
+ * sideways than up/down. We measure distance in 48ths of a cell (48 = lcm(24,16)):
+ * 1 px across = 2/48 cell, 1 px down = 3/48 cell.
+ */
 function moveUnit(u: Unit): void {
   if (u.tx === null || u.ty === null) return;
   const dx = (u.tx - u.x) as Fx;
   const dy = (u.ty - u.y) as Fx;
-  const dist = fxLen(dx, dy);
-  if (dist <= u.speed) {
+  const dist48 = fxLen((dx * 2) as Fx, (dy * 3) as Fx);
+  // speed/4096 cell = speed*48/4096 48ths = speed*768 in Fx raw units.
+  const step48 = fxRaw(u.speed * 768);
+  if (dist48 <= step48) {
     u.x = u.tx;
     u.y = u.ty;
     u.tx = u.ty = null;
     return;
   }
-  const k = fxDiv(u.speed, dist);
+  const k = fxDiv(step48, dist48);
   u.x = fxAdd(u.x, fxMul(dx, k));
   u.y = fxAdd(u.y, fxMul(dy, k));
 }
