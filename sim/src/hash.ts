@@ -26,6 +26,13 @@ export function hashWorld(w: World): number {
     mix(u.tx);
     mix(u.ty);
     mix(u.speed);
+    mix(u.path.length);
+    for (const c of u.path) mix(c);
+  }
+  if (w.grid) {
+    mix(w.grid.width);
+    mix(w.grid.height);
+    for (const c of w.grid.cells) mix(c);
   }
   return h >>> 0;
 }
