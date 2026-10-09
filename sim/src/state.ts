@@ -61,7 +61,7 @@ export interface Unit {
   job: Job | null;
   /** Builder is carrying a load of bricks back. */
   carrying: boolean;
-  /** Production buildings: entity kinds waiting to be trained, front first. */
+  /** Production buildings: entity kinds waiting to be trained, front first. A tower: the level it is upgrading to. */
   queue: number[];
   /** Ticks spent on queue[0]. */
   prod: number;
@@ -101,7 +101,12 @@ export type Job =
    * Inside `building`, off the map: dropping off a load (then back to `tree`) or building a site
    * (`tree` = -1). `timer` counts down to coming out; -1 = until the site is finished.
    */
-  | { kind: 'inside'; building: EntityId; timer: number; tree: number };
+  | { kind: 'inside'; building: EntityId; timer: number; tree: number }
+  /**
+   * Repair `building` from next to it (Builders and heroes; structures.ts). `hp` and `bricks` carry the
+   * fractions of the per-tick rates, 20.12 fixed point (RepairStructureAction +0x20 / +0x24).
+   */
+  | { kind: 'repair'; building: EntityId; hp: number; bricks: number };
 
 /**
  * Static per-type data from Entities.ebp, indexed by entity index (+0x04).

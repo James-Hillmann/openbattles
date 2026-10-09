@@ -2,6 +2,7 @@ import { MOVES_GROUND, cellCenterX, cellCenterY, isWalkableCode, type TerrainGri
 import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from './state';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
+import { finishUpgrade, isTower, mayBuild, stepRepair, stepUpgrade } from './structures';
 
 /**
  * Bricks, gathering, construction and production, ported from the game's
@@ -189,7 +190,7 @@ function standCell(w: World, u: Unit, origin: number, size: number): number {
  * Walk next to a rectangle, or report that u is standing next to it.
  * Returns false when there is nowhere to stand.
  */
-function approach(w: World, u: Unit, origin: number, size: number): 'there' | 'walking' | 'stuck' {
+export function approach(w: World, u: Unit, origin: number, size: number): 'there' | 'walking' | 'stuck' {
   const g = w.grid!;
   if (rectDist(g, unitCell(w, u), origin, size) === 1) return u.mv ? 'walking' : 'there';
   if (u.mv) return 'walking';
@@ -297,6 +298,7 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const p = getPlayer(w, player);
   const builders = ownBuilders(w, player, ids);
   if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
+  if (!mayBuild(w, player, t)) return; // prerequisites and building limits (structures.ts)
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
   for (const u of builders) setBuildJob(w, u, site);
@@ -377,6 +379,9 @@ function stepJob(w: World, u: Unit): void {
       u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
       return;
     }
+    case 'repair':
+      stepRepair(w, u);
+      return;
     case 'inside': {
       const b = findById(w.units, job.building);
       if (!b || b.hp <= 0) {
@@ -492,15 +497,19 @@ function stepMine(w: World, m: Unit): void {
 }
 
 /** Economy for one tick, after combat and movement. */
-export function economyStep(w: World, spawn: SpawnFn): void {
+export function economyStep(w: World, spawn: SpawnFn, place: PlaceFn): void {
   if (w.grid && w.occ) {
     for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u); // frozen builders wait (spells.ts)
+    const upgraded: Unit[] = [];
     for (const b of w.units) {
       if (b.hp <= 0 || !isBuilding(b)) continue;
       if (!isFinished(b)) stepConstruction(w, b);
       else if (b.role === ROLE_MINE) stepMine(w, b);
-      else stepProduction(w, b, spawn);
+      else if (isTower(b.role)) {
+        if (stepUpgrade(w, b)) upgraded.push(b);
+      } else stepProduction(w, b, spawn);
     }
+    for (const b of upgraded) finishUpgrade(w, b, place); // after the loop: it swaps the tower for a new entity
   }
   // The game bumps its time counter, then pays out when it is a multiple of 60 s.
   if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) addBricks(p, TRICKLE_BRICKS);

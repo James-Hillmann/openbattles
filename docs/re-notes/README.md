@@ -11,6 +11,7 @@ when they explain something; never paste decompiler output wholesale.
 | [formats.md](formats.md) | File formats: layout tables, what's known, what isn't |
 | [movement.md](movement.md) | Walking, cell occupancy, waiting, sidestepping, the path search |
 | [hud.md](hud.md) | Top-screen HUD, selection outline, bars over units |
+| [structures.md](structures.md) | Tower upgrades, repair, build prerequisites and building limits |
 | [skirmish.md](skirmish.md) | Skirmish options, start setup, win and loss, terrain per unit type |
 | [fog.md](fog.md) | Fog of war: vision circles, visible and explored grids |
 | [armies.md](armies.md) | The army screen, unit pools per slot, the icon table, Build Costs panel |

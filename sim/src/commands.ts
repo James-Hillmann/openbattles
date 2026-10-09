@@ -13,6 +13,10 @@ export type Command =
   | { kind: 'construct'; unitIds: EntityId[]; site: EntityId }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
+  /** Upgrade a finished Tower (or Tower II) to the next level. */
+  | { kind: 'upgrade'; building: EntityId }
+  /** Builders and heroes repair one of the player's damaged buildings. */
+  | { kind: 'repair'; unitIds: EntityId[]; target: EntityId }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
   | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 

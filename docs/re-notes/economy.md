@@ -85,7 +85,8 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 - **Ceilings**: the per-player limit table at `0x02126CA4` (`1, 20, 4, 7, 14, 29, 20, 8, 0, 5`, read by
   `0x020863B8`) gives 1 hero, 20 pop and 4 stars. `0x02086440` stores min(20, 4 + 4 x Farms) and the HUD
   (`0x020E018C`) shows min(Farms, 4) stars. confirmed (code; matches a playtester: "20 regular, 4 special").
-  Entries 3-9 are open (3, 4 and 6 double in some game mode).
+  Entries 3-9 (towers 7, other buildings 14, walls, bridges, gates) are in structures.md "Building limits"
+  (3, 4 and 6 double in some game mode).
 
 ## Functions
 

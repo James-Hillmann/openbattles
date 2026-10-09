@@ -36,8 +36,13 @@ import {
   START_BRICKS,
   TERRAIN_TREE,
   ROLE_BUILDER,
+  ROLE_HERO,
   ROLE_SHIPYARD,
   QUEUE_MAX,
+  isTower,
+  missingPrerequisites,
+  atBuildLimit,
+  upgradeOf,
   type EntityType,
   type StartSpawn,
   type WinMode,
@@ -424,6 +429,15 @@ app.canvas.addEventListener('contextmenu', (e) => {
     match.issue({ kind: 'construct', unitIds: builders, site: target.id });
     return;
   }
+  // Builders and heroes sent to one of our damaged buildings repair it (the game: touch it with a Builder
+  // selected; heroes have the same Repair button). docs/re-notes/structures.md
+  const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
+  if (target && target.owner === localPlayer && isBuilding(target) && isFinished(target) && target.hp < target.maxHp && fixers.length) {
+    match.issue({ kind: 'repair', unitIds: fixers, target: target.id });
+    const rest = unitIds.filter((id) => !fixers.includes(id));
+    if (rest.length) match.issue({ kind: 'move', unitIds: rest, x: fx(px), y: fx(py) });
+    return;
+  }
   if (target && target.owner !== localPlayer) {
     match.issue({ kind: 'attack', unitIds, target: target.id });
     return;
@@ -472,7 +486,7 @@ function drawFog() {
 function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
   const g = world.grid;
   const job = u.job;
-  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build')) return null;
+  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build' && job.kind !== 'repair')) return null;
   const here = unitCell(world, u);
   const [hx, hy] = [here % g.width, Math.floor(here / g.width)];
   let cx: number, cy: number, size: number;
@@ -480,8 +494,8 @@ function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
     if (g.cells[job.tree] !== TERRAIN_TREE) return null;
     [cx, cy, size] = [job.tree % g.width, Math.floor(job.tree / g.width), 1];
   } else {
-    const site = world.units.find((b) => b.id === job.site);
-    if (!site || isFinished(site)) return null;
+    const site = world.units.find((b) => b.id === (job.kind === 'build' ? job.site : job.building));
+    if (!site || (job.kind === 'build') === isFinished(site)) return null;
     const o = unitCell(world, site);
     [cx, cy, size] = [o % g.width, Math.floor(o / g.width), site.size];
   }
@@ -606,7 +620,10 @@ function pickCommand(key: string) {
   const type = Number(idx);
   if (what === 'spell') return pickSpell(type);
   if (what === 'build') placing = { type };
-  else if (what === 'train') {
+  else if (what === 'upgrade') {
+    const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isTower(u.role));
+    if (b) match.issue({ kind: 'upgrade', building: b.id });
+  } else if (what === 'train') {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
     if (b) match.issue({ kind: 'train', building: b.id, type });
   }
@@ -700,6 +717,7 @@ function updateStrip() {
   if (b) {
     const name = nameByIndex.get(b.kind) ?? '';
     if (!isFinished(b)) return bar.show(`${displayName(name)}: ${Math.floor((100 * b.progress) / Math.max(1, b.buildTime))}%`, []);
+    if (isTower(b.role)) return showUpgrade(b, item);
     const roles = TRAINS[b.role] ?? [];
     // One hero icon (the first), as the Castle strip shows in the emulator.
     const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
@@ -717,8 +735,48 @@ function updateStrip() {
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
   const all = armyBuildings(localPlayer);
   const list = BUILD_ORDER.map((r) => all.find((st) => st.role === r)).filter((st): st is UnitStats => !!st);
+  // Stables and Shipyard wait for a finished Barracks and Farm, and towers and other buildings have caps
+  // (structures.ts). The game checkers the button; our tooltip also says what's missing ("<1> Required", text 109).
+  const blocked = (st: UnitStats): string | null => {
+    const t = world.types[st.index];
+    if (!t) return null;
+    const need = missingPrerequisites(world, localPlayer, t);
+    if (need.length) {
+      const names = need.map((r) => displayName(all.find((x) => x.role === r)?.name ?? ''));
+      return (armyBundle?.text[FE_TEXT.required] || '<1> Required').replace('<1>', names.join(', '));
+    }
+    return atBuildLimit(world, localPlayer, t) ? 'Limit reached' : null;
+  };
+  const builds = list.map((st) => {
+    const it = item(st, 'build');
+    const why = blocked(st);
+    return why ? { ...it, label: `${it.label} (${why})`, enabled: false } : it;
+  });
   costs(list, 'build');
-  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', list.map((st) => item(st, 'build')));
+  costActions = costActions.map((a) => ({ ...a, enabled: builds.find((b) => b.key === a.key)?.enabled ?? a.enabled }));
+  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', builds);
+}
+
+/**
+ * A tower's upgrade strip (a grey tab in the game): one button for the next level at its full price, with
+ * "Upgrade Costs" on the top screen; while it runs, the level in progress shows like a unit in training.
+ * Tower III has nothing to upgrade to. Emulator and code: docs/re-notes/structures.md.
+ */
+function showUpgrade(b: Unit, item: (st: UnitStats, verb: string) => CommandItem) {
+  const queue = b.queue.map((k) => ({
+    icon: iconFor(nameByIndex.get(k) ?? ''),
+    pct: Math.floor((100 * b.prod) / Math.max(1, world.types[k]?.buildTime ?? 1)),
+  }));
+  const next = upgradeOf(world, b);
+  const st = next && unitStats[nameByIndex.get(next.kind) ?? ''];
+  if (!st) return bar.show('', [], queue);
+  const it = { ...item(st, 'upgrade'), ...(b.queue.length ? { enabled: false } : {}) };
+  const icon = armyBundle?.stripIcons[st.name];
+  if (icon) {
+    stripCosts = { title: armyBundle!.text[FE_TEXT.upgradeCosts] || 'Upgrade Costs', items: [{ icon, cost: st.cost }] };
+    costActions = [{ key: it.key, label: it.label, enabled: it.enabled }];
+  }
+  bar.show('', [it], queue);
 }
 
 /**
@@ -919,6 +977,20 @@ const netEl = document.getElementById('net')!;
 let acc = 0;
 let animTime = 0;
 
+/** A finished upgrade swaps a tower for a new entity; keep it selected, as the game does (0x02073620). */
+function followUpgrades(before: World) {
+  for (const id of [...selection.ids]) {
+    if (world.units.some((u) => u.id === id)) continue;
+    const old = before.units.find((u) => u.id === id);
+    if (!old || !isTower(old.role)) continue;
+    const now = world.units.find((u) => u.owner === old.owner && isTower(u.role) && u.x === old.x && u.y === old.y);
+    if (now) {
+      selection.ids.delete(id);
+      selection.ids.add(now.id);
+    }
+  }
+}
+
 /** Run every sim tick that `ms` more of wall time allows (fewer while waiting on input). */
 function advance(ms: number) {
   acc = Math.min(acc + ms, TICK_MS * MAX_CATCHUP_TICKS);
@@ -927,6 +999,7 @@ function advance(ms: number) {
     const r = match.tick();
     if (!r) break; // waiting for the other player's input: hold this tick
     prev = before;
+    followUpgrades(before);
     acc -= TICK_MS;
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
     if (fog) updateFog(fog, world, localPlayer);

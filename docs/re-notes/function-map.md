@@ -140,3 +140,10 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
 | `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
 | `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |
+| `0x020859D4` | ARM | `Team_countRole` | Entities of a role on a team; finished only when r2 = 1 | likely | structures.md |
+| `0x02086088` | ARM | `Team_limitLeft` | Room left in a limit group (table `0x02126CA4`) | likely | structures.md |
+| `0x02068B74` | ARM | `ConstructStructureEntityCommand::start` | Bricks, limit and prerequisite checks for a build order | confirmed (effects seen in the emulator) | structures.md |
+| `0x02073080` | ARM | `ResearchUpgradeEntityCommand::start` | Tower upgrade (and spell research): next level, pays its price | confirmed | structures.md |
+| `0x02073620` | ARM | (upgrade done) | Replaces the tower with the next level, damage carried over | confirmed | structures.md |
+| `0x020728CC` | ARM | `RepairStructureEntityCommand::start` | Heroes and Builders only; target a damaged building | confirmed | structures.md |
+| `0x02054B64` | ARM | `RepairStructureAction::update` | Per-tick repair: half price over the build time | confirmed | structures.md |
