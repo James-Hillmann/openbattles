@@ -170,6 +170,12 @@ function ringSearch(g: TerrainGrid, centre: number, maxR: number, match: (c: num
   }
   return -1;
 }
+/** A free cell this unit may stand in, by the game's ring search around `centre` (radius < maxR), or -1. */
+export function freeCellAround(w: World, u: Unit, centre: number, maxR: number): number {
+  const g = w.grid!;
+  return ringSearch(g, centre, maxR, (c) => walkableCell(g, u, c) && w.occ![slot(w, u, c)] === 0);
+}
+
 function ringOffset(k: number, s: number, r: number): [number, number] {
   switch (k) {
     case 0: return [-s, -r];

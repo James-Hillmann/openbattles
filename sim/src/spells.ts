@@ -1,7 +1,9 @@
-import { cellOf } from './terrain';
+import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { findById } from './combat';
 import { nextInt } from './rng';
-import { isBuilding, isFinished, ROLE_BASE, ROLE_HERO } from './economy';
+import { cellXOf, cellYOf, forestEnd, fx12Mul, normalize, packCell, thickLine } from './spellGeom';
+import { isBuilding, isFinished, ROLE_BASE, ROLE_HERO, ROLE_SIEGE, ROLE_TRANSPORT, starCap } from './economy';
+import { freeCellAround, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import type { Fx } from './fixed';
 import type { ActiveSpell, EntityId, PlayerId, SpellDef, Unit, World } from './state';
 
@@ -38,15 +40,43 @@ export function payForSpell(caster: Unit, def: SpellDef, target: { x: Fx; y: Fx 
   return true;
 }
 
+// What the player may tap (record +0x08, the spell UI's tap filter 0x020A9330).
+export const TAP_POINT = 1;
+export const TAP_OWN_UNIT = 2;
+export const TAP_ENEMY = 4;
+export const TAP_OWN_BUILDER = 8;
+export const TAP_OWN_MINE = 0x10;
+export const TAP_ENEMY_VEHICLE = 0x20;
+export const TAP_SELF = 0x40;
+const TAP_UNIT = TAP_OWN_UNIT | TAP_ENEMY | TAP_OWN_BUILDER | TAP_OWN_MINE | TAP_ENEMY_VEHICLE;
+
 /**
- * What the player taps after picking the spell (record +0x08, read by the spell UI 0x020A9330): 0x40
- * nothing (it goes off around the hero at once), 2 one of your units, 4 an enemy unit, 1 a spot.
- * confirmed for 1 (5/7/9, 25), 0x40 (13) and 4 (20) in the emulator; 2 likely.
+ * What the player taps after picking the spell: nothing (0x40: it goes off around the hero at once),
+ * a unit (2 own unit, 4 enemy, 8 own builder, 0x10 own mine, 0x20 enemy transport or siege unit), or a
+ * spot (1). A unit spell with bit 1 also takes a spot (Fireball, Thunder Hammer). likely; seen: 1 for
+ * 5/7/9/25, 0x40 for 13, 4 for 20.
  */
 export function spellTarget(def: SpellDef): 'unit' | 'point' | 'none' {
-  if (def.flags & 0x40) return 'none';
-  if (def.flags & 6) return 'unit';
+  if (def.flags & TAP_SELF) return 'none';
+  if (def.flags & TAP_UNIT) return 'unit';
   return 'point';
+}
+
+/** Whether a spell may be cast at this unit (the tap filter, plus Hot Wire's special-cap check 0x0207B71C). */
+export function canTarget(w: World, def: SpellDef, player: PlayerId, t: Unit): boolean {
+  if (t.hp <= 0) return false;
+  const f = def.flags;
+  const own = t.owner === player;
+  const enemy = !allied(w, t.owner, player);
+  if (f & TAP_OWN_UNIT && own && !isBuilding(t)) return true;
+  if (f & TAP_OWN_BUILDER && own && t.role === 1) return true;
+  if (f & TAP_OWN_MINE && own && t.role === 9) return true;
+  if (f & TAP_ENEMY && enemy) return true;
+  if (f & TAP_ENEMY_VEHICLE && enemy && (t.role === ROLE_TRANSPORT || t.role === ROLE_SIEGE)) {
+    // A siege unit only when the caster's player has room under its special cap (likely).
+    return t.role !== ROLE_SIEGE || w.units.filter((u) => u.owner === player && u.hp > 0 && u.role === ROLE_SIEGE).length < starCap(w, player);
+  }
+  return false;
 }
 
 /** Players on one team are allies (0x02085D38). */
@@ -69,13 +99,12 @@ export interface CastOrder {
 export function orderCast(w: World, player: PlayerId, o: CastOrder): void {
   const caster = findById(w.units, o.caster);
   const def = w.spellDefs[o.spell];
-  if (!caster || caster.owner !== player || !def || !caster.spells.includes(o.spell)) return;
-  const mode = spellTarget(def);
-  const t = mode === 'unit' ? findById(w.units, o.target) : undefined;
+  if (!caster || caster.owner !== player || !def || !caster.spells.includes(o.spell) || !spellWorks(def.id)) return;
+  let mode = spellTarget(def);
+  const t = mode === 'unit' && o.target ? findById(w.units, o.target) : undefined;
   if (mode === 'unit') {
-    if (!t || t.hp <= 0) return;
-    // 2 takes one of your own units, 4 an enemy's (the strip's tap filter; likely).
-    if (def.flags & 4 ? allied(w, t.owner, player) : t.owner !== player) return;
+    if (t ? !canTarget(w, def, player, t) : !(def.flags & TAP_POINT)) return;
+    if (!t) mode = 'point';
   }
   const at = mode === 'none' ? null : t ? { x: t.x, y: t.y } : { x: o.x, y: o.y };
   if (!payForSpell(caster, def, at)) return;
@@ -113,9 +142,39 @@ const MODE_UNIT = 1;
 const MODE_CASTER = 2;
 const MODE_POINT = 3;
 
+// Spell class kinds (SpellBase +0x08 holds the game's own).
+const C_NONE = 0;
+const C_HEAL = 1;
+const C_BUFF = 2;
+const C_DAMAGE = 3;
+const C_FREEZE = 4;
+const C_LIGHTNING = 5;
+const C_TELEPORT = 6;
+const C_TRACKING = 7;
+const C_HOTWIRE = 8;
+const C_FOREST = 9;
+const C_FIREBALL = 10;
+const C_HAMMER = 11;
+
+/** The class the factory (0x0207BBEC) makes for a spell id; C_NONE for the ones not ported yet. */
+function classOf(id: number): number {
+  if (HEAL.has(id)) return C_HEAL;
+  if (id in STAT_BUF) return C_BUFF;
+  if (id in DAMAGE) return C_DAMAGE;
+  if (FREEZE.has(id)) return C_FREEZE;
+  if (id === 15) return C_LIGHTNING;
+  if (id === 26) return C_TELEPORT;
+  if (id === 30) return C_TRACKING;
+  if (id === 32) return C_HOTWIRE;
+  if (id >= 10 && id <= 12) return C_FOREST;
+  if (id === 14) return C_FIREBALL;
+  if (id === 16) return C_HAMMER;
+  return C_NONE;
+}
+
 /** True for the spells this sim runs (the rest are paid for and do nothing yet). */
 export function spellWorks(id: number): boolean {
-  return HEAL.has(id) || id in STAT_BUF || id in DAMAGE || FREEZE.has(id);
+  return classOf(id) !== C_NONE;
 }
 
 /**
@@ -135,18 +194,23 @@ const cellOfUnit = (u: Unit) => cellOf(u.x, u.y);
  * 0x0207AB50 unit / 0x0207ABA0 around the caster). A unit spell holds its target at once; an area
  * spell waits in the scan queue for its units.
  */
-function startSpell(w: World, caster: Unit, def: SpellDef, mode: 'unit' | 'point' | 'none', t: Unit | undefined, at: { x: Fx; y: Fx }): ActiveSpell {
+function startSpell(
+  w: World, caster: Unit, def: SpellDef, mode: 'unit' | 'point' | 'none', t: Unit | undefined, at: { x: Fx; y: Fx }, cls = classOf(def.id),
+): ActiveSpell {
   const [cx, cy] = cellOf(at.x, at.y);
   const [end, , start, startChance] = [def.params[0], def.params[1], def.params[2], def.params[3]];
   const D = def.time + (DAMAGE[def.id] ?? 0);
+  // Classes that work on one target or on the caster have no area (radius -1).
+  const area = cls === C_HEAL || cls === C_BUFF || cls === C_DAMAGE;
   const s: ActiveSpell = {
-    id: w.nextSpell++, owner: caster.owner, spell: def.id, caster: caster.id, target: t?.id ?? 0, x: at.x, y: at.y, start: w.tick,
+    id: w.nextSpell++, owner: caster.owner, spell: def.id, cls, caster: caster.id, target: t?.id ?? 0, x: at.x, y: at.y, start: w.tick,
     mode: mode === 'unit' ? MODE_UNIT : mode === 'none' ? MODE_CASTER : MODE_POINT,
-    left: def.id in STAT_BUF ? BUFF_TICKS : def.id === 3 ? 1 : def.id in DAMAGE ? D : -1,
-    cx, cy, radius: mode === 'unit' ? -1 : def.b7, units: [], timer: FREEZE.has(def.id) ? def.time : 1,
-    dmg: 0, dmgStep: 0, chance: 0, chanceStep: 0, ring: 0, ringStep: 0,
+    left: cls === C_BUFF ? BUFF_TICKS : def.id === 3 ? 1 : cls === C_DAMAGE ? D : cls === C_TRACKING ? def.time : -1,
+    cx, cy, radius: mode === 'unit' || !area ? -1 : def.b7, units: [], phase: 0,
+    timer: cls === C_FREEZE ? def.time : cls === C_LIGHTNING ? LIGHTNING_DELAY : cls === C_TELEPORT ? TELEPORT_DELAY : cls === C_HOTWIRE ? def.time : 1,
+    dmg: 0, dmgStep: 0, chance: 0, chanceStep: 0, ring: 0, ringStep: 0, idx: 0, px: 0, py: 0, vx: 0, vy: 0,
   };
-  if (def.id in DAMAGE) {
+  if (cls === C_DAMAGE) {
     // Damage and hit chance move in a straight line from the record's start to end values over D ticks.
     s.dmg = start << 12;
     s.dmgStep = fxDivRound(end - start, D);
@@ -163,9 +227,10 @@ function startSpell(w: World, caster: Unit, def: SpellDef, mode: 'unit' | 'point
       for (let i = 0; i < bombs * 2; i++) nextInt(w.rng, 61);
     }
   }
-  if (FREEZE.has(def.id)) s.ringStep = fxDivRound(def.b7, def.time);
+  if (cls === C_FREEZE) s.ringStep = fxDivRound(def.b7, def.time);
+  if (cls === C_TRACKING && t) t.tracked = 1; // unit +0x155 (0x0205A990)
   w.spells.push(s);
-  if (FREEZE.has(def.id)) return s; // collects its own units as the ring grows
+  if (!area) return s;
   if (t) enter(w, s, t);
   else w.scanQueue.push(s.id);
   return s;
@@ -188,7 +253,7 @@ export function startAura(w: World, u: Unit): void {
  */
 function takes(s: ActiveSpell, u: Unit): boolean {
   if (u.hp <= 0) return false;
-  if (s.spell in DAMAGE) return u.owner !== s.owner;
+  if (s.cls === C_DAMAGE) return u.owner !== s.owner;
   if (u.owner !== s.owner || u.id === s.caster) return false;
   if (s.spell === AURA_BASE) return u.role === ROLE_HERO;
   if (s.spell === 17) return !isBuilding(u) || u.role === 9;
@@ -200,9 +265,9 @@ function enter(w: World, s: ActiveSpell, u: Unit): void {
   const free = s.units.indexOf(0);
   if (free >= 0) s.units[free] = u.id;
   else s.units.push(u.id);
-  const slot = STAT_BUF[s.spell];
+  const slot = s.cls === C_BUFF ? STAT_BUF[s.spell] : undefined;
   if (slot !== undefined) u.buffs[slot]!++;
-  if (s.spell in DAMAGE) u.grace = DAMAGE[s.spell]!; // 0x02076B9C; the last spell to take a unit sets it
+  if (s.cls === C_DAMAGE) u.grace = DAMAGE[s.spell] ?? 0; // 0x02076B9C; the last spell to take a unit sets it
 }
 
 /** A unit leaves: its slot stays, empty (0x0207B1F4). */
@@ -210,9 +275,9 @@ function leave(w: World, s: ActiveSpell, i: number): void {
   const u = findById(w.units, s.units[i]!);
   s.units[i] = 0;
   if (!u) return;
-  const slot = STAT_BUF[s.spell];
+  const slot = s.cls === C_BUFF ? STAT_BUF[s.spell] : undefined;
   if (slot !== undefined) u.buffs[slot]!--;
-  if (s.spell in DAMAGE) u.grace = 0;
+  if (s.cls === C_DAMAGE) u.grace = 0;
 }
 
 /** The spell is over: every unit leaves (SpellBase dtor 0x0207ACE8). */
@@ -277,7 +342,7 @@ const manhattan = (ax: number, ay: number, bx: number, by: number) => Math.abs(a
  */
 function damageTick(w: World, s: ActiveSpell, caster: Unit): void {
   const def = w.spellDefs[s.spell]!;
-  const grows = GROWS.has(s.spell);
+  const grows = GROWS.has(s.spell) && s.cls === C_DAMAGE;
   if (grows) s.ring += s.ringStep;
   const [hx, hy] = cellOfUnit(caster);
   for (const id of s.units) {
@@ -343,7 +408,7 @@ export function spellsStep(w: World): void {
     if (stepSpell(w, s)) done.add(s.id);
   }
   if (done.size) {
-    for (const s of w.spells) if (done.has(s.id) && !FREEZE.has(s.spell)) leaveAll(w, s);
+    for (const s of w.spells) if (done.has(s.id)) endSpell(w, s);
     w.spells = w.spells.filter((s) => !done.has(s.id));
     w.scanQueue = w.scanQueue.filter((id) => !done.has(id));
   }
@@ -351,7 +416,7 @@ export function spellsStep(w: World): void {
   if (next === undefined) return;
   const s = w.spells.find((x) => x.id === next)!;
   scan(w, s);
-  if (!(s.spell in STAT_BUF)) w.scanQueue.push(s.id); // all but buffs go round again
+  if (s.cls !== C_BUFF) w.scanQueue.push(s.id); // all but buffs go round again
 }
 
 /**
@@ -362,21 +427,335 @@ export function spellsStep(w: World): void {
 function stepSpell(w: World, s: ActiveSpell): boolean {
   const caster = findById(w.units, s.caster);
   const alive = !!caster && caster.hp > 0;
-  if (HEAL.has(s.spell) && --s.timer === 0) {
-    pulse(w, s);
-    s.timer = HEAL_PULSE;
-  }
-  if (s.spell in DAMAGE && alive) damageTick(w, s, caster);
-  if (FREEZE.has(s.spell)) {
-    if (s.timer === 0 || !alive) return true; // its own timer; SpellBase never times it out
-    freezeTick(w, s);
-    s.timer--;
-    return false;
+  switch (s.cls) {
+    case C_HEAL:
+      if (--s.timer === 0) {
+        pulse(w, s);
+        s.timer = HEAL_PULSE;
+      }
+      break;
+    case C_DAMAGE:
+      if (alive) damageTick(w, s, caster);
+      break;
+    case C_FREEZE:
+      if (s.timer === 0 || !alive) return true; // its own timer; SpellBase never times it out
+      freezeTick(w, s);
+      s.timer--;
+      return false;
+    case C_LIGHTNING:
+    case C_TELEPORT:
+    case C_HOTWIRE:
+      if (alive && classTick(w, s, caster)) return true;
+      break;
+    case C_FOREST:
+      if (alive && forestTick(w, s, caster)) return true;
+      break;
+    case C_FIREBALL:
+    case C_HAMMER:
+      if (alive && projectileTick(w, s, caster)) return true;
+      break;
   }
   if (!alive) s.left = 0;
   if (s.left === 0) return true;
   if (s.left > 0) s.left--;
   return false;
+}
+
+/** Lightning strikes this many ticks after the cast, when the hero's cast animation is done. confirmed: 14 */
+const LIGHTNING_DELAY = 14;
+/** Lightning's damage record (33). confirmed */
+const LIGHTNING_DAMAGE = 33;
+/** The lightning spell lingers this long after the strike. confirmed */
+const LIGHTNING_LINGER = 30;
+/** Teleport moves the hero this many ticks after the cast, when its picture says so. confirmed: 23 */
+const TELEPORT_DELAY = 23;
+/** How far Teleport looks for a free cell around the base (guess; the fallback search is 20 per the notes). */
+const TELEPORT_SEARCH = 20;
+
+/** The classes driven by a timer and a phase. True when the spell is over. */
+function classTick(w: World, s: ActiveSpell, caster: Unit): boolean {
+  if (s.cls === C_LIGHTNING) {
+    // 0x02079B74: wait for the cast animation, strike (the 8 beams are only a picture) with record 33's
+    // damage area around the hero, linger 30 ticks, end.
+    if (--s.timer > 0) return false;
+    if (s.phase === 1) return true;
+    const def = w.spellDefs[LIGHTNING_DAMAGE];
+    if (def) startSpell(w, caster, def, 'none', undefined, caster, C_DAMAGE);
+    s.phase = 1;
+    s.timer = LIGHTNING_LINGER;
+    return false;
+  }
+  if (s.cls === C_TELEPORT) {
+    // 0x0207C7FC: after the animation, the hero lands next to its player's first base, else near its
+    // start spot (0x020A3D24), via TeleportUnitCommand (0x0206B684). Over the tick after.
+    if (s.phase === 1) return true;
+    if (--s.timer > 0) return false;
+    teleportHome(w, caster);
+    s.phase = 1;
+    return false;
+  }
+  // Hot Wire (0x02078D3C): on its first update the target changes sides for good and drops its
+  // orders (0x020598A4); the spell then shows its picture for the record's +0x12 ticks.
+  if (s.phase === 0) {
+    s.phase = 1;
+    const t = findById(w.units, s.target);
+    if (t && t.hp > 0 && !allied(w, t.owner, s.owner)) {
+      t.owner = s.owner;
+      t.target = null;
+      t.ordered = false;
+      t.job = null;
+      stopMove(w, t);
+    }
+  }
+  return --s.timer <= 0;
+}
+
+/** Move a hero next to its player's first base, or near its start cell without one. */
+function teleportHome(w: World, u: Unit): void {
+  const g = w.grid;
+  if (!g || !w.occ) return;
+  const base = w.units.find((b) => b.owner === u.owner && b.role === ROLE_BASE && b.hp > 0);
+  const start = w.players.find((p) => p.id === u.owner)?.start ?? -1;
+  const centre = base ? unitCell(w, base) : start;
+  if (centre < 0) return;
+  const to = freeCellAround(w, u, centre, TELEPORT_SEARCH);
+  if (to < 0) return;
+  removeUnit(w, u);
+  u.x = cellCenterX(to % g.width);
+  u.y = cellCenterY(Math.floor(to / g.width));
+  u.mv = null;
+  u.tx = u.ty = null;
+  u.path = [];
+  u.target = null;
+  u.ordered = false;
+  placeUnit(w, u);
+}
+
+// ---- Forest spells (ForrestSpell 0x0207784C, update 0x020779CC) ----
+
+/** Each list cell tries this 2x2 block, one candidate a tick (table 0x0214A780). confirmed */
+const PLANT_OFFSETS = [[0, 0], [0, 1], [1, 0], [1, 1]] as const;
+/** 11 and 12 wait for their picture (ForrestSpawnEffect counts 10 updates): first plant on T + 12. confirmed */
+const FOREST_WAIT = 10;
+const TERRAIN_OPEN = 0;
+const TERRAIN_TREE = 1;
+const TERRAIN_CLIFF = 5;
+
+/**
+ * Forest spells plant trees toward the tapped spot: 10 along a thick line from the hero to `range`
+ * cells away, 11 and 12 on 80% of the open cells in the 5x5 square there, in an order shuffled with
+ * one rand(100) per cell. Each list cell costs 5 ticks: 4 candidates (its 2x2 block) and one to drop
+ * it; a candidate becomes a tree only on open ground inside the map with nobody standing on it.
+ * confirmed (docs/re-notes/spells.md "Forest spells").
+ */
+function forestTick(w: World, s: ActiveSpell, caster: Unit): boolean {
+  const g = w.grid;
+  if (!g) return true;
+  const def = w.spellDefs[s.spell]!;
+  if (s.phase === 0) {
+    const [hx, hy] = cellOfUnit(caster);
+    const [ex, ey] = forestEnd(hx, hy, s.cx, s.cy, def.range, g.width, g.height);
+    if (s.spell === 10) {
+      s.units = thickLine(hx, hy, ex, ey, g.width, g.height);
+      s.phase = 1;
+      s.timer = 1;
+      return false;
+    }
+    // Area query 0x0207ED4C: the square of radius b7 around the end, rows first, open cells only.
+    const area: number[] = [];
+    for (let y = Math.max(ey - def.b7, 0); y <= Math.min(ey + def.b7, g.height - 1); y++)
+      for (let x = Math.max(ex - def.b7, 0); x <= Math.min(ex + def.b7, g.width - 1); x++)
+        if (g.cells[y * g.width + x] === TERRAIN_OPEN) area.push(packCell(x, y));
+    // Shuffle 0x020781D0: a roll <= 50 sends a cell to the front group, else the back; keep 80%.
+    const front: number[] = [];
+    const back: number[] = [];
+    for (const c of area) (nextInt(w.rng, 100) <= 50 ? front : back).push(c);
+    s.units = [...front, ...back].slice(0, Math.floor((area.length * 80) / 100));
+    s.phase = 2;
+    s.timer = FOREST_WAIT;
+    return false;
+  }
+  if (s.phase === 2) {
+    if (--s.timer === 0) {
+      s.phase = 1;
+      s.timer = 1;
+    }
+    return false;
+  }
+  if (s.units.length === 0) return true;
+  if (--s.timer !== 0) return false;
+  s.timer = 1;
+  if (s.idx < PLANT_OFFSETS.length) {
+    const [ox, oy] = PLANT_OFFSETS[s.idx++]!;
+    const x = cellXOf(s.units[0]!) + ox;
+    const y = cellYOf(s.units[0]!) + oy;
+    if (canPlant(w, x, y)) g.cells[y * g.width + x] = TERRAIN_TREE;
+  } else {
+    s.idx = 0;
+    s.units.shift();
+  }
+  return false;
+}
+
+/** Inside the map (the playable rectangle is the whole map in skirmish), open ground, nobody there (0x02077DC8). */
+function canPlant(w: World, x: number, y: number): boolean {
+  const g = w.grid!;
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return false;
+  const c = y * g.width + x;
+  if (g.cells[c] !== TERRAIN_OPEN) return false;
+  if (w.occ) for (let l = 0; l * g.width * g.height < w.occ.length; l++) if (w.occ[l * g.width * g.height + c]) return false;
+  return !w.units.some((u) => u.hp > 0 && cellOfUnit(u)[0] === x && cellOfUnit(u)[1] === y);
+}
+
+// ---- Fireball and Thunder Hammer (ProjectileSpell 0x02079000 / 0x02079F7C) ----
+
+/** Projectile speed: entity 202's 2048, half a cell a tick. confirmed */
+const PROJECTILE_SPEED = 2048;
+/** Fireball's and Thunder Hammer's damage records. confirmed */
+const FIREBALL_DAMAGE = 34;
+const HAMMER_DAMAGE = 16;
+/** Ticks the spell stays after its impact (picture, then the projectile is destroyed): FireBall 3 + 30 + 2, ThunderHammer 5 + 30 + 2. */
+const FIREBALL_AFTER = 35;
+const HAMMER_AFTER = 37;
+/** Pixels per cell in the game's 20.12 pixel space. */
+const PX_W = 24 * 4096;
+const PX_H = 16 * 4096;
+const projCell = (s: ActiveSpell): [number, number] => [Math.floor(s.px / PX_W), Math.floor(s.py / PX_H)];
+
+/**
+ * Fireball and Thunder Hammer: on the first update a projectile leaves the hero toward the aim cell;
+ * it flies straight at 12 px across / 8 px down a tick from the next one, and its flight ends at the
+ * first unit or building in its cell, a tree (cleared) or a cliff, or at the aim cell. Then the spell
+ * decides: an own or allied unit makes Fireball fizzle, and any unit at all makes Thunder Hammer fizzle
+ * (a game bug); otherwise a damage area (record 34 / 16) starts where it stopped. The charge is spent
+ * either way. confirmed (docs/re-notes/spells.md "Fireball and Thunder Hammer").
+ */
+function projectileTick(w: World, s: ActiveSpell, caster: Unit): boolean {
+  const g = w.grid;
+  if (!g) return true;
+  if (s.phase === 0) {
+    launch(w, s, caster);
+    return false;
+  }
+  if (s.phase !== 1) return --s.timer <= 0; // after the impact or a fizzle
+  const [ax, ay] = [s.cx, s.cy];
+  const centreX = ax * PX_W + PX_W / 2;
+  const centreY = ay * PX_H + PX_H / 2;
+  if (s.idx === 0) {
+    // The velocity is set once, at the first move (0x02055B14).
+    const [nx, ny] = normalize(centreX - s.px, fx12Mul(centreY - s.py, 0x1800));
+    s.vx = fx12Mul(fx12Mul(nx, 24 << 12), PROJECTILE_SPEED);
+    s.vy = fx12Mul(fx12Mul(ny, 16 << 12), PROJECTILE_SPEED);
+    s.idx = 1;
+  }
+  let [x, y] = projCell(s);
+  if (x === ax && y === ay) return impact(w, s, caster, undefined, true);
+  const dx = centreX - s.px;
+  const dy = centreY - s.py;
+  const whole = (v: number) => Math.floor(v / 4096);
+  if (whole(s.vx) ** 2 + whole(s.vy) ** 2 >= whole(dx) ** 2 + whole(dy) ** 2) {
+    // One more step would pass the centre: snap onto it and arrive, no contact test.
+    s.px += dx;
+    s.py += dy;
+    return impact(w, s, caster, undefined, true);
+  }
+  s.px += s.vx;
+  s.py += s.vy;
+  [x, y] = projCell(s);
+  // Contact test 0x02053F70, in the projectile's cell only: anyone but the caster ends the flight for
+  // the spell (own units are reported too); with nobody there a tree is cleared and stops it, as does a cliff.
+  const hit = w.units.find((u) => u.id !== caster.id && u.hp > 0 && covers(u, x, y));
+  if (hit) return impact(w, s, caster, hit, false);
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return impact(w, s, caster, undefined, false);
+  const c = y * g.width + x;
+  if (g.cells[c] === TERRAIN_TREE) {
+    g.cells[c] = TERRAIN_OPEN;
+    return impact(w, s, caster, undefined, false);
+  }
+  if (g.cells[c] === TERRAIN_CLIFF) return impact(w, s, caster, undefined, false);
+  return false;
+}
+
+/** Whether a unit stands in (or a building covers) cell (x, y). */
+function covers(u: Unit, x: number, y: number): boolean {
+  const [ux, uy] = cellOfUnit(u);
+  return x >= ux && y >= uy && x < ux + u.size && y < uy + u.size;
+}
+
+/**
+ * The first update: the projectile starts at the hero's exact position, aimed at the target unit's
+ * cell or the tapped cell. Taps at or past the range move the aim: Fireball adds `range` cells beyond
+ * the tap (a game bug; past the left or top edge the byte wraps to the far side), Thunder Hammer scales
+ * the offset down to `range` (Manhattan). confirmed
+ */
+function launch(w: World, s: ActiveSpell, caster: Unit): void {
+  const g = w.grid!;
+  const def = w.spellDefs[s.spell]!;
+  const t = s.target ? findById(w.units, s.target) : undefined;
+  const [tx, ty] = t ? cellOfUnit(t) : [s.cx, s.cy];
+  const [hx, hy] = cellOfUnit(caster);
+  const dist = Math.abs(tx - hx) + Math.abs(ty - hy);
+  let ax = tx;
+  let ay = ty;
+  if (s.cls === C_FIREBALL ? dist >= def.range : dist > def.range) {
+    let px: number;
+    let py: number;
+    if (s.cls === C_FIREBALL) {
+      const [nx, ny] = normalize((tx - hx) * 4096, (ty - hy) * 4096);
+      px = tx * 4096 + fx12Mul(nx, def.range * 4096);
+      py = ty * 4096 + fx12Mul(ny, def.range * 4096);
+    } else {
+      const ratio = fxDivRound(def.range, dist);
+      px = hx * 4096 + fx12Mul((tx - hx) * 4096, ratio);
+      py = hy * 4096 + fx12Mul((ty - hy) * 4096, ratio);
+    }
+    ax = Math.min((px >> 12) & 0xff, g.width - 1);
+    ay = Math.min((py >> 12) & 0xff, g.height - 1);
+  }
+  s.cx = ax;
+  s.cy = ay;
+  // Our Q16.16 pixels -> the game's 20.12.
+  s.px = caster.x >> 4;
+  s.py = caster.y >> 4;
+  s.phase = 1;
+  // ThunderHammerEffect draws its starting angle from the game RNG (0x02021960).
+  if (s.cls === C_HAMMER) nextInt(w.rng, 8);
+}
+
+/** The flight is over: hit `u`, or nobody. `arrived` = reached the aim cell (a tree there is cleared). */
+function impact(w: World, s: ActiveSpell, caster: Unit, u: Unit | undefined, arrived: boolean): boolean {
+  const g = w.grid!;
+  const [x, y] = projCell(s);
+  if (arrived && x >= 0 && y >= 0 && x < g.width && y < g.height && g.cells[y * g.width + x] === TERRAIN_TREE) {
+    g.cells[y * g.width + x] = TERRAIN_OPEN; // likely: a global flag the skirmish had on
+  }
+  const fizzle = s.cls === C_HAMMER ? !!u : !!u && allied(w, u.owner, s.owner);
+  if (fizzle) {
+    s.phase = 3;
+    s.timer = 1; // guess: how long a fizzled spell lingers
+    return false;
+  }
+  const def = w.spellDefs[s.cls === C_HAMMER ? HAMMER_DAMAGE : FIREBALL_DAMAGE];
+  if (def) startSpell(w, caster, def, 'point', undefined, { x: (s.px << 4) as Fx, y: (s.py << 4) as Fx }, C_DAMAGE);
+  // The hammer's ring of six pictures draws six more angles.
+  if (s.cls === C_HAMMER) for (let i = 0; i < 6; i++) nextInt(w.rng, 8);
+  s.phase = 2;
+  s.timer = s.cls === C_HAMMER ? HAMMER_AFTER : FIREBALL_AFTER;
+  return false;
+}
+
+/** Where a flying Fireball or Thunder Hammer is (Fx pixels), for the client; null when none is in flight. */
+export function projectileAt(s: ActiveSpell): { x: Fx; y: Fx } | null {
+  return (s.cls === C_FIREBALL || s.cls === C_HAMMER) && s.phase === 1 ? { x: (s.px << 4) as Fx, y: (s.py << 4) as Fx } : null;
+}
+
+/** The spell is over: let go of its units (SpellBase dtor 0x0207ACE8), clear a tracking mark. */
+function endSpell(w: World, s: ActiveSpell): void {
+  leaveAll(w, s);
+  if (s.cls === C_TRACKING) {
+    const t = findById(w.units, s.target);
+    if (t && t.hp > 0) t.tracked = 0; // not counted: the first tracking to end clears it (likely)
+  }
 }
 
 /** Bring a unit's stats up to date with its buffs; call at the start of its update. */

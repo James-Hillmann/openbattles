@@ -116,6 +116,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     boost: 0,
     grace: 0,
     frozen: 0,
+    tracked: 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead

@@ -85,6 +85,8 @@ export interface Unit {
   grace: number;
   /** Frozen by a freeze ring until this tick (game: FreezeEntityCommand); 0 when never. */
   frozen: number;
+  /** 1 while marked by a Tracking spell (game: unit +0x155): shown through fog. */
+  tracked: number;
 }
 
 /** What a builder is doing. Cells are y * width + x. */
@@ -254,6 +256,10 @@ export interface ActiveSpell {
   owner: PlayerId;
   /** Spell id (SpellDef.id). */
   spell: number;
+  /** Class kind (spells.ts C_*; game: SpellBase +0x08). */
+  cls: number;
+  /** Class state machine step. */
+  phase: number;
   /** The hero who cast it. */
   caster: EntityId;
   /** Target unit, or 0. */
@@ -271,7 +277,7 @@ export interface ActiveSpell {
   cx: number;
   cy: number;
   radius: number;
-  /** Units in its area as of the last scan (game: SpellBase +0x38), in id order. */
+  /** Units in its area as of the last scan (game: SpellBase +0x38; 0 = empty slot). Forest spells: the cells to plant, (y << 8) | x. */
   units: EntityId[];
   /** Heals: ticks to the next pulse (HealSpell +0x50). Freeze rings: ticks left (EAttackSpell +0x7C). */
   timer: number;
@@ -283,6 +289,13 @@ export interface ActiveSpell {
   /** Growing hit zone or freeze ring radius in cells, 20.12, and its growth a tick (DamageSpell +0x5C/+0x60, EAttackSpell +0x80). */
   ring: number;
   ringStep: number;
+  /** Forest spells: candidate within the current cell's 2x2 block. Projectiles: 1 once the velocity is set. */
+  idx: number;
+  /** Projectiles: position and velocity in the game's 20.12 pixels (our map origin). */
+  px: number;
+  py: number;
+  vx: number;
+  vy: number;
 }
 
 /** The game's occupancy layers (OccupationGrid): ground, air, bridges. */

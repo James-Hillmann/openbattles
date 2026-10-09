@@ -134,3 +134,9 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x02076D64` | ARM | `DamageSpell_update` | rand(100)+1 per slot, hit if <= chance; slide chance/damage | confirmed | spells.md |
 | `0x020772FC` | ARM | `EAttackSpell_update` | Growing ring, freeze enemies per new whole cell | confirmed | spells.md |
 | `0x0205F104` | ARM | `Unit_regenCharge` | Living hero below max: charge + 1 | confirmed | spells.md |
+| `0x020F27B8` | ARM | `FX_normalize` | 20.12 unit vector with the DS divider and sqrt rounding | confirmed | spells.md |
+| `0x020F09DC` | ARM | `Cells_thickLine` | Bresenham line with side cells (Forest Spawn) | confirmed | spells.md |
+| `0x02077FE0` | ARM | `ForrestSpell_endPoint` | range cells toward the tap, clamped to the map | confirmed | spells.md |
+| `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
+| `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
+| `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |

@@ -48,6 +48,9 @@ import {
   spellTarget,
   spellWorks,
   isFrozen,
+  canTarget,
+  TAP_POINT,
+  projectileAt,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars, type CostAction } from './hud';
@@ -276,7 +279,8 @@ function startSkirmish() {
 }
 
 const cellCenterPx = (c: number, axis: 'x' | 'y') => (axis === 'x' ? c * CELL_W + CELL_W / 2 : c * CELL_H + CELL_H / 2);
-const treeCount = (cells: Uint8Array) => cells.reduce((n, c) => n + (c === TERRAIN_TREE ? 1 : 0), 0);
+/** A fingerprint of where the trees stand (chopped, burnt and planted trees all change it). */
+const treeCount = (cells: Uint8Array) => cells.reduce((n, c, i) => (c === TERRAIN_TREE ? (Math.imul(n, 31) + i + 1) | 0 : n), 0);
 
 let mapSize = { w: 600, h: 440 };
 let mapGrid: TerrainGrid | null = null;
@@ -436,7 +440,7 @@ app.canvas.addEventListener('contextmenu', (e) => {
 
 /** Enemy units outside our vision aren't drawn. guess: not yet checked in the emulator. */
 function hiddenByFog(u: World['units'][number]): boolean {
-  if (!fog || u.owner === localPlayer) return false;
+  if (!fog || u.owner === localPlayer || u.tracked) return false; // Tracking shows its target through fog (likely)
   const [cx, cy] = visionCell(u);
   return !isVisible(fog, cx, cy);
 }
@@ -763,6 +767,11 @@ function drawSpellAreas() {
       : [cx, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy, cx, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy];
     overlay.poly(pts).fill({ color: freeze ? 0x60b0ff : 0xff8020, alpha: 0.18 }).stroke({ color: freeze ? 0x60b0ff : 0xff8020, width: 1 / camera.scale.x, alpha: 0.6 });
   }
+  // Fireball / Thunder Hammer in flight (ours: the game draws FireBallEffect / ThunderHammerEffect).
+  for (const s of world.spells) {
+    const p = projectileAt(s);
+    if (p) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 4).fill({ color: s.spell === 14 ? 0xff6000 : 0x80c0ff });
+  }
 }
 
 /** Spell name for the tooltip (the game shows none on the strip; extract's SPELL_NAME_TEXT). */
@@ -792,8 +801,16 @@ function pickSpell(id: number) {
   aiming = aiming?.spell === id ? null : { spell: id, hero: hero.id };
 }
 
-const aimingHint = (d: SpellDef | undefined) =>
-  !d ? '' : spellTarget(d) === 'point' ? 'Pick a spot.' : d.flags & 4 ? 'Pick an enemy unit.' : 'Pick one of your units.';
+function aimingHint(d: SpellDef | undefined): string {
+  if (!d) return '';
+  if (spellTarget(d) === 'point') return 'Pick a spot.';
+  const f = d.flags;
+  if (f & 0x20) return 'Pick an enemy transport or siege unit.';
+  if (f & 0x10) return 'Pick one of your mines.';
+  if (f & 8) return 'Pick one of your Builders.';
+  if (f & 4) return f & TAP_POINT ? 'Pick an enemy or a spot.' : 'Pick an enemy.';
+  return 'Pick one of your units.';
+}
 
 /** Cast the armed spell at the clicked unit or spot. False when no spell is armed. */
 function tryCast(px: number, py: number): boolean {
@@ -806,8 +823,10 @@ function tryCast(px: number, py: number): boolean {
   }
   const hit = selection.pick(drawn, px, py);
   const target = hit ? world.units.find((u) => u.id === hit.id) : undefined;
-  if (spellTarget(def) === 'unit' && !target) return true; // keep aiming until a unit is clicked
-  match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: target && spellTarget(def) === 'unit' ? target.id : 0, x: fx(px), y: fx(py) });
+  const unit = spellTarget(def) === 'unit' && target && canTarget(world, def, localPlayer, target) ? target : undefined;
+  // Keep aiming until a unit the spell takes is clicked (unit spells that also take a spot cast there).
+  if (spellTarget(def) === 'unit' && !unit && !(def.flags & TAP_POINT)) return true;
+  match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: unit ? unit.id : 0, x: fx(px), y: fx(py) });
   aiming = null;
   return true;
 }
@@ -858,7 +877,7 @@ function tryPlace(): boolean {
   return true;
 }
 
-/** Redraw the ground when trees have been chopped (at most twice a second). */
+/** Redraw the ground when trees have been chopped or planted (at most twice a second). */
 function checkGround() {
   if (!world.grid || !mapName || !rom.summary()) return;
   const now = performance.now();

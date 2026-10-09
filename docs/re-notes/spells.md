@@ -166,25 +166,70 @@ The game draws each spell with its own effect: icons over buffed units (SpellIco
 SwordEffect / ArmourEffect), `Particles/SpellIncreaseEffect.hps` when a buff lands, SpellIconsHeartEffect
 on healed units, EarthQuakeEffect, ArrowVolleyEffect and so on. The client stands in with its own
 markers for now: a see-through diamond (damage) or square (freeze) over the area, a pip per buff over
-the unit, and an ice tint on frozen units.
+the unit, an ice tint on frozen units and a dot for a Fireball or Thunder Hammer in flight. Planted
+trees use the map's own tree tiles.
 
-## Traced, not ported yet
+## Forest spells (ForrestSpell 10, 11, 12; confirmed)
 
-- **10-12 Forest spells**: plant trees, one cell a tick, on open ground only and never under a unit.
-  The far end is always the full range from the hero toward the tap. 10 plants a thick line from the
-  hero (no RNG); 11 and 12 plant 80% of the cells within 2 of the end, in an order shuffled with one
-  `rand(100)` per cell, starting about 12 ticks in.
-- **14 Fireball**: a projectile (entity 202, 0.5 cell a tick) flies straight at the tapped cell (pulled
-  in to 10 cells) and stops at the first unit or building; on an own or allied one it fizzles (charge
-  spent), otherwise record 34's damage area starts at the impact (60 -> 50 %, 6 -> 3, 30 ticks).
-- **15 Lightning**: around the hero, about 14 ticks after the cast; record 33's damage area
-  (65 -> 50 %, 9 -> 5, 30 ticks) follows the hero. The 8 beams are only a picture.
-- **16 Thunder Hammer**: like Fireball with its own record (70 -> 50 %, 8 -> 6, 60 ticks). A game bug
-  makes any unit it touches count as an ally, so it only hurts when it reaches its spot untouched. Its
-  picture draws 7 numbers from the game RNG.
-- **26 Teleport**: 23 ticks after the cast the hero lands next to its player's first base (or the start
-  spot without one).
-- **30 Tracking**: marks an enemy unit for 240 ticks; the mark shows it on the map and minimap through
-  fog (likely). No fog is revealed.
-- **32 Hot Wire**: the tapped enemy transport or siege unit switches to the hero's player for good on the
-  next tick and drops its orders. Refused for a siege unit when the player is at the special cap.
+The far end is always `range` cells from the hero toward the tap (10; 8 for 11), Euclidean in cells,
+clamped to the map (`0x02077FE0`); a tap on the hero's own cell keeps the end there. The game's 20.12
+unit vector (`0x020F27B8`) is ported bit for bit in `sim/src/spellGeom.ts` (`normalize`).
+
+- **10 Forest Spawn**: a thick line (`0x020F09DC`) strictly between the hero and the end: a Bresenham
+  walk that also pushes one side cell while its error term is non-zero, and a diagonal pair (the cell
+  twice) on a minor step. Straight and exactly diagonal lines are one cell thick. No RNG. First plant on
+  T + 2 (T = the cast tick).
+- **11, 12**: the open cells (terrain 0) of the 5x5 square around the end, rows first (`0x0207ED4C`); one
+  `rand(100)` per cell sends it to the front (<= 50) or back group; the first 80% are kept. They wait for
+  their picture (10 updates), so the first plant is on T + 12.
+- Planting: each list cell tries its 2x2 block (offsets (0,0), (0,1), (1,0), (1,1)), one candidate a tick,
+  then one tick to drop the cell: 5 ticks per cell, duplicates too. A candidate becomes a tree (terrain 1)
+  only inside the playable rectangle (the whole map in skirmish), on open ground, with nobody on it. The
+  spell ends the tick after its list runs out (T + 2 + 5n for 10). Names: Forest Spawn is likely; which of
+  11 / 12 is Crystal Cache and which Jungle Growth is a guess.
+
+## Fireball and Thunder Hammer (14, 16; confirmed)
+
+They do no damage themselves: a projectile flies, and where it stops a damage area starts (record 34 for
+Fireball: 60 -> 50 %, 6 -> 3, 30 ticks; record 16 for Thunder Hammer: 70 -> 50 %, 8 -> 6, 60 ticks), run
+as a damage spell above (radius 5 around the stop).
+
+- Launch on T + 1 from the hero's exact position; moves from T + 2. The velocity is set once:
+  `normalize(dx, 1.5 dy)` times (24, 16) px times the speed 0.5, i.e. 12 px across / 8 px down a tick,
+  straight at the aim cell's centre. A step that would pass the centre snaps onto it.
+- Aim: the target unit's cell when cast at a unit, else the tapped cell. At Manhattan distance >= range
+  (Fireball) the game adds `range` cells **beyond** the tap (a bug; past the left or top edge the byte wraps
+  to the far side, so a fireball can fly the other way). Thunder Hammer, at distance > range, scales the
+  offset down to `range` (Manhattan).
+- After each step it checks its cell only: anybody there but the hero ends the flight for the spell (own
+  units too); with nobody there, a tree is cut down and stops it, and so does a cliff. Reaching the aim
+  cell also cuts a tree there (likely: a global flag that was on in skirmish).
+- Fireball fizzles (charge spent, no damage) when it stopped on an own or allied unit or building.
+  **Thunder Hammer fizzles on any unit at all**: the game's ally check compares the unit's player with
+  itself. It only hurts when it lands on the ground. Its picture draws 1 `rand(8)` at launch and 6 more on
+  a ground impact from the game RNG; the sim draws them too.
+- After the impact the spell stays 35 (Fireball) / 37 (Thunder Hammer) ticks for its picture. A fizzled
+  spell ends the tick after (guess).
+
+## Lightning, Teleport, Tracking, Hot Wire (15, 26, 30, 32)
+
+- **15 Lightning** (confirmed): around the hero. 14 ticks after the cast (when the hero's cast animation is
+  done) record 33's damage area (65 -> 50 %, 9 -> 5, 30 ticks) starts around the hero and follows it. The
+  8 beams are only a picture. The spell lingers 30 ticks.
+- **26 Teleport** (confirmed for a player with a base): 23 ticks after the cast the hero lands in the first
+  free cell of the game's ring search around its player's first base (seen: base at (10,10), King at
+  (10,9)); without a base, around its start cell (likely).
+- **30 Tracking** (likely): marks an enemy for 240 ticks (unit +0x155); the marked unit is drawn through
+  fog. The mark is not counted: the first tracking to end clears it, if the unit is alive.
+- **32 Hot Wire** (confirmed): taps an enemy transport or siege unit; on the next tick it changes sides for
+  good and drops its orders. A siege unit is refused when the caster's player is at its special cap
+  (likely). The spell shows its picture for 60 ticks.
+
+## Gather buffs (17, 19) and Trade Winds (24)
+
+- **19** (confirmed), on one own Builder: doubles the bricks of a load (75, or 100 with a Lumber Mill)
+  when it is dropped off with the buff still on. Chopping time is unchanged.
+- **17** (likely), on one own mine: doubles the mine's payout (25 -> 50); the interval is unchanged.
+- **24 Trade Winds** (confirmed), on one own unit: speed x1.5, like spell 4. Transports and siege units
+  show a different icon.
+- Single-unit buffs take hold on T + 1, without waiting for the scan queue.
