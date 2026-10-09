@@ -13,3 +13,5 @@ coverage/
 *.gpr
 *.rep/
 *.dst
+*.wav
+__pycache__/

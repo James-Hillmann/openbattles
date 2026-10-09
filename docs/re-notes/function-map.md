@@ -140,3 +140,27 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
 | `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
 | `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |
+| `0x02089B44` | Thumb | `Snd_openArchive` | `NNS_SndArcInit` on `Sound/sound_data.sdat`, player/stream setup | likely | sound-triggers.md |
+| `0x02088570` | Thumb | `Snd_onGameCreated` | Loads every SEQARC/bank the match needs, starts calm music | confirmed | sound-triggers.md |
+| `0x02089A8C` | Thumb | `Snd_playSeqArc` | The only SFX start: once per (arc, index) per frame, `NNS_SndArcPlaySeqArc` | confirmed | sound-triggers.md |
+| `0x02088978` | Thumb | `Snd_play` | Gate on load state, then `Snd_playSeqArc` | confirmed | |
+| `0x02089250` | Thumb | `Snd_playUnitEvent` | Entity SEQARC, index = event (0 select, 1 death, 2 strike, 4 special); view-gated | confirmed | |
+| `0x02089210` | Thumb | `Snd_playSpell` | Spell SEQARC by spell id; caster view-gated | confirmed | |
+| `0x02089290` / `0x020892F4` | Thumb | `Snd_playFe` / `Snd_playUi` | SEQARC 0 / 1 by code | confirmed | |
+| `0x020890DC` | Thumb | `Snd_playCollectable` | SEQARC 216: stud / minikit / red brick | likely | |
+| `0x0208936C` | Thumb | `Snd_inView` | Unit cell inside camera cell rect (cx-2, cy-2)..(cx+13, cy+14) | confirmed | |
+| `0x020889F8` | Thumb | `Snd_entitySeqArc` | Entity index -> SEQARC | confirmed | |
+| `0x02088CC4` | Thumb | `Snd_entityBank` | Entity index -> bank | likely | |
+| `0x02088F24` / `0x02089000` | Thumb | `Snd_spellSeqArc` / `Snd_spellBank` | Spell id -> SEQARC / bank | confirmed | |
+| `0x020897D4` | Thumb | `Snd_update` | Music hand-over, clears per-frame de-dup table `0x02155798` | confirmed | |
+| `0x02088994` | Thumb | `Snd_battleMusicTimeout` | Battle -> calm 450 ticks after the last hero-under-attack | confirmed | |
+| `0x02088538` | Thumb | `Snd_onEvent` | Events 0x0D, 0x0F, 0x36, 0x39 | likely | |
+| `0x020888E8` | Thumb | `Snd_onHeroUnderAttack` | Event 0x36: calm -> battle music | confirmed | |
+| `0x0208885C` | Thumb | `Snd_onTeamStatus` | Event 0x39: victory / defeat music | likely | |
+| `0x020898C8` / `0x020898E8` | Thumb | `Snd_setMusicFaction` / `Snd_setMusicType` | Music state at `0x0214B33C` +0xC / +8; playlist position restart | confirmed | |
+| `0x02089954` | Thumb | `Snd_prepareMusic` | Next STRM prepared on the idle stream handle | confirmed | |
+| `0x020899EC` | Thumb | `Snd_startPreparedMusic` | Start prepared stream, swap handles, apply music volume | confirmed | |
+| `0x02089A64` | Thumb | `Snd_stopMusic` | Stop the stream with a fade | confirmed | |
+| `0x02089BD4` / `0x02089C18` | Thumb | `Snd_nextPlaylistTrack` / `Snd_musicBase` | Playlist entry / first STRM per faction and type | confirmed | |
+| `0x02089860` / `0x020898A4` / `0x02089878` | Thumb | `Snd_setMasterVolume` / `Snd_setSfxVolume` / `Snd_setMusicVolume` | Volumes, clamped to 127 | likely | |
+| `0x02087A8C` | ARM | `Event_postHeroUnderAttack` | Posts event 0x36 (called from `Unit_setHp`) | likely | |

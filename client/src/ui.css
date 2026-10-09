@@ -143,6 +143,8 @@ label { display: inline-flex; gap: 8px; align-items: center; }
 .ask { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
 .ask[hidden], .help-keys[hidden] { display: none; }
 .help-keys h2 { margin-bottom: 8px; }
+.help-keys .vol { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 4px 0; }
+.help-keys .vol input { flex: 1; max-width: 160px; }
 .help-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
 .help-keys dt { font-weight: bold; color: var(--pick); }
 .help-keys dd { margin: 0; }
