@@ -30,7 +30,11 @@ export interface ArmyBundle {
   maps: Record<string, { title: string; preview?: Rgba }>;
   /** 24x24 army screen heads (UI/MiniHeads) by entity name. */
   heads: Record<string, Rgba>;
-  /** 24x24 build/train strip icons (UI/MiniHeadsGame) by entity name, for every unit and building with an icon. */
+  /**
+   * 24x24 build/train strip icons by entity name. Units: UI/MiniHeadsGame through the icon table.
+   * Buildings: their own selection portrait (UI/GamePlayerCards) shrunk 4x, ours (the game shows a
+   * type icon there; armies.md "Building icons").
+   */
   stripIcons: Record<string, Rgba>;
   /** Army screen pictures (UI/FEPlayerCards) by entity name. */
   cards: Record<string, Rgba>;
@@ -110,13 +114,37 @@ function iconCell(chars: CharData, pal: Uint8Array, bank: number, i: number): Rg
   return out;
 }
 
-function card(rom: UnpackedRom, id: string): Rgba | undefined {
-  const base = `UI/FEPlayerCards/${id}`;
+/** First cell of a character picture: UI/FEPlayerCards (army screen) or UI/GamePlayerCards (in-game portrait). */
+function card(rom: UnpackedRom, id: string, dir = 'UI/FEPlayerCards'): Rgba | undefined {
+  const base = `${dir}/${id}`;
   const ncer = tryRomFile(rom, `${base}.NCER`);
   if (!ncer) return undefined;
   const cell = decodeCells(ncer)[0];
   if (!cell?.length) return undefined;
   return renderCell(cell, decodeChars(romFile(rom, `${base}.NCGR`)), decodePalette(romFile(rom, `${base}.NCLR`)));
+}
+
+/** Box-filter `img` down by `f` (alpha-weighted, so transparent pixels don't darken the edges). */
+export function shrink(img: Rgba, f: number): Rgba {
+  const w = Math.floor(img.width / f);
+  const h = Math.floor(img.height / f);
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const sum = [0, 0, 0, 0];
+      for (let dy = 0; dy < f; dy++) {
+        for (let dx = 0; dx < f; dx++) {
+          const s = ((y * f + dy) * img.width + x * f + dx) * 4;
+          const a = img.data[s + 3]!;
+          for (let c = 0; c < 3; c++) sum[c]! += img.data[s + c]! * a;
+          sum[3]! += a;
+        }
+      }
+      const a = sum[3]!;
+      if (a) data.set([sum[0]! / a, sum[1]! / a, sum[2]! / a, a / (f * f)], (y * w + x) * 4);
+    }
+  }
+  return { width: w, height: h, data };
 }
 
 export function buildArmyBundle(rom: UnpackedRom, language = 'American_English'): ArmyBundle {
@@ -152,6 +180,12 @@ export function buildArmyBundle(rom: UnpackedRom, language = 'American_English')
     if (cell === undefined) continue;
     heads[rec.name] = iconCell(headChars, pal, HEAD_BANK, cell);
     stripIcons[rec.name] = iconCell(stripChars, pal, STRIP_BANK, stripIcon(cell, slotIn.get(rec.name) ?? -1));
+  }
+  // Buildings get a small copy of their own portrait instead of the type icon, so a Farm and a
+  // Barracks look different on the strip (asked for in playtesting).
+  for (const name of new Set(Object.values(armies).flatMap((a) => a.buildings))) {
+    const p = card(rom, name, 'UI/GamePlayerCards');
+    if (p) stripIcons[name] = shrink(p, 4);
   }
   const cards: Record<string, Rgba> = {};
   for (const name of Object.keys(units)) {
