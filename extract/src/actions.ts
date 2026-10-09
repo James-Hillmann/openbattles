@@ -17,7 +17,11 @@ export const ACTION_CELLS = {
   rally: [24, 144],
   patrol: [48, 144],
   move: [96, 144],
+  // The stairs at 96 are the Load button (transports.md: tapping it, then a ship, loaded the King), and
+  // the box on a crane next to the wrench is Unload (likely, by its picture; the transport's strip shows both).
+  load: [96, 144],
   repair: [120, 144],
+  unload: [144, 144],
   stop: [192, 144],
   stand: [216, 144],
   alert: [136, 24],

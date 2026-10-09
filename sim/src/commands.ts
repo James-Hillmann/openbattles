@@ -37,7 +37,11 @@ export type Command =
   /** Set the rally point of production buildings to cell (cx, cy) (RallyPointCommand). */
   | { kind: 'rally'; unitIds: EntityId[]; cx: number; cy: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
-  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
+  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx }
+  /** Units walk to transport `transport` and board it (game: GarrisonCommand). */
+  | { kind: 'load'; unitIds: EntityId[]; transport: EntityId }
+  /** Everyone aboard these transports gets off onto nearby land (game: UngarrisonCommand). */
+  | { kind: 'unload'; transports: EntityId[] };
 
 /** A command stamped with who issued it and the tick it executes on. */
 export interface ScheduledCommand {

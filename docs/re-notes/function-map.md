@@ -208,3 +208,14 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020D9D74` | ARM | `Ui_battleAlert` | 2 s throttle, local check, stores time and camera spot | confirmed | orders.md |
 | `0x020E2480` | THUMB | `Sel_box` | Box select by role lists, capped at 9 | confirmed | orders.md |
 | `0x020E339C` | THUMB | `Sel_add` | Adds a unit unless 9 are selected | confirmed | orders.md |
+| `0x02084748` | ARM | `Garrison_issue` | GarrisonCommand: one GarrisonEntityCommand per listed unit | confirmed | transports.md |
+| `0x0206BBBC` | ARM | `GarrisonEntity_init` | Fails for a unit that can go on water | likely |  |
+| `0x0206BC20` | ARM | `GarrisonEntity_update` | Walk next to the transport (5 tries), then LoadAction | likely | tries at +0x1E |
+| `0x02053790` | ARM | `LoadAction_update` | Board if the held cell touches the footprint; 3 retry, 5 full | confirmed | emulator |
+| `0x0205B2DC` | ARM | `Container_add` | Add a unit to a container if its class has room | likely |  |
+| `0x0205B1D8` | ARM | `Container_countClass` | Cargo sharing a class's room | likely | classes 0-3 together, 4 alone |
+| `0x020010E0` | ARM | `Container_room` | Room per cargo class: transport 4/2, base 10 builders | likely |  |
+| `0x0205B704` | ARM | `Container_remove` | Put a unit back on the map at its exit cell | confirmed |  |
+| `0x0207FF24` | ARM | `Map_ringSearch` | Ring search round a footprint, top/bottom then left/right | confirmed | matcher 0x02080708; transports.md |
+| `0x0205B788` | ARM | `Container_ejectAll` | On death: eject last-to-first, kill all if none got off | likely |  |
+| `0x0205BDE4` | ARM | `Unit_effectiveCell` | A carried unit's cell is its carrier's | likely |  |

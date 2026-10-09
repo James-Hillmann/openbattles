@@ -106,8 +106,8 @@ export const TRAINS: Readonly<Record<number, readonly number[]>> = {
 };
 
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
-/** A Builder inside a building (dropping off or building): off the map, not drawn, not targetable. */
-export const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
+/** A Builder inside a building (dropping off or building) or a unit in a transport: off the map, not drawn, not targetable. */
+export const isInside = (u: Unit): boolean => u.job?.kind === 'inside' || u.carrier !== 0;
 export const isFinished = (u: Unit): boolean => u.progress >= u.buildTime;
 
 export function getPlayer(w: World, id: PlayerId): Player | undefined {
@@ -189,7 +189,7 @@ function ring(g: TerrainGrid, cx: number, cy: number, r: number): number[] {
 }
 
 /** The free cell next to a rectangle closest to unit u (ties: lowest cell index), or -1. */
-function standCell(w: World, u: Unit, origin: number, fw: number, fh: number): number {
+export function standCell(w: World, u: Unit, origin: number, fw: number, fh: number): number {
   const g = w.grid!;
   const here = unitCell(w, u);
   let best = -1;
