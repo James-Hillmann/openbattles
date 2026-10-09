@@ -36,8 +36,13 @@ import {
   START_BRICKS,
   TERRAIN_TREE,
   ROLE_BUILDER,
+  ROLE_HERO,
   ROLE_SHIPYARD,
   QUEUE_MAX,
+  isTower,
+  missingPrerequisites,
+  atBuildLimit,
+  upgradeOf,
   type EntityType,
   type StartSpawn,
   type WinMode,
@@ -80,6 +85,9 @@ import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
 import { BattleAlert } from './battleAlert';
 import { SiteFx } from './siteFx';
+import { GameAudio } from './audio';
+import { GameSound } from './gameSound';
+import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
@@ -294,6 +302,8 @@ function startSkirmish() {
   structures.clear();
   selection.ids.clear();
   placing = null;
+  // Music follows the local player's faction (King 0 .. Alien 5); custom armies use their buildings' faction (guess).
+  if (!appEl.classList.contains('menu')) sound.matchStart(Math.max(0, 'KWPIEA'.indexOf(basePrefix(localPlayer))));
   const start = getPlayer(world, localPlayer)?.start ?? -1;
   if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
@@ -393,9 +403,15 @@ window.addEventListener('pointerup', (e) => {
     if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
     hover = w;
-    if (!tryOrder(Math.round(w.x), Math.round(w.y)) && !tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+    const had = new Set(selection.ids);
+    if (!tryOrder(Math.round(w.x), Math.round(w.y)) && !tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) {
+      selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+      sound.select(had, selection.ids, world);
+    }
   } else if (boxRect) {
+    const had = new Set(selection.ids);
     selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, drag.additive);
+    sound.select(had, selection.ids, world);
   }
   drag = null;
   boxRect = null;
@@ -452,6 +468,8 @@ app.canvas.addEventListener('contextmenu', (e) => {
   const sel = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id));
   const unitIds = sel.map((u) => u.id);
   if (unitIds.length === 0) return;
+  // Every order plays UI BACK1 (move: code 4, other orders: code 6).
+  sound.play(UI_BACK1);
   // A building on its own: the ground tap sets its rally point (emulator: tapping the map with the
   // Castle selected stored the cell, as Set Rally Point does).
   if (sel.every(isBuilding)) {
@@ -464,6 +482,16 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Builders sent to one of our unfinished buildings go and build it.
   if (target && target.owner === localPlayer && isBuilding(target) && !isFinished(target) && builders.length) {
     match.issue({ kind: 'construct', unitIds: builders, site: target.id });
+    return;
+  }
+  // Builders and heroes sent to one of our damaged buildings repair it (the game: touch it with a Builder
+  // selected; heroes have the same Repair button). docs/re-notes/structures.md
+  const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
+  if (target && target.owner === localPlayer && isBuilding(target) && isFinished(target) && target.hp < target.maxHp && fixers.length) {
+    match.issue({ kind: 'repair', unitIds: fixers, target: target.id });
+    tapMark('repair', px, py);
+    const rest = unitIds.filter((id) => !fixers.includes(id));
+    if (rest.length) match.issue({ kind: 'move', unitIds: rest, x: fx(px), y: fx(py) });
     return;
   }
   if (target && target.owner !== localPlayer) {
@@ -516,7 +544,7 @@ function drawFog() {
 function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
   const g = world.grid;
   const job = u.job;
-  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build' && job.kind !== 'wall')) return null;
+  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build' && job.kind !== 'wall' && job.kind !== 'repair')) return null;
   const here = unitCell(world, u);
   const [hx, hy] = [here % g.width, Math.floor(here / g.width)];
   let cx: number, cy: number, sw: number, sh: number;
@@ -524,8 +552,8 @@ function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
     if (g.cells[job.tree] !== TERRAIN_TREE) return null;
     [cx, cy, sw, sh] = [job.tree % g.width, Math.floor(job.tree / g.width), 1, 1];
   } else {
-    const site = world.units.find((b) => b.id === job.site);
-    if (!site || isFinished(site)) return null;
+    const site = world.units.find((b) => b.id === (job.kind === 'repair' ? job.building : job.site));
+    if (!site || (job.kind !== 'repair') === isFinished(site)) return null;
     const o = unitCell(world, site);
     [cx, cy, sw, sh] = [o % g.width, Math.floor(o / g.width), fpW(site.size), fpH(site.size)];
   }
@@ -670,7 +698,10 @@ function pickCommand(key: string) {
   if (what === 'spell') return pickSpell(type);
   if (what === 'act') return pickAction(idx as ActionKey);
   if (what === 'build') (placing = { type }), (ordering = null);
-  else if (what === 'train') {
+  else if (what === 'upgrade') {
+    const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isTower(u.role));
+    if (b) match.issue({ kind: 'upgrade', building: b.id });
+  } else if (what === 'train') {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
     if (b) match.issue({ kind: 'train', building: b.id, type });
   }
@@ -768,6 +799,7 @@ function updateStrip() {
   if (b) {
     const name = nameByIndex.get(b.kind) ?? '';
     if (!isFinished(b)) return bar.show(`${displayName(name)}: ${Math.floor((100 * b.progress) / Math.max(1, b.buildTime))}%`, []);
+    if (isTower(b.role)) return showUpgrade(b, item);
     const roles = TRAINS[b.role] ?? [];
     // One hero icon (the first), as the Castle strip shows in the emulator.
     const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
@@ -789,8 +821,49 @@ function updateStrip() {
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.show(orderHint(), [], [], 'build', acts);
   const all = armyBuildings(localPlayer);
   const list = BUILD_ORDER.map((r) => (STRIP_STRUCTURES[r] ? unitStats[STRIP_STRUCTURES[r]] : all.find((st) => st.role === r))).filter((st): st is UnitStats => !!st);
+  // Stables and Shipyard wait for a finished Barracks and Farm, and towers and other buildings have caps
+  // (structures.ts). The game checkers the button; our tooltip also says what's missing ("<1> Required", text 109).
+  const blocked = (st: UnitStats): string | null => {
+    const t = world.types[st.index];
+    if (!t) return null;
+    const need = missingPrerequisites(world, localPlayer, t);
+    if (need.length) {
+      const names = need.map((r) => displayName(all.find((x) => x.role === r)?.name ?? ''));
+      return (armyBundle?.text[FE_TEXT.required] || '<1> Required').replace('<1>', names.join(', '));
+    }
+    return atBuildLimit(world, localPlayer, t) ? 'Limit reached' : null;
+  };
+  const builds = list.map((st) => {
+    const it = item(st, 'build');
+    const why = blocked(st);
+    return why ? { ...it, label: `${it.label} (${why})`, enabled: false } : it;
+  });
   costs(list, 'build');
-  bar.show(placing ? placingHint(placing.type) : orderHint(), list.map((st) => item(st, 'build')), [], 'build', acts);
+  costActions = costActions.map((a) => ({ ...a, enabled: builds.find((b) => b.key === a.key)?.enabled ?? a.enabled }));
+  bar.show(placing ? placingHint(placing.type) : orderHint(), builds, [], 'build', acts);
+}
+
+/**
+ * A tower's upgrade strip (a grey tab in the game): one button for the next level at its full price, with
+ * "Upgrade Costs" on the top screen; while it runs, the level in progress shows like a unit in training.
+ * Tower III has nothing to upgrade to. Emulator and code: docs/re-notes/structures.md.
+ */
+function showUpgrade(b: Unit, item: (st: UnitStats, verb: string) => CommandItem) {
+  // The level in progress fills the one slot (the bar over the tower shows how far); clicking it cancels for a refund.
+  const queue = b.queue.map((k) => {
+    const name = nameByIndex.get(k) ?? '';
+    return { icon: iconFor(name), used: true, name };
+  });
+  const next = upgradeOf(world, b);
+  const st = next && unitStats[nameByIndex.get(next.kind) ?? ''];
+  if (!st) return bar.show('', [], queue);
+  const it = { ...item(st, 'upgrade'), ...(b.queue.length ? { enabled: false } : {}) };
+  const icon = armyBundle?.stripIcons[st.name];
+  if (icon) {
+    stripCosts = { title: armyBundle!.text[FE_TEXT.upgradeCosts] || 'Upgrade Costs', items: [{ icon, cost: st.cost }] };
+    costActions = [{ key: it.key, label: it.label, enabled: it.enabled }];
+  }
+  bar.show('', [it], queue);
 }
 
 /**
@@ -910,14 +983,14 @@ function tryCast(px: number, py: number): boolean {
 
 // --- Actions strip: Attack, Stand Ground, Patrol, Move, Stop, Set Rally Point (docs/re-notes/orders.md) ---
 
-type ActionKey = 'attack' | 'stand' | 'patrol' | 'move' | 'stop' | 'rally';
+type ActionKey = 'attack' | 'repair' | 'stand' | 'patrol' | 'move' | 'stop' | 'rally';
 /** Strip label for each order (the game's own: lang 305, 314, 306, 307, 309, 315). */
 const ACTION_LABEL: Record<ActionKey, string> = {
-  attack: 'Attack', stand: 'Stand Ground', patrol: 'Patrol', move: 'Move', stop: 'Stop', rally: 'Set Rally Point',
+  attack: 'Attack', repair: 'Repair', stand: 'Stand Ground', patrol: 'Patrol', move: 'Move', stop: 'Stop', rally: 'Set Rally Point',
 };
 
 /** An order picked from the strip, waiting for its spot (Patrol takes two: A then B). */
-let ordering: { act: 'attack' | 'patrol' | 'move' | 'rally'; a?: { cx: number; cy: number } } | null = null;
+let ordering: { act: 'attack' | 'repair' | 'patrol' | 'move' | 'rally'; a?: { cx: number; cy: number } } | null = null;
 
 const actionIconCache = new Map<ActionIcon, HTMLCanvasElement>();
 function actionIcon(name: ActionIcon): HTMLCanvasElement | null {
@@ -934,15 +1007,17 @@ const trains = (u: Unit) => isBuilding(u) && isFinished(u) && (TRAINS[u.role]?.l
 /**
  * The blue strip for the selection. Game (strip contents, emulator): the King's is Attack, Repair,
  * Stand Ground, Patrol, Move, Stop; the Castle's is Set Rally Point, Stop. Other units get the same
- * list less what they can't do (no Attack or Stand Ground without a weapon). likely for non-hero units.
- * Repair isn't here: the sim has no repair order yet.
+ * list less what they can't do (no Attack or Stand Ground without a weapon, Repair for Builders and
+ * heroes only). likely for non-hero units.
  */
 function actionItems(sel: Unit[]): CommandItem[] {
   const b = sel.find(isBuilding);
   const keys: ActionKey[] = b
     ? trains(b) ? ['rally', 'stop'] : []
     : [
-        ...(sel.some((u) => u.attack) ? (['attack', 'stand'] as const) : []),
+        ...(sel.some((u) => u.attack) ? (['attack'] as const) : []),
+        ...(sel.some((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO) ? (['repair'] as const) : []),
+        ...(sel.some((u) => u.attack) ? (['stand'] as const) : []),
         ...(['patrol', 'move', 'stop'] as const),
       ];
   return keys.map((k) => ({
@@ -975,6 +1050,7 @@ function orderHint(): string {
   if (!ordering) return '';
   const what = {
     attack: 'Pick an enemy to attack.',
+    repair: 'Pick one of your damaged buildings.',
     move: 'Pick where to move.',
     rally: 'Pick the rally point.',
     patrol: ordering.a ? 'Pick the second patrol point.' : 'Pick the first patrol point.',
@@ -1006,6 +1082,13 @@ function tryOrder(px: number, py: number): boolean {
     if (!target || target.owner === localPlayer) return true; // keep waiting for an enemy
     match.issue({ kind: 'attack', unitIds, target: target.id });
     tapMark('attack', px, py);
+  } else if (ordering.act === 'repair') {
+    const hit = selection.pick(drawn, px, py);
+    const target = hit && world.units.find((u) => u.id === hit.id);
+    if (!target || target.owner !== localPlayer || !isBuilding(target) || !isFinished(target) || target.hp >= target.maxHp) return true;
+    const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
+    match.issue({ kind: 'repair', unitIds: fixers, target: target.id });
+    tapMark('repair', px, py);
   } else if (!ordering.a) {
     ordering.a = { cx, cy };
     tapMark('patrol', px, py);
@@ -1190,6 +1273,7 @@ function tryPlace(): boolean {
     const { cx, cy } = placeCell(t.size);
     if (!placeable(t, cx, cy)) return true; // keep the preview up; the spot is taken
     match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
+    sound.play(UI_BACK1); // confirming a building site is a move order
   }
   placing = null;
   return true;
@@ -1224,6 +1308,20 @@ const netEl = document.getElementById('net')!;
 let acc = 0;
 let animTime = 0;
 
+/** A finished upgrade swaps a tower for a new entity; keep it selected, as the game does (0x02073620). */
+function followUpgrades(before: World) {
+  for (const id of [...selection.ids]) {
+    if (world.units.some((u) => u.id === id)) continue;
+    const old = before.units.find((u) => u.id === id);
+    if (!old || !isTower(old.role)) continue;
+    const now = world.units.find((u) => u.owner === old.owner && isTower(u.role) && u.x === old.x && u.y === old.y);
+    if (now) {
+      selection.ids.delete(id);
+      selection.ids.add(now.id);
+    }
+  }
+}
+
 /** Run every sim tick that `ms` more of wall time allows (fewer while waiting on input). */
 function advance(ms: number) {
   acc = Math.min(acc + ms, TICK_MS * MAX_CATCHUP_TICKS);
@@ -1232,8 +1330,10 @@ function advance(ms: number) {
     const r = match.tick();
     if (!r) break; // waiting for the other player's input: hold this tick
     prev = before;
+    followUpgrades(before);
     acc -= TICK_MS;
     alert.observe(before.units, world.units, localPlayer, performance.now());
+    if (!appEl.classList.contains('menu')) sound.tick(before, world, localPlayer, heard);
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
     if (fog) updateFog(fog, world, localPlayer);
     tickEl.textContent = String(world.tick);
@@ -1429,9 +1529,50 @@ const rom = createRom({
     stripIconCache.clear();
     actionIconCache.clear();
     markTextures.clear();
+    // A (new) ROM is in: its sounds replace any cached ones.
+    audio.reset();
+    if (appEl.classList.contains('menu')) sound.menu();
   },
   onError: (m) => console.error(m),
 });
+const audio = new GameAudio({ labels: () => rom.summary()?.sound ?? null, render: (req) => rom.sound(req) });
+const sound = new GameSound(audio);
+// Touch-screen buttons play FE CLICK1 (generic button 0x020E5624); menus use the same.
+document.addEventListener('click', (e) => {
+  if (e.target instanceof Element && e.target.closest('button')) sound.play(FE_CLICK1);
+}, true);
+// Volume sliders: the game's 0..127 option bytes (a new profile has music 50, effects 127).
+for (const [id, key] of [['volMusic', 'music'], ['volFx', 'effects']] as const) {
+  const el = document.getElementById(id) as HTMLInputElement;
+  el.value = String(audio.settings[key]);
+  el.oninput = () => audio.setSettings({ ...audio.settings, [key]: Number(el.value) });
+}
+// The strip clicks once per icon as they slide in, a frame or two apart.
+bar.onOpen = (n) => {
+  for (let i = 0; i < n; i++) setTimeout(() => sound.play(UI_MENUSLIDECLICK), i * 2 * (1000 / 60));
+};
+
+/**
+ * The game only plays unit, spell and pickup sounds for units whose cell is inside the camera's
+ * rectangle with a margin (Snd_inView 0x0208936C: 2 cells left/up, 1-2 right/down of the DS view).
+ * Our view is the browser canvas, so we use it with 2 cells on every side (our adaptation).
+ */
+function heard(id: number, w: World): boolean {
+  const u = w.units.find((x) => x.id === id);
+  if (!u) return false;
+  const s = camera.scale.x;
+  const x0 = -camera.x / s;
+  const y0 = -camera.y / s;
+  const cx = Math.floor(fxToFloat(u.x) / CELL_W);
+  const cy = Math.floor(fxToFloat(u.y) / CELL_H);
+  return (
+    cx >= Math.floor(x0 / CELL_W) - 2 &&
+    cx <= Math.floor((x0 + app.screen.width / s) / CELL_W) + 2 &&
+    cy >= Math.floor(y0 / CELL_H) - 2 &&
+    cy <= Math.floor((y0 + app.screen.height / s) / CELL_H) + 2
+  );
+}
+
 rom.onGround = (name, g) => {
   if (name === mapName) ground.texture = textureFrom(g);
 };
@@ -1444,6 +1585,9 @@ function setMode(mode: 'menu' | 'game') {
   screensEl.hidden = mode === 'game';
   document.getElementById('quitAsk')!.hidden = true;
   if (mode === 'game') requestAnimationFrame(() => app.resize());
+  // Pressing Start stops the menu music; the match's music starts once it is loaded.
+  if (mode === 'menu') sound.menu();
+  else audio.stopMusic();
 }
 
 const skirmishMaps = () => skirmishFirst(rom.summary()?.maps ?? []).filter((m) => /^mp\d+$/.test(m));

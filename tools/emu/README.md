@@ -34,6 +34,16 @@ stack names the caller (see `docs/re-notes/economy.md`). Selecting a unit and ta
 (8,50) opens its build/train strip on the bottom screen; a building preview is confirmed with the
 check mark that appears at the left edge. Hold the d-pad to scroll the camera (it accelerates).
 
+## Recording audio
+
+`tools/emu/wav.py` takes the same tokens as `drive.py` and writes DeSmuME's mixer output to a WAV
+(16-bit stereo, 44.1 kHz). Compare it with our renders from `npx tsx extract/cli/sound.ts game.nds`
+(`out/sound/LABEL.wav`) by cross-correlation; see `docs/re-notes/sound.md`.
+
+```sh
+out/venv/bin/python tools/emu/wav.py game.nds out/tap.wav w1500 t128,96 w200   # title tap: SE_FE_CLICK1
+```
+
 ## What's been checked this way
 
 - Trees: the baked ground and terrain layers in RAM match `bakeTrees()` on mp01, mp02 and mp03
@@ -57,3 +67,6 @@ check mark that appears at the left edge. Hold the d-pad to scroll the camera (i
 
   With the profile from step 1, `Continue` x3 then `Start` (215,175) on the default map gives a King
   skirmish with the builder at (120,68) and the hero at (144,100) on the bottom screen.
+- Sound: the title music is `STRM_COMBINED_FE_THEME` at 47605 Hz, the title tap is `SE_FE_CLICK1` at our
+  level (docs/re-notes/sound.md). When each sound plays was logged with exec hooks on the game's sound
+  module (docs/re-notes/sound-triggers.md).

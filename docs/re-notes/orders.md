@@ -95,7 +95,7 @@ found).
 
 Strip contents seen in the emulator: the King's is Attack, Repair, Stand Ground, Patrol, Move,
 Stop; the Castle's is Set Rally Point, Stop. confirmed. Other units: the same list less what they
-can't do (likely). Repair is left out: the sim has no repair order yet.
+can't do (likely): Attack and Stand Ground need a weapon, Repair a Builder or hero.
 
 Icons: `UI/AllInOne/UI_MainCastle`, palette bank 1 (blue), the row at y 144, 24 px apart:
 attack (x 0), rally (24), patrol (48), harvest (72), move (96), repair (120), two not placed

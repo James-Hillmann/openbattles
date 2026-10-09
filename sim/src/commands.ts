@@ -17,6 +17,10 @@ export type Command =
   | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
+  /** Upgrade a finished Tower (or Tower II) to the next level. */
+  | { kind: 'upgrade'; building: EntityId }
+  /** Builders and heroes repair one of the player's damaged buildings. */
+  | { kind: 'repair'; unitIds: EntityId[]; target: EntityId }
   /** Cancel entry `index` of a building's queue (0 = the unit in training, refunded), or all of it with -1. */
   | { kind: 'cancel'; building: EntityId; index: number }
   /** Stop: drop the current order and stand (StopCommand). On a building it cancels the unit in training. */
