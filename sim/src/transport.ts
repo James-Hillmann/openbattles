@@ -105,7 +105,7 @@ function boardStep(w: World, u: Unit): void {
   }
   b.tries++;
   // guess: the game picks its cell with 0x0207F99C (not traced); we take the nearest free one, like builders.
-  const c = standCell(w, u, unitCell(w, t), t.size);
+  const c = standCell(w, u, unitCell(w, t), t.size, t.size);
   if (c >= 0) orderMove(w, u, c);
 }
 

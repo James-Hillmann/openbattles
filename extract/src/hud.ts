@@ -1,6 +1,7 @@
 import { romFile, tryRomFile } from './bundle';
 import { parseFont, renderText, type Font } from './font';
 import { entityLabels, parseLang, type EntityLabel } from './lang';
+import { minimapDotColors } from './minimap';
 import { decodeCells, decodeChars, decodePalette, decodeScreen, type CharData } from './nitro';
 import { blitTile, renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
@@ -13,8 +14,8 @@ import { buildParticleFx, type ParticleFx } from './effects';
 export interface HudBundle {
   /** Empty frame, already in the player's team color. */
   frame: Rgba;
-  /** Status-bar icons, 16x24 each: bricks, minifigs (animated in the game; frame 0 here), the red star. */
-  icons: { bricks: Rgba; minifigs: Rgba; star: Rgba };
+  /** Status-bar icon animation frames, 16x24 each (see ICON_ANIMS). */
+  icons: { bricks: Rgba[]; minifigs: Rgba[]; star: Rgba[] };
   /** 8x8 status-bar glyphs keyed by character ('0'-'9', '/', '-', '+'), transparent background. */
   glyphs: Record<string, Rgba>;
   /** Display names and max HP per entity, indexed like Entities.ebp. */
@@ -23,6 +24,8 @@ export interface HudBundle {
   portraits: Record<string, Rgba>;
   /** Font for the unit name panel. */
   nameFont: Font;
+  /** Minimap dot colors by palette index (4 red, 5 blue); undefined for unmapped game versions. */
+  minimapDots?: [number, number, number][];
   /** 24x24 build/train strip icons by entity name, for the entities whose icon number is known (COMMAND_ICONS). */
   commandIcons: Record<string, Rgba>;
   /** The dust cloud and flying studs over building sites (docs/re-notes/build-ui.md). */
@@ -93,9 +96,24 @@ const GLYPH_TILES: Record<string, number> = {
 /** White at color 1; bank 14 is what the game's sub BG2 uses (confirmed from VRAM). */
 const GLYPH_BANK = 14;
 
-/** GameAnims.NCGR (24 tiles wide): top-left tile of each 2x3-tile icon, drawn with WorldViewTop_Back bank 14. */
-const ICON_TILES = { bricks: 2, minifigs: 146, star: 74 } as const;
+/**
+ * Status-bar icons: GameAnims.NCGR (24 tiles wide) holds one row of twelve 2x3-tile
+ * frames per icon, drawn with WorldViewTop_Back bank 14. Frame order and cycle
+ * length were measured frame by frame in the emulator (confirmed); the cycle
+ * lengths also appear in UI/Game/WorldViewTopScreen.bin (4/500, 12/800, 12/1000).
+ */
+export const ICON_ANIMS = {
+  bricks: { row: 0, frames: [0, 1, 2, 3], cycleMs: 500 },
+  minifigs: { row: 2, frames: [0, 1, 2, 3, 4, 5, 4, 5, 8, 9, 10, 11], cycleMs: 800 },
+  star: { row: 1, frames: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], cycleMs: 1000 },
+} as const;
 const ICON_BANK = 14;
+
+/** Which frame (index into `HudBundle.icons[name]`) shows at `timeMs`. */
+export function iconFrame(name: keyof typeof ICON_ANIMS, timeMs: number): number {
+  const a = ICON_ANIMS[name];
+  return Math.floor((((timeMs % a.cycleMs) + a.cycleMs) % a.cycleMs) * a.frames.length / a.cycleMs);
+}
 
 const blank = (width: number, height: number): Rgba => ({ width, height, data: new Uint8ClampedArray(width * height * 4) });
 
@@ -132,11 +150,9 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
   for (const [c, tile] of Object.entries(GLYPH_TILES)) glyphs[c] = tileBlock(chars, pal, tile, 1, 1, GLYPH_BANK);
 
   const anims = decodeChars(romFile(rom, 'UI/GameAnims.NCGR'));
-  const icons = {
-    bricks: tileBlock(anims, pal, ICON_TILES.bricks, 2, 3, ICON_BANK),
-    minifigs: tileBlock(anims, pal, ICON_TILES.minifigs, 2, 3, ICON_BANK),
-    star: tileBlock(anims, pal, ICON_TILES.star, 2, 3, ICON_BANK),
-  };
+  const iconFrames = (name: keyof typeof ICON_ANIMS) =>
+    ICON_ANIMS[name].frames.map((f) => tileBlock(anims, pal, ICON_ANIMS[name].row * 3 * anims.tilesWide + f * 2, 2, 3, ICON_BANK));
+  const icons = { bricks: iconFrames('bricks'), minifigs: iconFrames('minifigs'), star: iconFrames('star') };
 
   const labels = entityLabels(romFile(rom, 'BP/Entities.ebp'), parseLang(romFile(rom, `LOC/${language}.lng`)));
   const portraits: Record<string, Rgba> = {};
@@ -150,7 +166,7 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const hc = decodeChars(heads);
     for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom) };
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom) };
 }
 
 /** What the top screen shows this frame. */
@@ -158,8 +174,10 @@ export interface TopScreenState {
   bricks: number;
   minifigs: number;
   minifigCap: number;
-  /** Third counter (red star); its meaning is still open. */
+  /** Third counter (spinning red star): special units against their cap (see docs/re-notes/economy.md). */
   star: [number, number];
+  /** Drives the icon animations. */
+  timeMs: number;
   /** The selected entity, if any: index into `labels`, and its current HP. */
   selected?: { entity: number; hp: number };
   minimap?: MinimapState;
@@ -298,9 +316,9 @@ const NAME_RGB: [number, number, number] = [255, 255, 255];
 export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   const out: Rgba = { width: TOP_W, height: TOP_H, data: hud.frame.data.slice() };
   const L = HUD_LAYOUT;
-  draw(out, hud.icons.bricks, L.icons.bricks, L.icons.y);
-  draw(out, hud.icons.minifigs, L.icons.minifigs, L.icons.y);
-  draw(out, hud.icons.star, L.icons.star, L.icons.y);
+  draw(out, hud.icons.bricks[iconFrame('bricks', s.timeMs)]!, L.icons.bricks, L.icons.y);
+  draw(out, hud.icons.minifigs[iconFrame('minifigs', s.timeMs)]!, L.icons.minifigs, L.icons.y);
+  draw(out, hud.icons.star[iconFrame('star', s.timeMs)]!, L.icons.star, L.icons.y);
   drawDigits(out, hud, String(s.bricks), L.counters.bricks, L.counters.y);
   drawDigits(out, hud, `${s.minifigs}/${s.minifigCap}`, L.counters.minifigs, L.counters.y);
   drawDigits(out, hud, `${s.star[0]}/${s.star[1]}`, L.counters.star, L.counters.y);
