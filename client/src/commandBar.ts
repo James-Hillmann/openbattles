@@ -23,8 +23,10 @@ export interface CommandItem {
 
 export interface QueueItem {
   icon: HTMLCanvasElement | null;
-  /** 0..100 for the unit in training, -1 for one still waiting. */
-  pct: number;
+  /** False for an empty slot. */
+  used: boolean;
+  /** What's in the slot (for redraws). */
+  name: string;
 }
 
 /** DS layout, in DS pixels: band at y 32, 24 px icons with a 1 px dark rule between them. Shown at 2x. */
@@ -40,7 +42,12 @@ export class CommandBar {
   readonly el = document.createElement('div');
   private shown = '';
 
-  constructor(parent: HTMLElement, private readonly onPick: (key: string) => void) {
+  constructor(
+    parent: HTMLElement,
+    private readonly onPick: (key: string) => void,
+    /** A queue slot was clicked: cancel that entry (0 = the unit in training). */
+    private readonly onCancel: (index: number) => void = () => {},
+  ) {
     this.el.className = 'cmdbar';
     this.el.hidden = true;
     parent.appendChild(this.el);
@@ -77,9 +84,16 @@ export class CommandBar {
       .cmdbar.spell .price { border-top-color: #983800; }
       .cmdbar.spell button:disabled::after { background: repeating-conic-gradient(#3080f8 0 25%, transparent 0 50%) 0 0 / ${2 * SCALE}px ${2 * SCALE}px; opacity: 1; }
       .cmdbar button.armed { outline: 3px solid #fff; outline-offset: -3px; }
-      .cmdbar .queue div { width: 32px; height: 36px; background: #400; position: relative; border: 1px solid #000; }
-      .cmdbar .queue canvas { width: 32px; height: 32px; display: block; }
-      .cmdbar .queue i { position: absolute; left: 0; bottom: 0; height: 4px; background: #3e3; }
+      /* The game's three queue slots (top screen, under the portrait): 24x24 recessed boxes, each queued unit's
+         head with an 8x8 red no-entry badge at its lower right that cancels it. */
+      .cmdbar .queue { pointer-events: auto; }
+      .cmdbar .queue button { width: ${ICON * SCALE}px; height: ${ICON * SCALE}px; padding: 0; background: #301010;
+        border: 2px solid; border-color: #180808 #604040 #604040 #180808; position: relative; }
+      .cmdbar .queue button:disabled::after { display: none; }
+      .cmdbar .queue canvas { width: 100%; height: 100%; display: block; }
+      .cmdbar .queue b { position: absolute; right: 0; bottom: 0; width: ${8 * SCALE}px; height: ${8 * SCALE}px; border-radius: 50%;
+        background: #e01010; border: 1px solid #fff; box-sizing: border-box; }
+      .cmdbar .queue b::after { content: ''; position: absolute; left: 3px; right: 3px; top: 50%; height: 2px; margin-top: -1px; background: #fff; }
     `;
     parent.appendChild(css);
   }
@@ -91,7 +105,7 @@ export class CommandBar {
 
   /** `hint` is a line under the band (e.g. where to place a building); the title belongs to the top screen. */
   show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = [], theme: 'build' | 'spell' = 'build'): void {
-    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.pct), theme]);
+    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.name), theme]);
     this.el.hidden = items.length === 0 && queue.length === 0 && !hint;
     if (key === this.shown) return;
     this.shown = key;
@@ -130,14 +144,21 @@ export class CommandBar {
     if (queue.length) {
       const q = document.createElement('div');
       q.className = 'queue';
-      for (const it of queue) {
-        const d = document.createElement('div');
-        if (it.icon) d.appendChild(copy(it.icon));
-        const bar = document.createElement('i');
-        bar.style.width = `${Math.max(0, it.pct) * 0.32}px`;
-        d.appendChild(bar);
+      queue.forEach((it, i) => {
+        const d = document.createElement('button');
+        d.disabled = !it.used;
+        if (it.used) {
+          d.title = 'Cancel';
+          if (it.icon) d.appendChild(copy(it.icon));
+          d.appendChild(document.createElement('b'));
+          d.addEventListener('pointerdown', (e) => e.stopPropagation());
+          d.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.onCancel(i);
+          });
+        }
         q.appendChild(d);
-      }
+      });
       under.appendChild(q);
     }
     if (hint) under.appendChild(Object.assign(document.createElement('span'), { className: 'hint', textContent: hint }));

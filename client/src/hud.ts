@@ -85,6 +85,12 @@ export class HudView {
   }
 }
 
+/**
+ * A building's training progress: a red row above its health bar while selected, lit cells =
+ * floor(percent x cells / 100); lit is BGR555 0x001F (emulator). The unlit shade is our guess.
+ */
+export const TRAIN_COLORS = { lit: 0xff0000, unlit: 0x500000 };
+
 function drawRow(g: Graphics, left: number, top: number, cells: number, lit: number, colors: { lit: number; unlit: number }): void {
   g.rect(left, top, 3 * cells + 1, 4).fill(0x000000);
   for (let k = 0; k < cells; k++) g.rect(left + 1 + 3 * k, top + 1, 2, 2).fill(k < lit ? colors.lit : colors.unlit);
@@ -95,8 +101,8 @@ function drawRow(g: Graphics, left: number, top: number, cells: number, lit: num
  * `frameLeft`/`frameTop`: the unit's 24x24 sprite frame. The health row sits at
  * frameTop - 6 (a 2 px gap), the hero row 4 px above it.
  */
-export function drawUnitBars(g: Graphics, frameLeft: number, frameTop: number, hp: number, maxHp: number, power?: { value: number; max: number }): void {
+export function drawUnitBars(g: Graphics, frameLeft: number, frameTop: number, hp: number, maxHp: number, power?: { value: number; max: number; colors?: { lit: number; unlit: number } }): void {
   const cells = barCells(24);
   drawRow(g, frameLeft, frameTop - 6, cells, litCells(hp, maxHp, cells), HP_BANDS[hpBand(hp, maxHp)]!);
-  if (power) drawRow(g, frameLeft, frameTop - 10, cells, litCells(power.value, power.max, cells), POWER_COLORS);
+  if (power) drawRow(g, frameLeft, frameTop - 10, cells, litCells(power.value, power.max, cells), power.colors ?? POWER_COLORS);
 }

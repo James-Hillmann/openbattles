@@ -33,8 +33,16 @@ export const POP_PER_FARM = 4;
 export const MAX_HEROES = 1;
 export const MAX_POP = 20;
 export const MAX_STARS = 4;
-/** Production queue length per building. likely (a playtester of the DS game; not watched yet) */
+/**
+ * Production queue per building: 3 entries, the one in training included (0x02084A08 drops a 4th order).
+ * confirmed (code and emulator; docs/re-notes/economy.md "Training queue")
+ */
 export const QUEUE_MAX = 3;
+/** An idle building looks at its queue every 10 ticks (0x0206DA60). confirmed (code); phase guess */
+export const PROD_IDLE_CHECK = 10;
+/** `prod` while the front unit hasn't started: wait for the next 10-tick check, or try every tick. */
+export const PROD_IDLE = -2;
+export const PROD_READY = -1;
 /**
  * A Builder dropping off a load goes inside the building: in the tick after it arrives (bricks paid then),
  * out DROP_TICKS ticks after it arrived, at the building's exit cell. confirmed (emulator, 10 drop-offs;
@@ -320,14 +328,52 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
   if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
-  // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code)
-  if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
-  if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;
-  if (takesStar(t.role) && starsUsed(w, player) + 1 > starCap(w, player)) return;
-  if (!spendBricks(p, t.cost)) return;
+  // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code). The game's strip greys the
+  // icon instead; refusing the order here keeps a second hero out of the queue the same way.
+  if (t.role === ROLE_HERO && (heroAlive(w, player) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
+  // Nothing is paid or reserved yet: that happens when the unit starts training (0x02071E94). confirmed
+  if (b.queue.length === 0) b.prod = PROD_IDLE;
+  b.queue.push(type);
+}
+
+const heroAlive = (w: World, player: PlayerId): boolean => w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO);
+
+/**
+ * Cancel queue entry `index` (0 = the front) of a building, or the whole queue with -1
+ * (CancelProduceQueueItemCommand, 0x02084A60). A waiting unit just goes; the one in training is refunded in
+ * full and frees its pop or star slot. confirmed (emulator). The game refunds the front unit even when it
+ * was never paid (stuck at the pop cap: a free 50 bricks); we refund only what was paid.
+ */
+export function orderCancel(w: World, player: PlayerId, building: EntityId, index: number): void {
+  const b = findById(w.units, building);
+  if (!b || b.owner !== player || !isBuilding(b) || index < -1 || index >= b.queue.length) return;
+  const all = index === -1;
+  if ((all || index === 0) && b.prod >= 0 && b.queue.length) {
+    const t = w.types[b.queue[0]!];
+    const p = getPlayer(w, player);
+    if (t && p) {
+      addBricks(p, t.cost);
+      if (takesPop(t.role)) p.reservedPop--;
+      if (takesStar(t.role)) p.reservedStars--;
+    }
+  }
+  if (all) b.queue.length = 0;
+  else b.queue.splice(index, 1);
+  // A new front waits for the building's next 10-tick look at its queue. confirmed (emulator)
+  if (all || index === 0) b.prod = PROD_IDLE;
+}
+
+/** Start the front unit if the player can take it now: pay, and reserve its pop or star slot. */
+function startTraining(w: World, b: Unit, t: EntityType): boolean {
+  const p = getPlayer(w, b.owner);
+  if (!p) return false;
+  if (t.role === ROLE_HERO && heroAlive(w, b.owner)) return false;
+  if (takesPop(t.role) && popUsed(w, b.owner) + 1 > popCap(w, b.owner)) return false;
+  if (takesStar(t.role) && starsUsed(w, b.owner) + 1 > starCap(w, b.owner)) return false;
+  if (!spendBricks(p, t.cost)) return false;
   if (takesPop(t.role)) p.reservedPop++;
   if (takesStar(t.role)) p.reservedStars++;
-  b.queue.push(type);
+  return true;
 }
 
 // ---- per tick ----
@@ -470,6 +516,17 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
     b.queue.shift();
     return;
   }
+  if (b.prod < 0) {
+    // Not started: an idle building checks every 10 ticks; right after a unit comes out, or while the front
+    // waits for a free slot (pop cap: it blocks the rest of the queue), every tick. confirmed (emulator)
+    if (b.prod === PROD_IDLE && w.tick % PROD_IDLE_CHECK !== 0) return;
+    if (!startTraining(w, b, t)) {
+      b.prod = PROD_READY;
+      return;
+    }
+    b.prod = 0;
+    return;
+  }
   if (b.prod < t.buildTime) b.prod++;
   if (b.prod < t.buildTime) return;
   const c = exitCell(w, b);
@@ -478,7 +535,7 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
   if (p && takesPop(t.role)) p.reservedPop--;
   if (p && takesStar(t.role)) p.reservedStars--;
   b.queue.shift();
-  b.prod = 0;
+  b.prod = PROD_READY;
   spawn(w, b.owner, t, c);
 }
 
