@@ -45,6 +45,7 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 ## Construction
 
 - Placing a building pays its cost (+0x5E) at once (Farm: 500 -> 425). confirmed
+  Walls and bridges are the exception: each is paid when the work on it starts ([walls-bridges.md](walls-bridges.md)).
 - The site appears with 1 HP. Progress ticks up once per tick of work; **build time is +0x60 in
   ticks** (Farm 360: started tick 386, finished tick 746). HP rises with it to the full value.
   Unit +0x22E holds percent done (100 = finished). confirmed (one Builder on a Farm)

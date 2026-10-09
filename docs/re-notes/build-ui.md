@@ -72,7 +72,7 @@ construction: see "Construction effect" below.
 ## Open
 
 - Strip icons of Imperial, Earth and Aliens units; the strip's exact end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
-- Stables and Shipyard lists; Wall and Bridge placement; the blue order strip; hero spells.
+- Stables and Shipyard lists; the blue order strip. (Wall and Bridge placement: [walls-bridges.md](walls-bridges.md).)
 - The game's placement rules beyond "walkable and free"; the yellow outline under a site.
 
 ## Builder at work (emulator, 2026-10-08)

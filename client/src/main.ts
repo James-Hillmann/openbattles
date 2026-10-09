@@ -55,6 +55,15 @@ import {
   canTarget,
   TAP_POINT,
   projectileAt,
+  ROLE_BRIDGE,
+  ROLE_WALL,
+  fpH,
+  fpW,
+  isStructure,
+  sizeBridge,
+  wallLine,
+  isWalkableCode,
+  type BridgeSite,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
@@ -70,6 +79,7 @@ import type { GameSettings, GameType } from '@lbw/server/protocol';
 import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
 import { SiteFx } from './siteFx';
+import { StructureView, bridgeSitesOf, siteNear } from './structures';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
 let localPlayer = 0;
@@ -137,6 +147,10 @@ const camera = new Container();
 app.stage.addChild(camera);
 const ground = new Sprite();
 camera.addChild(ground);
+/** Walls and finished bridges: part of the map layer in the game, so under every unit. */
+const structureLayer = new Container();
+camera.addChild(structureLayer);
+const structures = new StructureView(structureLayer);
 const unitLayer = new Container();
 camera.addChild(unitLayer);
 const fallback = new Graphics();
@@ -256,7 +270,7 @@ function startSkirmish() {
   const settings = online?.settings ?? offlineSettings;
   // The sim writes chopped trees and footprints into the grid: every match starts from the map's own.
   const grid = { ...mapGrid, cells: mapTerrain.slice() };
-  world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines, spellDefs: armyBundle?.spells ?? [] }, mapStarts, {
+  world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines, bridgeSites: mapBridges, spellDefs: armyBundle?.spells ?? [] }, mapStarts, {
     prebuilt: settings?.prebase ?? false,
     rules: { mode: settings ? WIN_MODE[settings.game] : 0 },
     bricks: settings?.bank ?? START_BRICKS,
@@ -276,6 +290,7 @@ function startSkirmish() {
   for (const sp of unitSprites.values()) sp.destroy();
   unitSprites.clear();
   unitAnim.clear();
+  structures.clear();
   selection.ids.clear();
   placing = null;
   const start = getPlayer(world, localPlayer)?.start ?? -1;
@@ -292,12 +307,17 @@ let mapGrid: TerrainGrid | null = null;
 let mapTerrain = new Uint8Array(0);
 let mapStarts: StartSpawn[] = [];
 let mapMines: number[] = [];
+/** The map's bridge sites, each with the bridge that fits it. */
+let mapBridges: BridgeSite[] = [];
 let mapName = '';
 /** Trees on the ground texture we show; when the sim's count drops, the ground is redrawn. */
 let groundTrees = 0;
 let groundAsked = 0;
-/** Building picked from the strip, waiting for a spot: entity index. */
-let placing: { type: number } | null = null;
+/**
+ * Building picked from the strip, waiting for a spot: entity index. A wall line starts where the
+ * pointer goes down (`from`) and ends where it comes up, as on the DS touch screen.
+ */
+let placing: { type: number; from?: { cx: number; cy: number } } | null = null;
 let minimap: Rgba | undefined;
 /** The local player's fog (presentation only, not part of the lockstep state). */
 let fog: Fog | null = null;
@@ -319,6 +339,8 @@ function onMap(b: MapBundle, hud: HudBundle) {
   mapTerrain = b.terrain.slice();
   mapStarts = b.starts;
   mapMines = b.mineSites.map((m) => m.y * b.width + m.x);
+  mapBridges = bridgeSitesOf(b.bridgeMarks, (x, y, v) => sizeBridge({ width: b.width, height: b.height, cells: b.terrain }, x, y, v), b.width);
+  structures.setArt(b.structures);
   mapName = b.name;
   fog = createFog(b.width, b.height);
   centerOn(mapSize.w / 2, mapSize.h / 2);
@@ -348,12 +370,22 @@ app.canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.button !== 1) return;
   if (e.button === 1) e.preventDefault();
   const pan = e.button === 1 || keys.has(' ');
+  if (!pan && e.button === 0 && placing && world.types[placing.type]?.role === ROLE_WALL) {
+    const w = toWorld(e.clientX, e.clientY);
+    placing.from = { cx: Math.floor(w.x / CELL_W), cy: Math.floor(w.y / CELL_H) };
+  }
   drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing && !aiming, additive: e.shiftKey };
 });
 // Chrome on Windows starts its auto-scroll on a middle press; the camera drag replaces it.
 app.canvas.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
 window.addEventListener('pointerup', (e) => {
   if (!drag) return;
+  if (placing?.from && !drag.pan) {
+    hover = toWorld(e.clientX, e.clientY);
+    tryPlace();
+    drag = null;
+    return;
+  }
   if (!drag.moved) {
     if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
@@ -370,6 +402,7 @@ window.addEventListener('pointermove', (e) => {
   if (!drag) return;
   if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 4) return;
   drag.moved = true;
+  if (placing?.from && !drag.pan) return; // dragging out a wall line
   if (drag.box) {
     const a = toWorld(drag.startX, drag.startY);
     const b = toWorld(e.clientX, e.clientY);
@@ -472,31 +505,31 @@ function drawFog() {
 function workSpot(u: World['units'][number]): { x: Fx; y: Fx } | null {
   const g = world.grid;
   const job = u.job;
-  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build')) return null;
+  if (!g || !job || (job.kind !== 'chop' && job.kind !== 'build' && job.kind !== 'wall')) return null;
   const here = unitCell(world, u);
   const [hx, hy] = [here % g.width, Math.floor(here / g.width)];
-  let cx: number, cy: number, size: number;
+  let cx: number, cy: number, sw: number, sh: number;
   if (job.kind === 'chop') {
     if (g.cells[job.tree] !== TERRAIN_TREE) return null;
-    [cx, cy, size] = [job.tree % g.width, Math.floor(job.tree / g.width), 1];
+    [cx, cy, sw, sh] = [job.tree % g.width, Math.floor(job.tree / g.width), 1, 1];
   } else {
     const site = world.units.find((b) => b.id === job.site);
     if (!site || isFinished(site)) return null;
     const o = unitCell(world, site);
-    [cx, cy, size] = [o % g.width, Math.floor(o / g.width), site.size];
+    [cx, cy, sw, sh] = [o % g.width, Math.floor(o / g.width), fpW(site.size), fpH(site.size)];
   }
   // Next to it (Chebyshev distance 1 from the rectangle), as the sim requires before work counts.
-  const dx = hx < cx ? cx - hx : hx >= cx + size ? hx - (cx + size - 1) : 0;
-  const dy = hy < cy ? cy - hy : hy >= cy + size ? hy - (cy + size - 1) : 0;
+  const dx = hx < cx ? cx - hx : hx >= cx + sw ? hx - (cx + sw - 1) : 0;
+  const dy = hy < cy ? cy - hy : hy >= cy + sh ? hy - (cy + sh - 1) : 0;
   if (Math.max(dx, dy) !== 1) return null;
-  return { x: fx(cx * CELL_W + (size * CELL_W) / 2), y: fx(cy * CELL_H + (size * CELL_H) / 2) };
+  return { x: fx(cx * CELL_W + (sw * CELL_W) / 2), y: fx(cy * CELL_H + (sh * CELL_H) / 2) };
 }
 
 /** A building's footprint in world pixels (top-left cell is where the sim keeps it). */
 function footprint(u: World['units'][number]) {
   const g = world.grid!;
   const c = unitCell(world, u);
-  return { left: (c % g.width) * CELL_W, top: Math.floor(c / g.width) * CELL_H, w: u.size * CELL_W, h: u.size * CELL_H };
+  return { left: (c % g.width) * CELL_W, top: Math.floor(c / g.width) * CELL_H, w: fpW(u.size) * CELL_W, h: fpH(u.size) * CELL_H };
 }
 
 /** The construction effect, once the ROM is loaded. */
@@ -568,6 +601,18 @@ function drawBuilding(u: World['units'][number], isSelected: boolean, out: Picka
   }
 }
 
+/**
+ * A wall or bridge: drawn into the map layer by StructureView; here it only becomes pickable and
+ * gets bars like other buildings. An unfinished bridge shows just its bars (and is pickable so
+ * builders can be sent to help).
+ */
+function drawStructure(u: World['units'][number], isSelected: boolean, out: Pickable[]) {
+  if (!world.grid) return;
+  const f = footprint(u);
+  out.push({ id: u.id, owner: u.owner, x: f.left + f.w / 2, y: f.top + f.h, box: { l: f.left, t: f.top, r: f.left + f.w, b: f.top + f.h }, building: true });
+  if (isSelected || !isFinished(u) || u.hp * 100 <= u.maxHp * 32) drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), f.top + 2, u.hp, u.maxHp);
+}
+
 /** The picture without its top `hidden` rows, cached until the cut moves. */
 function cutTexture(id: number, tex: Texture, hidden: number): Texture {
   const v = siteViews.get(id) ?? { fx: new Sprite() };
@@ -597,8 +642,10 @@ function pruneSites() {
 
 // --- Build and train strip (docs/re-notes/build-ui.md) ---------------------------
 
-/** Order of the Builder's strip in the game: Castle, Farm, Lumber Mill, Mine, Barracks, Stables, Shipyard, Tower (then Wall, Bridge, not built yet). */
-const BUILD_ORDER = [7, 10, 8, 9, 11, 12, 16, 13];
+/** Order of the Builder's strip in the game: Castle, Farm, Lumber Mill, Mine, Barracks, Stables, Shipyard, Tower, Wall, Bridge. */
+const BUILD_ORDER = [7, 10, 8, 9, 11, 12, 16, 13, ROLE_WALL, ROLE_BRIDGE];
+/** The strip's one Bridge icon (the game shows BridgeSmallH's); the site picks the real size. */
+const STRIP_STRUCTURES: Record<number, string> = { [ROLE_WALL]: 'Wall', [ROLE_BRIDGE]: 'BridgeSmallH' };
 
 const endEl = document.createElement('div');
 endEl.className = 'endbanner';
@@ -728,9 +775,9 @@ function updateStrip() {
   if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero);
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
   const all = armyBuildings(localPlayer);
-  const list = BUILD_ORDER.map((r) => all.find((st) => st.role === r)).filter((st): st is UnitStats => !!st);
+  const list = BUILD_ORDER.map((r) => (STRIP_STRUCTURES[r] ? unitStats[STRIP_STRUCTURES[r]] : all.find((st) => st.role === r))).filter((st): st is UnitStats => !!st);
   costs(list, 'build');
-  bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', list.map((st) => item(st, 'build')));
+  bar.show(placing ? placingHint(placing.type) : '', list.map((st) => item(st, 'build')));
 }
 
 /**
@@ -857,15 +904,52 @@ function placeCell(size: number) {
   return { cx, cy };
 }
 
+function placingHint(type: number): string {
+  const role = world.types[type]?.role;
+  if (role === ROLE_WALL) return 'Drag out a wall. Right-click cancels.';
+  if (role === ROLE_BRIDGE) return world.bridgeSites.length ? 'Pick a river crossing. Right-click cancels.' : 'This map has no river crossings.';
+  return `Place the ${displayName(nameByIndex.get(type) ?? '')}. Right-click cancels.`;
+}
+
+const hoverCell = () => ({ cx: Math.floor(hover.x / CELL_W), cy: Math.floor(hover.y / CELL_H) });
+
+/**
+ * The wall line being dragged (or the one cell under the pointer before the drag starts): the
+ * cells the sim will build, green, and the ones it will leave out, red.
+ */
+function wallPreview(t: EntityType): { cells: [number, number][]; ok: boolean[] } {
+  const to = hoverCell();
+  const from = placing?.from ?? to;
+  const cells = wallLine(from.cx, from.cy, to.cx, to.cy, fpW(t.size), fpH(t.size));
+  const g = world.grid!;
+  const ok = cells.map(([x, y]) => x >= 0 && y >= 0 && x < g.width && y < g.height && isWalkableCode(g.cells[y * g.width + x]!, t.moves));
+  return { cells, ok };
+}
+
 /** Building preview under the pointer: green where it can stand, red where not. */
 function drawPlacement() {
   ghost.visible = false;
   if (!placing || !world.grid) return;
   const t = world.types[placing.type];
   if (!t) return;
+  if (t.role === ROLE_WALL) {
+    const { cells, ok } = wallPreview(t);
+    cells.forEach(([x, y], i) => overlay.rect(x * CELL_W, y * CELL_H, CELL_W, CELL_H).fill({ color: ok[i] ? 0x30ff30 : 0xff3030, alpha: 0.35 }));
+    return;
+  }
+  if (t.role === ROLE_BRIDGE) {
+    const { cx, cy } = hoverCell();
+    const site = siteNear(world, cx, cy);
+    const st = site && world.types[site.type];
+    if (!site || !st) return void overlay.rect(cx * CELL_W, cy * CELL_H, CELL_W, CELL_H).fill({ color: 0xff3030, alpha: 0.35 });
+    const g = world.grid;
+    const [l, tp] = [(site.cell % g.width) * CELL_W, Math.floor(site.cell / g.width) * CELL_H];
+    overlay.rect(l, tp, fpW(st.size) * CELL_W, fpH(st.size) * CELL_H).fill({ color: bridgeOpen(site) ? 0x30ff30 : 0xff3030, alpha: 0.35 });
+    return;
+  }
   const { cx, cy } = placeCell(t.size);
   const ok = placeable(t, cx, cy);
-  const [l, tp, w, h] = [cx * CELL_W, cy * CELL_H, t.size * CELL_W, t.size * CELL_H];
+  const [l, tp, w, h] = [cx * CELL_W, cy * CELL_H, fpW(t.size) * CELL_W, fpH(t.size) * CELL_H];
   overlay.rect(l, tp, w, h).fill({ color: ok ? 0x30ff30 : 0xff3030, alpha: 0.35 });
   const tex = buildingTex.get(`${nameByIndex.get(placing.type)}@${bankOf(localPlayer)}`);
   if (tex) {
@@ -888,8 +972,8 @@ function placeable(t: EntityType, cx: number, cy: number): boolean {
   if (!canPlace(world, t, cx, cy)) return false;
   if (!fog) return true;
   const r = t.role === ROLE_SHIPYARD ? 1 : 0;
-  for (let y = cy - r; y < cy + t.size + r; y++) {
-    for (let x = cx - r; x < cx + t.size + r; x++) {
+  for (let y = cy - r; y < cy + fpH(t.size) + r; y++) {
+    for (let x = cx - r; x < cx + fpW(t.size) + r; x++) {
       if (x >= 0 && y >= 0 && x < fog.width && y < fog.height && !isExplored(fog, x, y)) return false;
     }
   }
@@ -901,13 +985,33 @@ function tryPlace(): boolean {
   if (!placing) return false;
   const t = world.types[placing.type];
   const unitIds = world.units.filter((u) => u.owner === localPlayer && u.role === ROLE_BUILDER && selection.ids.has(u.id)).map((u) => u.id);
-  if (t && unitIds.length) {
+  if (t && unitIds.length && t.role === ROLE_WALL) {
+    const to = hoverCell();
+    const from = placing.from ?? to;
+    placing.from = undefined;
+    if (!wallPreview(t).ok.some(Boolean)) return true; // nothing buildable there: keep picking
+    match.issue({ kind: 'wall', unitIds, type: placing.type, fx: from.cx, fy: from.cy, tx: to.cx, ty: to.cy });
+  } else if (t && unitIds.length && t.role === ROLE_BRIDGE) {
+    const { cx, cy } = hoverCell();
+    const site = siteNear(world, cx, cy);
+    if (!site || !bridgeOpen(site)) return true;
+    const g = world.grid!;
+    match.issue({ kind: 'bridge', unitIds, type: site.type, cx: site.cell % g.width, cy: Math.floor(site.cell / g.width) });
+  } else if (t && unitIds.length) {
     const { cx, cy } = placeCell(t.size);
     if (!placeable(t, cx, cy)) return true; // keep the preview up; the spot is taken
     match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
   }
   placing = null;
   return true;
+}
+
+/** A site with no finished or enemy bridge on it, that the player has seen. */
+function bridgeOpen(site: BridgeSite): boolean {
+  const g = world.grid!;
+  const there = world.units.find((u) => u.role === ROLE_BRIDGE && u.hp > 0 && unitCell(world, u) === site.cell);
+  if (there && (there.owner !== localPlayer || isFinished(there))) return false;
+  return !fog || isExplored(fog, site.cell % g.width, Math.floor(site.cell / g.width));
 }
 
 /** Redraw the ground when trees have been chopped or planted (at most twice a second). */
@@ -992,6 +1096,7 @@ app.ticker.add((t) => {
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
   drawFog();
+  structures.draw(world, (o) => teamColor[o] ?? o, hiddenByFog);
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
     // Builders inside a building (dropping off, or building a site) aren't drawn or pickable, as in the game.
@@ -1000,6 +1105,10 @@ app.ticker.add((t) => {
       if (hidden) hidden.visible = false;
       const site = siteViews.get(u.id);
       if (site) site.fx.visible = false;
+      continue;
+    }
+    if (isStructure(u.role)) {
+      drawStructure(u, selection.ids.has(u.id), nextDrawn);
       continue;
     }
     if (isBuilding(u)) {
@@ -1304,6 +1413,8 @@ void menus.boot();
     const r = app.canvas.getBoundingClientRect();
     return { x: r.left + camera.x + x * camera.scale.x, y: r.top + camera.y + y * camera.scale.y };
   },
+  /** Point the camera at a world pixel (tests take screenshots there). */
+  center: (x: number, y: number) => centerOn(x, y),
   grid: () => world.grid && { width: world.grid.width, height: world.grid.height, cells: [...world.grid.cells] },
   issueMove: (x: number, y: number) =>
     match.issue({ kind: 'move', unitIds: world.units.filter((u) => u.owner === localPlayer).map((u) => u.id), x: fx(x), y: fx(y) }),
