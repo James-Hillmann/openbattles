@@ -29,3 +29,4 @@ export * from './armyBundle';
 export * from './effects';
 export * from './spells';
 export * from './structures';
+export * from './actions';
