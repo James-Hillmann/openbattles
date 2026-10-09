@@ -411,7 +411,7 @@ function stepMine(w: World, m: Unit): void {
 /** Economy for one tick, after combat and movement. */
 export function economyStep(w: World, spawn: SpawnFn): void {
   if (w.grid && w.occ) {
-    for (const u of w.units) if (u.hp > 0 && u.job) stepJob(w, u);
+    for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u); // frozen builders wait (spells.ts)
     for (const b of w.units) {
       if (b.hp <= 0 || !isBuilding(b)) continue;
       if (!isFinished(b)) stepConstruction(w, b);

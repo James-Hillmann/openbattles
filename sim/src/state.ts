@@ -81,6 +81,10 @@ export interface Unit {
   buffs: number[];
   /** The buffs in effect (bit per slot), refreshed from `buffs` at the start of the unit's update (game: stats rebuild 0x0205CCA4). */
   boost: number;
+  /** Damage spell hits this unit shrugs off first (game: unit +0x230); set when a damage spell takes it. */
+  grace: number;
+  /** Frozen by a freeze ring until this tick (game: FreezeEntityCommand); 0 when never. */
+  frozen: number;
 }
 
 /** What a builder is doing. Cells are y * width + x. */
@@ -261,14 +265,24 @@ export interface ActiveSpell {
   start: number;
   /** Ticks left; -1 runs until its caster is gone (game: SpellBase +0x14). */
   left: number;
+  /** 1 a unit, 2 around the caster, 3 a spot (game: SpellBase +0x1C). */
+  mode: number;
   /** Centre cell of its area and the radius in cells (|dx| + |dy|), or radius -1 for no area. */
   cx: number;
   cy: number;
   radius: number;
   /** Units in its area as of the last scan (game: SpellBase +0x38), in id order. */
   units: EntityId[];
-  /** Heals: ticks to the next pulse (game: HealSpell +0x50). */
+  /** Heals: ticks to the next pulse (HealSpell +0x50). Freeze rings: ticks left (EAttackSpell +0x7C). */
   timer: number;
+  /** Damage spells: damage and hit chance per tick, 20.12, and how much they change each tick (DamageSpell +0x64/+0x68, +0x50/+0x54). */
+  dmg: number;
+  dmgStep: number;
+  chance: number;
+  chanceStep: number;
+  /** Growing hit zone or freeze ring radius in cells, 20.12, and its growth a tick (DamageSpell +0x5C/+0x60, EAttackSpell +0x80). */
+  ring: number;
+  ringStep: number;
 }
 
 /** The game's occupancy layers (OccupationGrid): ground, air, bridges. */

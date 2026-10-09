@@ -107,12 +107,14 @@ export function hashWorld(w: World): number {
     for (const u of w.units) {
       mix(u.charge);
       mix(u.boost);
+      mix(u.grace);
+      mix(u.frozen);
       for (const b of u.buffs) mix(b);
     }
     mix(w.nextSpell);
     mix(w.spells.length);
     for (const s of w.spells) {
-      for (const v of [s.id, s.owner, s.spell, s.caster, s.target, s.x, s.y, s.start, s.left, s.cx, s.cy, s.radius, s.timer]) mix(v);
+      for (const v of [s.id, s.owner, s.spell, s.caster, s.target, s.x, s.y, s.start, s.left, s.mode, s.cx, s.cy, s.radius, s.timer, s.dmg, s.dmgStep, s.chance, s.chanceStep, s.ring, s.ringStep]) mix(v);
       mix(s.units.length);
       for (const id of s.units) mix(id);
     }

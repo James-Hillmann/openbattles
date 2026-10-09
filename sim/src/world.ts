@@ -9,7 +9,7 @@ import { OCC_LAYERS, type AttackStats, type EntityType, type GameRules, type Mel
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
-import { BUFF_SLOTS, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
+import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
   ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
@@ -114,6 +114,8 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     spells: type.role === ROLE_HERO ? [...(type.spells ?? [])] : [],
     buffs: new Array<number>(BUFF_SLOTS).fill(0),
     boost: 0,
+    grace: 0,
+    frozen: 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
@@ -239,12 +241,12 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
   for (const u of w.units) {
     refreshBoost(u);
     regenCharge(u);
-    combatStep(w, u);
+    if (!isFrozen(w, u)) combatStep(w, u);
   }
   stepProjectiles(w);
   spellsStep(w);
   for (const u of w.units) {
-    if (u.hp === 0) continue;
+    if (u.hp === 0 || isFrozen(w, u)) continue;
     if (w.grid) moveOnMap(w, u);
     else moveUnit(u);
   }

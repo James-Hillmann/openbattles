@@ -23,9 +23,9 @@ const def = (id: number, range: number, b7: number, flags: number, cost: number)
   id, icon: 0, params: [0, 0, 0, 0], range, b7, flags, cost, category: 0, time: 30,
 });
 const DEFS: SpellDef[] = [
-  def(0, 0, 0, 0, 0),
-  def(1, 1, 5, 0x40, 0),
-  def(2, 1, 3, 0x40, 0),
+  def(0, 1, 0, 0, 0),
+  def(1, 1, 5, 2, 100),
+  def(2, 1, 3, 0x40, 100),
   def(3, 5, 5, 1, 100),
   def(4, 5, 5, 2, 100),
   def(5, 5, 5, 1, 100),
@@ -34,6 +34,15 @@ const DEFS: SpellDef[] = [
   def(8, 5, 5, 2, 100),
   def(9, 5, 5, 1, 100),
 ];
+// The damage and freeze spells, as in the table: params are +0x02..+0x05 (end damage, end chance, start damage, start chance).
+const big = (id: number, params: [number, number, number, number], flags: number, cost: number): SpellDef => ({
+  id, icon: 0, params, range: 10, b7: 5, flags, cost, category: 0, time: 60,
+});
+DEFS[13] = big(13, [5, 50, 12, 50], 0x40, 600);
+DEFS[20] = big(20, [3, 50, 6, 60], 4, 400);
+DEFS[25] = big(25, [5, 50, 10, 60], 1, 600);
+DEFS[29] = big(29, [0, 0, 0, 0], 1, 400);
+for (let i = 0; i < 35; i++) DEFS[i] ??= def(i, 10, 5, 1, 300);
 
 const melee = (damage: number, damageRand: number, cooldown: number) => ({
   damage, damageRand, cooldown, minRange: 1, maxRange: 1, sight: 0, projectile: null,
@@ -227,5 +236,91 @@ describe('spell commands', () => {
     run(w, 50);
     run(c, 50);
     expect(hashWorld(c)).toBe(hashWorld(w));
+  });
+});
+
+describe('damage spells', () => {
+  const KING: UnitType = { ...HERO, spells: [5, 9, 10, 13] };
+
+  it('Earthquake: 61 ticks of damage sliding from 12 to 4, one roll per slot a tick', () => {
+    const w = world();
+    const king = spawnUnit(w, 0, ...at(5, 5), KING);
+    const foes = [spawnUnit(w, 1, ...at(7, 5), GUARD), spawnUnit(w, 1, ...at(5, 8), GUARD)];
+    cast(w, king.id, 13, 0, 0);
+    const quake = w.spells.find((s) => s.spell === 13)!;
+    const dmg: number[] = [];
+    while (w.spells.includes(quake)) {
+      step(w, []);
+      dmg.push(quake.dmg);
+    }
+    expect(dmg).toHaveLength(61);
+    // Logged after each tick's step, so dmg[k] is the value for hit k + 1: 4.998 on the last hit.
+    expect(dmg[0]! >> 12).toBe(11); // 12 - 0.117
+    expect(dmg[59]! >> 12).toBe(4);
+    expect(foes.every((f) => f.hp < 350)).toBe(true);
+  });
+
+  it('a sure hit takes exactly the damage, no armor, after the grace hits', () => {
+    const w = world();
+    w.spellDefs[25] = big(25, [10, 100, 10, 0xff], 1, 600); // always hits for 10
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [25] });
+    const foe = spawnUnit(w, 1, ...at(9, 5), GUARD);
+    foe.buffs[2] = 1; // armor does not help
+    cast(w, hero.id, 25, 9, 5);
+    const hp: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      step(w, []);
+      hp.push(foe.hp);
+    }
+    // Scanned at the end of the 2nd tick (behind the hero's aura); then 10 grace hits; then 10 a tick.
+    expect(hp.slice(0, 11)).toEqual(new Array(11).fill(350));
+    expect(hp.slice(11, 14)).toEqual([340, 330, 320]);
+  });
+
+  it('allies and own units are never hit', () => {
+    const w = world();
+    w.spellDefs[25] = big(25, [10, 100, 10, 0xff], 1, 600);
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [25] });
+    const own = spawnUnit(w, 0, ...at(9, 5), GUARD);
+    run(w, 1);
+    cast(w, hero.id, 25, 9, 5);
+    run(w, 70);
+    expect(own.hp).toBe(350);
+  });
+
+  it('Monkey Swarm takes only an enemy unit', () => {
+    const w = world();
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [20] });
+    const own = spawnUnit(w, 0, ...at(6, 5), GUARD);
+    const foe = spawnUnit(w, 1, ...at(7, 5), GUARD);
+    cast(w, hero.id, 20, 0, 0, own.id);
+    expect(w.spells.some((s) => s.spell === 20)).toBe(false);
+    cast(w, hero.id, 20, 0, 0, foe.id);
+    const s = w.spells.find((x) => x.spell === 20)!;
+    expect(s.units).toEqual([foe.id]);
+    expect(foe.grace).toBe(15);
+  });
+});
+
+describe('freeze ring', () => {
+  it('29 freezes enemy minifigures the ring reaches, for 60 ticks', () => {
+    const w = world();
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [29] });
+    const near = spawnUnit(w, 1, ...at(10, 5), { ...GUARD, attack: null });
+    const far = spawnUnit(w, 1, ...at(10, 9), { ...GUARD, attack: null }); // Chebyshev 4: caught on update 38
+    const castTick = w.tick;
+    cast(w, hero.id, 29, 10, 6);
+    run(w, 2); // update 2: radius 1
+    expect(near.frozen).toBe(castTick + 2 + 60);
+    expect(far.frozen).toBe(0);
+    // A frozen unit ignores its move order.
+    const [x, y] = at(15, 5);
+    step(w, [{ tick: w.tick, player: 1, cmd: { kind: 'move', unitIds: [near.id], x, y } }]);
+    run(w, 10);
+    expect(near.x).toBe(at(10, 5)[0]);
+    run(w, 30);
+    expect(far.frozen).toBeGreaterThan(w.tick);
+    run(w, 30);
+    expect(w.spells.some((s) => s.spell === 29)).toBe(false);
   });
 });
