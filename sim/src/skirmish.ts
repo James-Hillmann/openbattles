@@ -3,6 +3,9 @@ import { cellCenterX, cellCenterY } from './terrain';
 import { createWorld, placeBuilding, spawnUnit, type UnitType, type WorldInit } from './world';
 import { freeCellNear } from './economy';
 import { placeUnit } from './movement';
+import { nextInt } from './rng';
+import { PICKUP_STUD, addPickup } from './pickups';
+import { newStats } from './stats';
 
 /**
  * One starting unit or building from a map's EVNT section (read by
@@ -28,6 +31,13 @@ export interface SkirmishOptions {
   bricks: number;
   /** Map slot per player: slots[playerId]. Fixed starting positions put player 0 on slot 0, player 1 on slot 1. */
   slots: number[];
+  /**
+   * "Random starting positions": each player gets a random free slot of the map instead (0x020A2C48).
+   * `slots` then only says how many players there are.
+   */
+  randomStart?: boolean;
+  /** The map's pickup records (EVNT; extract's GameMap.pickups): cell and collectable blueprint index. */
+  pickups?: readonly { x: number; y: number; item: number }[];
   /** Each player's picked army (the army screen), if any: limits what they build and train. */
   armies?: (PlayerArmy | undefined)[];
   /** Unit type for a player's faction entity of this role and index, or null when there is none. */
@@ -59,15 +69,29 @@ export function startSpawns(records: readonly StartSpawn[], slots: readonly numb
   return out;
 }
 
+/**
+ * Random starting positions (0x020A2C48): the map's slots 0..n-1 go in a list; each player in turn
+ * draws one at random from what is left (MATH_Rand32 through 0x0208339C, here the world's RNG, so
+ * both online clients draw the same). Slots on maps run 0-3 and every skirmish map has all four.
+ */
+export function randomSlots(w: World, records: readonly StartSpawn[], players: number): number[] {
+  const n = records.reduce((m, r) => Math.max(m, r.slot + 1), 0);
+  const free = Array.from({ length: n }, (_, i) => i);
+  const out: number[] = [];
+  for (let p = 0; p < players && free.length > 0; p++) out.push(free.splice(nextInt(w.rng, free.length), 1)[0]!);
+  return out;
+}
+
 /** A new skirmish world: players, rules and each player's starting units and buildings. */
 export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, records: readonly StartSpawn[], opts: SkirmishOptions): World {
   const players: Player[] = opts.slots.map((_, id) => {
     const army = opts.armies?.[id];
-    return { id, team: id, bricks: opts.bricks, status: PLAYING, start: -1, reservedPop: 0, reservedStars: 0, ...(army ? { army: { units: [...army.units], base: army.base } } : {}) };
+    return { id, team: id, bricks: opts.bricks, status: PLAYING, start: -1, reservedPop: 0, reservedStars: 0, stats: newStats(), ...(army ? { army: { units: [...army.units], base: army.base } } : {}) };
   });
   const w = createWorld({ ...init, players, rules: opts.rules });
   const width = init.grid?.width ?? 0;
-  for (const s of startSpawns(records, opts.slots, opts.prebuilt)) {
+  const slots = opts.randomStart ? randomSlots(w, records, opts.slots.length) : opts.slots;
+  for (const s of startSpawns(records, slots, opts.prebuilt)) {
     // The hero's record also sets where the player's camera starts (0x020A3CEC), first one only.
     const p = players[s.player]!;
     if (s.role === 0 && p.start < 0) p.start = s.y * width + s.x;
@@ -89,5 +113,14 @@ export function createSkirmish(init: Omit<WorldInit, 'players' | 'rules'>, recor
       }
     }
   }
+  // Pickup records name a collectable blueprint of the mission; on skirmish maps every one is 8,
+  // the BlueStud (read from the mission's blueprint table in RAM; docs/re-notes/pickups.md).
+  for (const r of opts.pickups ?? []) {
+    const type = SKIRMISH_PICKUPS[r.item];
+    if (type !== undefined) addPickup(w, type, r.x, r.y);
+  }
   return w;
 }
+
+/** Collectable type per skirmish pickup blueprint index. */
+const SKIRMISH_PICKUPS: Record<number, number> = { 8: PICKUP_STUD };

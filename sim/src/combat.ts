@@ -84,10 +84,11 @@ export function meleeBonus(t: MeleeBonusTable | null, attackerKind: number, defe
  * Damage is applied in 20.12 fixed point times the target's damage multiplier: 1.0, or 0.5 with the
  * armor buff (spells.ts damageTaken). Upgrades are not ported.
  */
-function applyDamage(w: World, t: Unit, hit: number): void {
+function applyDamage(w: World, t: Unit, hit: number, by: number): void {
   const dmg = damageTaken(t, hit);
   t.hp = t.hp > dmg ? t.hp - dmg : 0;
   t.lastHit = w.tick;
+  t.lastHitBy = by;
 }
 
 /** Game: melee branch of 0x02050A40. One RNG draw when damageRand > 0. */
@@ -95,7 +96,7 @@ function meleeHit(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
   const roll = a.damageRand > 0 ? nextInt(w.rng, a.damageRand) : 0;
   const base = Math.max(1, meleeDamage(u, a.damage) + meleeBonus(w.bonus, u.kind, t.kind));
-  applyDamage(w, t, roll + base);
+  applyDamage(w, t, roll + base, u.owner);
 }
 
 /** Game: 0x0206E950. One RNG draw when maxDamage > minDamage. */
@@ -117,7 +118,7 @@ function splash(w: World, p: Projectile, cx: number, cy: number): void {
     const ring = chebToFootprint(cx, cy, o); // a building is hit through its nearest footprint cell
     if (ring > 2) continue;
     const f = SPLASH_FACTOR[ring]!;
-    applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12));
+    applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12), p.owner);
   }
 }
 
@@ -143,7 +144,7 @@ export function stepProjectiles(w: World): void {
       continue;
     }
     if (p.type.splash) splash(w, p, cx, cy);
-    else applyDamage(w, t, rollDamage(w, p.type.minDamage, p.type.maxDamage));
+    else applyDamage(w, t, rollDamage(w, p.type.minDamage, p.type.maxDamage), p.owner);
   }
   w.projectiles = keep;
 }

@@ -140,6 +140,19 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
 | `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
 | `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |
+| `0x0205923C` | ARM | `Collectable_onCellClaimed` | Takes a pickup when a unit claims its cell (footprint, role filter, mode) | confirmed | pickups.md |
+| `0x020593A0` | ARM | `Collectable_collect` | Dispatch by collectable type | confirmed | pickups.md |
+| `0x0205ED5C` | ARM | `HealthPowerup_collect` | +100 HP up to max | confirmed | pickups.md |
+| `0x0205EDA0` | ARM | `ManaPowerup_collect` | +100 magic up to max | confirmed | pickups.md |
+| `0x0205F018` | ARM | `BlueStud_collect` | +1000 bricks, 150 in a bricks game | confirmed | pickups.md |
+| `0x020A2C48` | Thumb | `Skirmish_randomSlots` | Random start slot draw | confirmed | skirmish.md |
+| `0x020A6660` | ? | `Stats_addBricks` | Bricks Collected stat | confirmed | score.md |
+| `0x020A7A38` | ? | `Stats_built` | Built counters by role class | confirmed | score.md |
+| `0x020A7C68` | ? | `Stats_destroyed` | Destroyed counters | confirmed | score.md |
+| `0x020A7E58` | ? | `Stats_lost` | Lost counters | confirmed | score.md |
+| `0x0206A078` | ARM | `DieEntityCommand_start` | Stats, 7-tick timer | confirmed | death.md |
+| `0x0206A2F4` | ARM | `DieEntityCommand_update` | Death particles by role | confirmed | death.md |
+| `0x02029214` | ARM | `Particles_play` | Plays a particle effect by table id at a cell | likely | death.md |
 | `0x02089B44` | Thumb | `Snd_openArchive` | `NNS_SndArcInit` on `Sound/sound_data.sdat`, player/stream setup | likely | sound-triggers.md |
 | `0x02088570` | Thumb | `Snd_onGameCreated` | Loads every SEQARC/bank the match needs, starts calm music | confirmed | sound-triggers.md |
 | `0x02089A8C` | Thumb | `Snd_playSeqArc` | The only SFX start: once per (arc, index) per frame, `NNS_SndArcPlaySeqArc` | confirmed | sound-triggers.md |
