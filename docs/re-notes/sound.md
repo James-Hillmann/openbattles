@@ -79,6 +79,9 @@ start it full. guess
   is -8.1 dB = 0.39. The last 0.8 dB is unexplained. likely
 - Our sliders are those two option bytes (0..127, music 50 and effects 127 by default), through the
   same decibel curve.
+- In front of both sits our own volume control (bottom right, always visible, with mute), which the DS
+  doesn't have: its speaker is small, while full scale through headphones is very loud. It starts at
+  40% (gain 0.16, -16 dB; the slider is squared) and is saved in the browser with the other two.
 
 ## Browser playback
 

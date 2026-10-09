@@ -1568,6 +1568,24 @@ document.addEventListener('click', (e) => {
   if (e.target instanceof Element && e.target.closest('button')) sound.play(FE_CLICK1);
 }, true);
 // Volume sliders: the game's 0..127 option bytes (a new profile has music 50, effects 127).
+// The always-visible volume control (top right, over menus and matches): mute + master volume.
+const volMaster = document.getElementById('volMaster') as HTMLInputElement;
+const volMute = document.getElementById('volMute') as HTMLButtonElement;
+const showVolume = () => {
+  const { volume, muted } = audio.settings;
+  volMaster.value = String(volume);
+  volMute.textContent = muted || volume === 0 ? '\u{1F507}' : volume < 50 ? '\u{1F509}' : '\u{1F50A}';
+  volMute.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+};
+volMaster.oninput = () => {
+  audio.setSettings({ ...audio.settings, volume: Number(volMaster.value), muted: false });
+  showVolume();
+};
+volMute.onclick = () => {
+  audio.setSettings({ ...audio.settings, muted: !audio.settings.muted });
+  showVolume();
+};
+showVolume();
 for (const [id, key] of [['volMusic', 'music'], ['volFx', 'effects']] as const) {
   const el = document.getElementById(id) as HTMLInputElement;
   el.value = String(audio.settings[key]);

@@ -82,3 +82,12 @@ describe('music plan', () => {
     expect([m.next(), m.next()]).toEqual([16, 16]);
   });
 });
+
+describe('on-screen volume', () => {
+  it('starts at 40% (-16 dB) and maps the slider squared', async () => {
+    const { DEFAULT_VOLUME, masterGain } = await import('../../client/src/audio');
+    expect(DEFAULT_VOLUME).toBe(40);
+    expect(20 * Math.log10(masterGain(DEFAULT_VOLUME))).toBeCloseTo(-15.9, 1);
+    expect([masterGain(0), masterGain(100), masterGain(150), masterGain(-5)]).toEqual([0, 1, 1, 0]);
+  });
+});
