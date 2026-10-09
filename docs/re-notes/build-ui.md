@@ -57,7 +57,12 @@ construction: see "Construction effect" below.
   (`priceLabel`), because players asked for it.
 - Also not in the game: the Build Costs icons on the top screen are buttons that do what their strip
   button does (checkered when you can't afford it), since on a PC the panel looks clickable.
-- Icons come from the ARM9 icon table (armies.md); a unit with no strip icon shows its head.
+- Unit icons come from the ARM9 icon table (armies.md); a unit with no strip icon shows its head.
+- Not in the game: building icons. The DS draws a red type icon per building slot (a castle glyph and
+  so on, confirmed in the emulator), so every army's Farm looks alike. Playtesters found that hard to
+  read, so ours shows each building's own selection portrait (`UI/GamePlayerCards/<name>`, the 96x96
+  picture the top screen shows when it is selected) box-filtered down to 24x24, on the strip, its
+  queue and the Build Costs panel (`shrink` in `extract/src/armyBundle.ts`).
 - Placement: click a spot (green = `canPlace` and every footprint cell explored; a Shipyard's shore too),
   right-click or Escape cancels. No check mark. Terrain per building comes from its entity flags (economy.md).
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.

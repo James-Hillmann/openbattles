@@ -1,3 +1,4 @@
+import { moveSpeed } from './spells';
 import { CELL_H, CELL_W } from './config';
 import { fxToInt, type Fx } from './fixed';
 import { stepBudget, stepToward } from './motion';
@@ -111,14 +112,15 @@ function inAlignWindow(u: Unit): boolean {
  * One tick of the game's seeker (0x0205571C): head for the centre of cell
  * `target`. With `claimCells`, crossing into a new cell needs that cell; if it
  * is taken but the unit is next to its target, it may claim the target
- * instead (this is how a diagonal step past a corner gets through).
+ * instead (this is how a diagonal step past a corner gets through, even a
+ * corner of unwalkable terrain: confirmed in the emulator, see movement.md).
  * `align` is the end-of-move variant: done once inside the align window.
  */
 function seek(w: World, u: Unit, m: Mover, target: number, claimCells: boolean, align: boolean): number {
   const g = w.grid!;
   const here = unitCell(w, u);
   if (here === target && (!align || inAlignWindow(u))) return ARRIVED;
-  const n = stepToward(u.x, u.y, cellCenterX(cx(g, target)), cellCenterY(cy(g, target)), stepBudget(u.speed));
+  const n = stepToward(u.x, u.y, cellCenterX(cx(g, target)), cellCenterY(cy(g, target)), stepBudget(moveSpeed(u)));
   const st = n.arrived ? ARRIVED : MOVING;
   const next = cellAt(g, n.x, n.y);
   if (next !== here && claimCells && next !== u.cell) {
@@ -168,6 +170,12 @@ function ringSearch(g: TerrainGrid, centre: number, maxR: number, match: (c: num
   }
   return -1;
 }
+/** A free cell this unit may stand in, by the game's ring search around `centre` (radius < maxR), or -1. */
+export function freeCellAround(w: World, u: Unit, centre: number, maxR: number): number {
+  const g = w.grid!;
+  return ringSearch(g, centre, maxR, (c) => walkableCell(g, u, c) && w.occ![slot(w, u, c)] === 0);
+}
+
 function ringOffset(k: number, s: number, r: number): [number, number] {
   switch (k) {
     case 0: return [-s, -r];

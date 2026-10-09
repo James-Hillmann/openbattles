@@ -5,6 +5,7 @@ import type { EntityId, MeleeBonusTable, Projectile, Unit, World } from './state
 import { stepBudget, stepToward } from './motion';
 import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { orderMove, stopMove } from './movement';
+import { damageTaken, meleeDamage } from './spells';
 
 /** A Builder inside a building is off the map: it can't fight or be hit (economy.ts `isInside`). */
 const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
@@ -77,11 +78,11 @@ export function meleeBonus(t: MeleeBonusTable | null, attackerKind: number, defe
 }
 
 /**
- * Damage is applied in 20.12 fixed point times the target's damage multiplier.
- * The multiplier is always 1.0 so far (buffs/upgrades are out of scope), which
- * makes this a plain integer subtraction clamped at 0.
+ * Damage is applied in 20.12 fixed point times the target's damage multiplier: 1.0, or 0.5 with the
+ * armor buff (spells.ts damageTaken). Upgrades are not ported.
  */
-function applyDamage(w: World, t: Unit, dmg: number): void {
+function applyDamage(w: World, t: Unit, hit: number): void {
+  const dmg = damageTaken(t, hit);
   t.hp = t.hp > dmg ? t.hp - dmg : 0;
   t.lastHit = w.tick;
 }
@@ -90,7 +91,7 @@ function applyDamage(w: World, t: Unit, dmg: number): void {
 function meleeHit(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
   const roll = a.damageRand > 0 ? nextInt(w.rng, a.damageRand) : 0;
-  const base = Math.max(1, a.damage + meleeBonus(w.bonus, u.kind, t.kind));
+  const base = Math.max(1, meleeDamage(u, a.damage) + meleeBonus(w.bonus, u.kind, t.kind));
   applyDamage(w, t, roll + base);
 }
 

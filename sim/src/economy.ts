@@ -394,7 +394,8 @@ function stepJob(w: World, u: Unit): void {
         // The tick after arriving: in, and the load is paid.
         removeUnit(w, u);
         const p = getPlayer(w, u.owner);
-        if (p) addBricks(p, loadValue(w, u.owner));
+        // The logging buff (spell 19, buff slot 3) doubles the load; it counts only if still on at drop-off (0x0206D1A0).
+        if (p) addBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
         u.carrying = false;
       }
       if (--job.timer > 0) return;
@@ -486,13 +487,14 @@ function stepMine(w: World, m: Unit): void {
   m.payout = MINE_TICKS;
   const t = w.types[m.kind];
   const p = getPlayer(w, m.owner);
-  if (t && p) addBricks(p, t.yield);
+  // The mining buff (spell 17, buff slot 4) doubles the payout, not the interval (0x0206D7D0; likely).
+  if (t && p) addBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
 }
 
 /** Economy for one tick, after combat and movement. */
 export function economyStep(w: World, spawn: SpawnFn): void {
   if (w.grid && w.occ) {
-    for (const u of w.units) if (u.hp > 0 && u.job) stepJob(w, u);
+    for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u); // frozen builders wait (spells.ts)
     for (const b of w.units) {
       if (b.hp <= 0 || !isBuilding(b)) continue;
       if (!isFinished(b)) stepConstruction(w, b);

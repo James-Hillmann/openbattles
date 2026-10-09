@@ -123,3 +123,20 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020826E4` | ARM | `Path_poll` | Runs the job a few rounds; fails if another unit is in the end cell | confirmed | builder case |
 | `0x0205A088` | ARM | `Unit_isMoving` | Has a MoveUnitAction (action type 8) | likely | |
 | `0x020F2548` | ARM | `Time_secondsToTicks` | n * 30 | likely | |
+| `0x0207BBEC` | ARM | `Spell_create` | Factory: record type byte -> spell class | confirmed | spells.md |
+| `0x0207B810` | ARM | `Spell_canCast` | Hero, range (cells^2), charge > cost; pays | confirmed | spells.md |
+| `0x0207B56C` | ARM | `SpellPool_update` | Update every spell, delete finished ones | confirmed | spells.md |
+| `0x02075FBC` | ARM | `SpellPool_scanNext` | Recompute one queued spell's area per tick | confirmed | spells.md |
+| `0x0207AD54` | ARM | `Spell_scanArea` | Units within a Manhattan radius of the centre | confirmed | spells.md |
+| `0x0207A9E0` | ARM | `SpellBase_update` | Caster gone or 0 ticks -> finished; else count down | confirmed | spells.md |
+| `0x02078750` | ARM | `HealSpell_update` | Pulse every 7 ticks: +30 / +10 / maxHP/4 | confirmed | spells.md |
+| `0x0205CCA4` | ARM | `UnitStats_rebuild` | Entity stats, upgrades, then buff signs per slot | confirmed | spells.md |
+| `0x02076D64` | ARM | `DamageSpell_update` | rand(100)+1 per slot, hit if <= chance; slide chance/damage | confirmed | spells.md |
+| `0x020772FC` | ARM | `EAttackSpell_update` | Growing ring, freeze enemies per new whole cell | confirmed | spells.md |
+| `0x0205F104` | ARM | `Unit_regenCharge` | Living hero below max: charge + 1 | confirmed | spells.md |
+| `0x020F27B8` | ARM | `FX_normalize` | 20.12 unit vector with the DS divider and sqrt rounding | confirmed | spells.md |
+| `0x020F09DC` | ARM | `Cells_thickLine` | Bresenham line with side cells (Forest Spawn) | confirmed | spells.md |
+| `0x02077FE0` | ARM | `ForrestSpell_endPoint` | range cells toward the tap, clamped to the map | confirmed | spells.md |
+| `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
+| `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
+| `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |

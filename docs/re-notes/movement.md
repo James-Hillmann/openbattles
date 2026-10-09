@@ -56,10 +56,17 @@ naval units probably use other layers).
 - Otherwise move one tick toward the target cell's centre (velocity set up
   from the unit's speed each tick, `0x02055C34`).
 - Same cell: just move. New cell: reserve it, then move. Reservation failed:
-  if the unit is within one cell of its target, reserve the target cell
-  instead and move anyway (this lets a diagonal step get past a blocked
-  corner cell; the unit's sprite briefly overlaps that cell). Else report
-  **blocked** with the cell it bumped into.
+  if the unit's cell is diagonally next to its target (dx and dy both ±1),
+  reserve the target cell instead and move anyway (this lets a diagonal step
+  get past a blocked corner cell; the unit's sprite briefly overlaps that
+  cell). Else report **blocked** with the cell it bumped into.
+  The blocked corner cell can be terrain, so units (ships too) slip through a
+  one-cell diagonal line of unwalkable cells. **Confirmed** (2026-10-09): on
+  mp01 we wrote a diagonal line of water cells (x = y) into the terrain grid in
+  RAM; the King walked from (11, 15) to (15, 11) straight through it, holding
+  (12, 13) then (13, 12). A line two cells thick stopped him. Our sim holds the
+  same cells. A ship is a ground-layer unit with a water-only mask, so it cuts
+  across thin diagonal land the same way.
 - The aligning seeker never reserves and is done once the position, measured
   from the cell's top-left, is 6–17 px across and 6–9 px down. (likely;
   **confirmed** by the King replay)

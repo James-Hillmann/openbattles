@@ -12,7 +12,9 @@ export type Command =
   /** Builders go work on an existing unfinished building. */
   | { kind: 'construct'; unitIds: EntityId[]; site: EntityId }
   /** Queue a unit of entity kind `type` at a production building. */
-  | { kind: 'train'; building: EntityId; type: number };
+  | { kind: 'train'; building: EntityId; type: number }
+  /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
+  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 
 /** A command stamped with who issued it and the tick it executes on. */
 export interface ScheduledCommand {

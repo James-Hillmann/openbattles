@@ -14,3 +14,5 @@ export * from './rules';
 export * from './skirmish';
 export * from './fog';
 export * from './lockstep';
+export * from './spells';
+export * from './spellGeom';

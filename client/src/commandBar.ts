@@ -17,6 +17,8 @@ export interface CommandItem {
   price?: HTMLCanvasElement | null;
   /** False when the player can't afford it or has no room for it. */
   enabled: boolean;
+  /** Drawn as picked (a spell waiting for its target). */
+  armed?: boolean;
 }
 
 export interface QueueItem {
@@ -65,6 +67,16 @@ export class CommandBar {
       .cmdbar .under { display: flex; gap: 10px; align-items: center; padding: 6px ${8 * SCALE}px; }
       .cmdbar .hint { text-shadow: 1px 1px 0 #000, -1px 0 0 #000; }
       .cmdbar .queue { display: flex; gap: 2px; }
+      /* The hero's spell strip (orange tab): the same band in the strip texture's orange, and a blue 1 px checker
+         over spells the hero lacks the charge for (both measured in the emulator). */
+      .cmdbar.spell .band, .cmdbar.spell button { background: #f89800; }
+      .cmdbar.spell .band { border-top-color: #f8d800; border-bottom-color: #983800; }
+      .cmdbar.spell .band::before { background: #d86800; border-right-color: #983800; }
+      .cmdbar.spell .band::after { background: linear-gradient(90deg, #f89800 40%, #f8d800 40% 60%, #d86800 60%); }
+      .cmdbar.spell button { border-right-color: #983800; }
+      .cmdbar.spell .price { border-top-color: #983800; }
+      .cmdbar.spell button:disabled::after { background: repeating-conic-gradient(#3080f8 0 25%, transparent 0 50%) 0 0 / ${2 * SCALE}px ${2 * SCALE}px; opacity: 1; }
+      .cmdbar button.armed { outline: 3px solid #fff; outline-offset: -3px; }
       .cmdbar .queue div { width: 32px; height: 36px; background: #400; position: relative; border: 1px solid #000; }
       .cmdbar .queue canvas { width: 32px; height: 32px; display: block; }
       .cmdbar .queue i { position: absolute; left: 0; bottom: 0; height: 4px; background: #3e3; }
@@ -78,11 +90,12 @@ export class CommandBar {
   }
 
   /** `hint` is a line under the band (e.g. where to place a building); the title belongs to the top screen. */
-  show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = []): void {
-    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost]), queue.map((q) => q.pct)]);
+  show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = [], theme: 'build' | 'spell' = 'build'): void {
+    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.pct), theme]);
     this.el.hidden = items.length === 0 && queue.length === 0 && !hint;
     if (key === this.shown) return;
     this.shown = key;
+    this.el.classList.toggle('spell', theme === 'spell');
     this.el.replaceChildren();
     if (items.length) {
       const band = document.createElement('div');
@@ -90,7 +103,9 @@ export class CommandBar {
       for (const it of items) {
         const b = document.createElement('button');
         b.title = it.label;
+        b.dataset.key = it.key;
         b.disabled = !it.enabled;
+        b.classList.toggle('armed', !!it.armed);
         if (it.icon) b.appendChild(copy(it.icon));
         else b.appendChild(Object.assign(document.createElement('span'), { className: 'name', textContent: it.label.split(':')[0]! }));
         const price = document.createElement('span');
