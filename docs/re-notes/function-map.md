@@ -140,3 +140,13 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
 | `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
 | `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |
+| `0x02001170` | ARM | `Footprint_shape` | Size code -> (w, h) table: squares, bridges, gates | confirmed | walls-bridges.md |
+| `0x020679D0` | ARM | `Wall_lineCells` | Cells of a dragged wall line (FX_Div steps) | confirmed | walls-bridges.md |
+| `0x02067C30` | ARM | `ConstructMultipleEntityCommand_update` | Builds wall pieces in order, paying each as it starts | likely | walls-bridges.md |
+| `0x0205DFE0` | ARM | `Wall_neighbourMask` | E/N/W/S same-slot wall mask, kept at unit +0x224 | confirmed | walls-bridges.md |
+| `0x02034B44` | ARM | `Wall_drawCell` | Swaps a cell's BG tiles for wall tiles | confirmed | walls-bridges.md |
+| `0x02034D84` | ARM | `Bg_setTeamRamp` | Writes a slot's 3-colour ramp into BG palette 0x37+3s | confirmed | walls-bridges.md |
+| `0x020A36E4` | THUMB | `Map_buildBridgeSites` | MARK 7/8 points -> sites, picks small/medium/large | confirmed | walls-bridges.md |
+| `0x0200D8A8` | ARM | `Bridge_draw` | Swaps a finished bridge's cells for bridge metatiles | confirmed | walls-bridges.md |
+| `0x020A30A0` | THUMB | `Map_setTerrain` | Writes one terrain grid cell (+0x2E8) | confirmed | walls-bridges.md |
+| `0x0205878C` | ARM | `Bridge_collapse` | Footprint back to water; kills walkers on it, rescues heroes | likely | walls-bridges.md |

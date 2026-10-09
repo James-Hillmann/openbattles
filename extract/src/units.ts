@@ -306,6 +306,8 @@ export function buildUnitBundle(
       buildings.push({ key: `${rec.name}@${bank}`, name: rec.name, image: { width: r.w, height: r.h, data } });
     }
   }
+  // Walls and bridges belong to every army and are drawn into the map layer (structures.ts), not as sprites.
+  for (const rec of records) if (rec.kind === 0 && /^(Wall|Bridge(Small|Medium|Large)[HV])$/.test(rec.name)) stats[rec.name] = unitStats(records, rec);
   const drawn = new Set(names);
   return { buildings, sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

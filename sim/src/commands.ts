@@ -11,6 +11,10 @@ export type Command =
   | { kind: 'build'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Builders go work on an existing unfinished building. */
   | { kind: 'construct'; unitIds: EntityId[]; site: EntityId }
+  /** Builders build a line of walls (entity kind `type`) from cell (fx, fy) to (tx, ty), paying as each piece starts. */
+  | { kind: 'wall'; unitIds: EntityId[]; type: number; fx: number; fy: number; tx: number; ty: number }
+  /** Builders build the bridge `type` at the map bridge site whose top-left is (cx, cy). */
+  | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */

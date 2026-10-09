@@ -72,6 +72,8 @@ describe('sanitizeCommand', () => {
     expect(sanitizeCommand({ kind: 'harvest', unitIds: [1], cx: 4, cy: 5, x: 1 })).toEqual({ kind: 'harvest', unitIds: [1], cx: 4, cy: 5 });
     expect(sanitizeCommand({ kind: 'build', unitIds: [1], type: 13, cx: 4, cy: 5 })).toEqual({ kind: 'build', unitIds: [1], type: 13, cx: 4, cy: 5 });
     expect(sanitizeCommand({ kind: 'construct', unitIds: [1], site: 7 })).toEqual({ kind: 'construct', unitIds: [1], site: 7 });
+    expect(sanitizeCommand({ kind: 'wall', unitIds: [1], type: 120, fx: 1, fy: 2, tx: 5, ty: 2, x: 0 })).toEqual({ kind: 'wall', unitIds: [1], type: 120, fx: 1, fy: 2, tx: 5, ty: 2 });
+    expect(sanitizeCommand({ kind: 'bridge', unitIds: [1], type: 123, cx: 45, cy: 29 })).toEqual({ kind: 'bridge', unitIds: [1], type: 123, cx: 45, cy: 29 });
     expect(sanitizeCommand({ kind: 'train', building: 7, type: 2 })).toEqual({ kind: 'train', building: 7, type: 2 });
     expect(sanitizeCommand({ kind: 'train', building: 7, type: 2.5 })).toBeNull();
   });
