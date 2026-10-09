@@ -55,6 +55,8 @@ construction: see "Construction effect" below.
   icon, unaffordable icons checkered. The prices are on the top screen's Build Costs panel (armies.md).
 - Not in the game: each icon also has its price on a dark row under it, in the status-bar digit font
   (`priceLabel`), because players asked for it.
+- Also not in the game: the Build Costs icons on the top screen are buttons that do what their strip
+  button does (checkered when you can't afford it), since on a PC the panel looks clickable.
 - Icons come from the ARM9 icon table (armies.md); a unit with no strip icon shows its head.
 - Placement: click a spot (green = `canPlace`), right-click or Escape cancels. No check mark.
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.

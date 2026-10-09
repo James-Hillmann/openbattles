@@ -45,7 +45,7 @@ import {
   type World,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
-import { HudView, drawUnitBars } from './hud';
+import { HudView, drawUnitBars, type CostAction } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
 import { createRom, savedRom, saveRom, skirmishFirst } from './romPanel';
@@ -135,7 +135,7 @@ camera.addChild(fogLayer);
 /** Health bars and the box-select rectangle draw above units. */
 const overlay = new Graphics();
 camera.addChild(overlay);
-const hudView = new HudView(document.getElementById('side')!);
+const hudView = new HudView(document.getElementById('side')!, (key) => pickCommand(key));
 /** `?dev` shows the tick and state hash. */
 const DEV = new URLSearchParams(location.search).has('dev');
 document.getElementById('dev')!.hidden = !DEV;
@@ -586,7 +586,8 @@ endEl.className = 'endbanner';
 endEl.hidden = true;
 stageEl.appendChild(endEl);
 
-const bar = new CommandBar(stageEl, (key) => {
+/** A strip button or Build Costs icon was picked: `build:<type>` starts placing, `train:<type>` queues it. */
+function pickCommand(key: string) {
   const [what, idx] = key.split(':');
   const type = Number(idx);
   if (what === 'build') placing = { type };
@@ -594,7 +595,8 @@ const bar = new CommandBar(stageEl, (key) => {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
     if (b) match.issue({ kind: 'train', building: b.id, type });
   }
-});
+}
+const bar = new CommandBar(stageEl, pickCommand);
 
 /** Stats of what player p's buildings train: their army's units, in slot order. */
 function armyUnits(p: number): UnitStats[] {
@@ -652,9 +654,12 @@ function priceCanvas(cost: number): HTMLCanvasElement | null {
 
 /** What the top screen's "Build Costs" panel shows while the strip is open, or null. */
 let stripCosts: { title: string; items: { icon: Rgba; cost: number }[] } | null = null;
+/** What each Build Costs icon does (the same as its strip button). */
+let costActions: CostAction[] = [];
 
 function updateStrip() {
   stripCosts = null;
+  costActions = [];
   const me = getPlayer(world, localPlayer);
   const sel = world.units.filter((u) => u.owner === localPlayer && u.hp > 0 && selection.ids.has(u.id));
   if (!me || me.status !== PLAYING || sel.length === 0) return bar.hide();
@@ -666,10 +671,15 @@ function updateStrip() {
     icon: iconFor(st.name),
     enabled: me.bricks >= st.cost,
   });
-  const costs = (list: UnitStats[]) => {
+  const costs = (list: UnitStats[], verb: string) => {
     const icons = armyBundle?.stripIcons;
     if (!icons) return;
-    stripCosts = { title: armyBundle!.text[FE_TEXT.buildCosts] ?? 'Build Costs', items: list.filter((st) => icons[st.name]).map((st) => ({ icon: icons[st.name]!, cost: st.cost })) };
+    const shown = list.filter((st) => icons[st.name]);
+    stripCosts = { title: armyBundle!.text[FE_TEXT.buildCosts] ?? 'Build Costs', items: shown.map((st) => ({ icon: icons[st.name]!, cost: st.cost })) };
+    costActions = shown.map((st) => {
+      const it = item(st, verb);
+      return { key: it.key, label: it.label, enabled: it.enabled };
+    });
   };
   const b = sel.find(isBuilding);
   if (b) {
@@ -678,7 +688,7 @@ function updateStrip() {
     const roles = TRAINS[b.role] ?? [];
     // One hero icon (the first), as the Castle strip shows in the emulator.
     const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
-    costs(list);
+    costs(list, 'train');
     const queue = b.queue.map((k, i) => {
       const n = nameByIndex.get(k) ?? '';
       const bt = world.types[k]?.buildTime ?? 1;
@@ -689,7 +699,7 @@ function updateStrip() {
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
   const all = armyBuildings(localPlayer);
   const list = BUILD_ORDER.map((r) => all.find((st) => st.role === r)).filter((st): st is UnitStats => !!st);
-  costs(list);
+  costs(list, 'build');
   bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', list.map((st) => item(st, 'build')));
 }
 
@@ -913,6 +923,7 @@ app.ticker.add((t) => {
   const me = getPlayer(world, localPlayer);
   endEl.hidden = !me || me.status === PLAYING;
   if (me && me.status !== PLAYING) endEl.textContent = me.status === WON ? 'Victory!' : 'Defeat';
+  hudView.setActions(stripCosts ? costActions : []);
   hudView.update({
     costs: stripCosts ?? undefined,
     bricks: me?.bricks ?? online?.settings.bank ?? START_BRICKS,
@@ -955,6 +966,7 @@ const screensEl = document.getElementById('screens')!;
 function setMode(mode: 'menu' | 'game') {
   appEl.classList.toggle('menu', mode === 'menu');
   screensEl.hidden = mode === 'game';
+  document.getElementById('quitAsk')!.hidden = true;
   if (mode === 'game') requestAnimationFrame(() => app.resize());
 }
 
@@ -1010,13 +1022,22 @@ async function startOffline(setup: SkirmishSetup) {
   await rom.loadMap(setup.map);
 }
 
+// Quit asks first; ? shows the controls.
+const quitAsk = document.getElementById('quitAsk')!;
+const helpEl = document.getElementById('help')!;
 document.getElementById('quit')!.onclick = () => {
+  quitAsk.hidden = !quitAsk.hidden;
+  helpEl.hidden = true;
+};
+document.getElementById('quitNo')!.onclick = () => (quitAsk.hidden = true);
+document.getElementById('quitYes')!.onclick = () => {
+  quitAsk.hidden = true;
   if (lobby.inGame()) return lobby.leave();
   backToMenu();
 };
 document.getElementById('helpBtn')!.onclick = () => {
-  const h = document.getElementById('help')!;
-  h.hidden = !h.hidden;
+  helpEl.hidden = !helpEl.hidden;
+  quitAsk.hidden = true;
 };
 
 function backToMenu() {

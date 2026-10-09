@@ -133,3 +133,16 @@ label { display: inline-flex; gap: 8px; align-items: center; }
 .mapbar .arrow { width: 34px; height: 30px; padding: 0; border: 0; border-radius: 6px; cursor: pointer; color: #fff; font-size: 14px;
   background: linear-gradient(#3a7bff, #1f5ee8 60%, #0b2f9a); box-shadow: 0 3px 0 #000a; }
 .mapbar .arrow:hover { filter: brightness(1.2); }
+
+/* ---- top screen: Build Costs icons are buttons (ours; on the DS the panel is only a list) ---- */
+.topwrap { position: relative; width: 512px; flex: none; }
+.topwrap[hidden] { display: none; }
+.costhits button { position: absolute; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 2px; }
+.costhits button:hover:not(:disabled) { box-shadow: 0 0 0 2px #fff, 0 0 10px #fff; background: #ffffff22; }
+.costhits button:disabled { cursor: not-allowed; background: repeating-conic-gradient(#600c 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.ask { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.ask[hidden], .help-keys[hidden] { display: none; }
+.help-keys h2 { margin-bottom: 8px; }
+.help-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.help-keys dt { font-weight: bold; color: var(--pick); }
+.help-keys dd { margin: 0; }
