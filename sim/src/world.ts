@@ -9,7 +9,7 @@ import { OCC_LAYERS, type AttackStats, type EntityType, type GameRules, type Mel
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
-import { orderCast, regenCharge, spellsStep } from './spells';
+import { BUFF_SLOTS, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
   ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
@@ -34,7 +34,7 @@ export function createWorld({ seed, grid = null, bonus = null, players = [], rul
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], spellDefs, spells: [],
+    mineSites: [...mineSites], spellDefs, spells: [], nextSpell: 1, scanQueue: [],
   };
 }
 
@@ -112,9 +112,12 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     maxCharge: type.role === ROLE_HERO ? type.charge ?? 0 : 0,
     charge: type.role === ROLE_HERO ? type.charge ?? 0 : 0,
     spells: type.role === ROLE_HERO ? [...(type.spells ?? [])] : [],
+    buffs: new Array<number>(BUFF_SLOTS).fill(0),
+    boost: 0,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
+  startAura(w, u);
   return u;
 }
 
@@ -221,7 +224,7 @@ function planGroupMove(w: World, g: TerrainGrid, units: readonly Unit[], x: Fx, 
 /** Movement without a map (bare test worlds): straight at (tx, ty), no collisions. */
 function moveUnit(u: Unit): void {
   if (u.tx === null || u.ty === null) return;
-  const n = stepToward(u.x, u.y, u.tx, u.ty, stepBudget(u.speed));
+  const n = stepToward(u.x, u.y, u.tx, u.ty, stepBudget(moveSpeed(u)));
   u.x = n.x;
   u.y = n.y;
   if (n.arrived) u.tx = u.ty = null;
@@ -234,6 +237,7 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     applyCommand(w, c.player, c.cmd);
   }
   for (const u of w.units) {
+    refreshBoost(u);
     regenCharge(u);
     combatStep(w, u);
   }
@@ -261,12 +265,13 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells] })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs] })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],
     projectiles: w.projectiles.map((p) => ({ ...p })),
-    spells: w.spells.map((s) => ({ ...s })),
+    spells: w.spells.map((s) => ({ ...s, units: [...s.units] })),
+    scanQueue: [...w.scanQueue],
     players: w.players.map((p) => ({ ...p })),
   };
 }

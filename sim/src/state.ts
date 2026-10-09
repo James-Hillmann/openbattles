@@ -74,6 +74,13 @@ export interface Unit {
   maxCharge: number;
   /** Spell ids this hero can cast, in strip order (entity +0x72..+0x76). Static per unit type. */
   spells: number[];
+  /**
+   * Stat buffs on this unit, per slot (BUFF_SPEED, BUFF_DAMAGE, BUFF_ARMOR): how many buff spells
+   * hold it (game: the influence list at unit +0x1E4). Only whether a count is above 0 matters.
+   */
+  buffs: number[];
+  /** The buffs in effect (bit per slot), refreshed from `buffs` at the start of the unit's update (game: stats rebuild 0x0205CCA4). */
+  boost: number;
 }
 
 /** What a builder is doing. Cells are y * width + x. */
@@ -211,8 +218,12 @@ export interface World {
   mineSites: number[];
   /** The game's spell table by spell id (ARM9). Static game data, not hashed; empty without a ROM. */
   spellDefs: SpellDef[];
-  /** Spells being cast or still running, sorted by id like units. */
+  /** Spells being cast or still running, sorted by id. */
   spells: ActiveSpell[];
+  /** Next spell id (spells count separately from units so a cast never shifts unit ids). */
+  nextSpell: number;
+  /** Spells waiting for their area scan, front first; one is scanned per tick (game: 0x02075FBC). */
+  scanQueue: number[];
 }
 
 /**
@@ -248,6 +259,16 @@ export interface ActiveSpell {
   y: Fx;
   /** Tick it was cast. */
   start: number;
+  /** Ticks left; -1 runs until its caster is gone (game: SpellBase +0x14). */
+  left: number;
+  /** Centre cell of its area and the radius in cells (|dx| + |dy|), or radius -1 for no area. */
+  cx: number;
+  cy: number;
+  radius: number;
+  /** Units in its area as of the last scan (game: SpellBase +0x38), in id order. */
+  units: EntityId[];
+  /** Heals: ticks to the next pulse (game: HealSpell +0x50). */
+  timer: number;
 }
 
 /** The game's occupancy layers (OccupationGrid): ground, air, bridges. */
