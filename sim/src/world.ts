@@ -9,6 +9,7 @@ import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type Ga
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
+import { orderRepair, orderUpgrade } from './structures';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
   ROLE_BRIDGE, ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderCancel, orderConstruct, orderHarvest, orderTrain,
@@ -209,6 +210,12 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
       break;
     case 'train':
       orderTrain(w, player, cmd.building, cmd.type);
+      break;
+    case 'upgrade':
+      orderUpgrade(w, player, cmd.building);
+      break;
+    case 'repair':
+      orderRepair(w, player, cmd.unitIds, cmd.target);
       break;
     case 'cancel':
       orderCancel(w, player, cmd.building, cmd.index);

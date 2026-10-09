@@ -7,6 +7,7 @@ export * from './terrain';
 export * from './world';
 export * from './combat';
 export * from './economy';
+export * from './structures';
 export * from './hash';
 export * from './replay';
 export * from './movement';
