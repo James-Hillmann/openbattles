@@ -14,10 +14,19 @@
           <span id="net"></span>
           <button class="brick small" id="helpBtn">?</button>
         </div>
+        <div class="panel ask" id="quitAsk" hidden>
+          <span>Quit this match?</span>
+          <button class="brick small red" id="quitYes">Quit</button>
+          <button class="brick small" id="quitNo">Keep playing</button>
+        </div>
         <div class="panel help-keys" id="help" hidden>
-          Click a unit or building to select it (shift adds), or drag a box around your units (shift adds). Move the camera with the arrow keys / WASD, or drag with the middle mouse button (or hold Space and drag). Right-click an enemy to attack, a tree to chop
-          it with Builders, your unfinished building to help build it, anywhere else to move. Select a Builder to build, a Castle or
-          Barracks to train, from the red strip. Drag or WASD to pan, wheel to zoom.
+          <h2>Controls</h2>
+          <dl>
+            <dt>Select</dt><dd>Click a unit or building. Drag a box around your units. Shift adds to the selection.</dd>
+            <dt>Orders</dt><dd>Right-click the ground to move, an enemy to attack, a tree to chop it (Builders), your unfinished building to help build it.</dd>
+            <dt>Build / train</dt><dd>Select a Builder, Castle or Barracks, then click an icon on the red strip or on Build Costs above. Place a building with a click; right-click or Esc cancels.</dd>
+            <dt>Camera</dt><dd>Arrow keys or WASD, middle-drag or Space + drag, mouse wheel to zoom.</dd>
+          </dl>
         </div>
         <div class="dev" id="dev" hidden>Tick <code id="tick">0</code>, hash <code id="hash">-</code></div>
       </aside>
