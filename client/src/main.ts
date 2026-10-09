@@ -84,6 +84,9 @@ import type { GameSettings, GameType } from '@lbw/server/protocol';
 import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
 import { SiteFx } from './siteFx';
+import { GameAudio } from './audio';
+import { GameSound } from './gameSound';
+import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
@@ -298,6 +301,8 @@ function startSkirmish() {
   structures.clear();
   selection.ids.clear();
   placing = null;
+  // Music follows the local player's faction (King 0 .. Alien 5); custom armies use their buildings' faction (guess).
+  if (!appEl.classList.contains('menu')) sound.matchStart(Math.max(0, 'KWPIEA'.indexOf(basePrefix(localPlayer))));
   const start = getPlayer(world, localPlayer)?.start ?? -1;
   if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
@@ -397,9 +402,15 @@ window.addEventListener('pointerup', (e) => {
     if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
     hover = w;
-    if (!tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+    const had = new Set(selection.ids);
+    if (!tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) {
+      selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+      sound.select(had, selection.ids, world);
+    }
   } else if (boxRect) {
+    const had = new Set(selection.ids);
     selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, drag.additive);
+    sound.select(had, selection.ids, world);
   }
   drag = null;
   boxRect = null;
@@ -456,6 +467,8 @@ app.canvas.addEventListener('contextmenu', (e) => {
   const sel = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id));
   const unitIds = sel.map((u) => u.id);
   if (unitIds.length === 0) return;
+  // Every order plays UI BACK1 (move: code 4, other orders: code 6).
+  sound.play(UI_BACK1);
   const builders = sel.filter((u) => u.role === ROLE_BUILDER).map((u) => u.id);
   const hit = selection.pick(drawn, px, py);
   const target = hit && world.units.find((u) => u.id === hit.id);
@@ -1062,6 +1075,7 @@ function tryPlace(): boolean {
     const { cx, cy } = placeCell(t.size);
     if (!placeable(t, cx, cy)) return true; // keep the preview up; the spot is taken
     match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
+    sound.play(UI_BACK1); // confirming a building site is a move order
   }
   placing = null;
   return true;
@@ -1120,6 +1134,7 @@ function advance(ms: number) {
     prev = before;
     followUpgrades(before);
     acc -= TICK_MS;
+    if (!appEl.classList.contains('menu')) sound.tick(before, world, localPlayer, heard);
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
     if (fog) updateFog(fog, world, localPlayer);
     tickEl.textContent = String(world.tick);
@@ -1311,9 +1326,50 @@ const rom = createRom({
   onArmy: (a) => {
     armyBundle = a;
     stripIconCache.clear();
+    // A (new) ROM is in: its sounds replace any cached ones.
+    audio.reset();
+    if (appEl.classList.contains('menu')) sound.menu();
   },
   onError: (m) => console.error(m),
 });
+const audio = new GameAudio({ labels: () => rom.summary()?.sound ?? null, render: (req) => rom.sound(req) });
+const sound = new GameSound(audio);
+// Touch-screen buttons play FE CLICK1 (generic button 0x020E5624); menus use the same.
+document.addEventListener('click', (e) => {
+  if (e.target instanceof Element && e.target.closest('button')) sound.play(FE_CLICK1);
+}, true);
+// Volume sliders: the game's 0..127 option bytes (a new profile has music 50, effects 127).
+for (const [id, key] of [['volMusic', 'music'], ['volFx', 'effects']] as const) {
+  const el = document.getElementById(id) as HTMLInputElement;
+  el.value = String(audio.settings[key]);
+  el.oninput = () => audio.setSettings({ ...audio.settings, [key]: Number(el.value) });
+}
+// The strip clicks once per icon as they slide in, a frame or two apart.
+bar.onOpen = (n) => {
+  for (let i = 0; i < n; i++) setTimeout(() => sound.play(UI_MENUSLIDECLICK), i * 2 * (1000 / 60));
+};
+
+/**
+ * The game only plays unit, spell and pickup sounds for units whose cell is inside the camera's
+ * rectangle with a margin (Snd_inView 0x0208936C: 2 cells left/up, 1-2 right/down of the DS view).
+ * Our view is the browser canvas, so we use it with 2 cells on every side (our adaptation).
+ */
+function heard(id: number, w: World): boolean {
+  const u = w.units.find((x) => x.id === id);
+  if (!u) return false;
+  const s = camera.scale.x;
+  const x0 = -camera.x / s;
+  const y0 = -camera.y / s;
+  const cx = Math.floor(fxToFloat(u.x) / CELL_W);
+  const cy = Math.floor(fxToFloat(u.y) / CELL_H);
+  return (
+    cx >= Math.floor(x0 / CELL_W) - 2 &&
+    cx <= Math.floor((x0 + app.screen.width / s) / CELL_W) + 2 &&
+    cy >= Math.floor(y0 / CELL_H) - 2 &&
+    cy <= Math.floor((y0 + app.screen.height / s) / CELL_H) + 2
+  );
+}
+
 rom.onGround = (name, g) => {
   if (name === mapName) ground.texture = textureFrom(g);
 };
@@ -1326,6 +1382,9 @@ function setMode(mode: 'menu' | 'game') {
   screensEl.hidden = mode === 'game';
   document.getElementById('quitAsk')!.hidden = true;
   if (mode === 'game') requestAnimationFrame(() => app.resize());
+  // Pressing Start stops the menu music; the match's music starts once it is loaded.
+  if (mode === 'menu') sound.menu();
+  else audio.stopMusic();
 }
 
 const skirmishMaps = () => skirmishFirst(rom.summary()?.maps ?? []).filter((m) => /^mp\d+$/.test(m));

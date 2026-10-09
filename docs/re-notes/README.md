@@ -17,6 +17,8 @@ when they explain something; never paste decompiler output wholesale.
 | [armies.md](armies.md) | The army screen, unit pools per slot, the icon table, Build Costs panel |
 | [unlocks.md](unlocks.md) | What the game unlocks over time (we unlock everything) |
 | [multiplayer.md](multiplayer.md) | DS wireless setup screens, the command lockstep netcode, and our online version |
+| [sound.md](sound.md) | The sound archive (effects, banks, samples, music streams), driver numbers, levels vs the emulator |
+| [sound-triggers.md](sound-triggers.md) | When each sound effect and music track plays, the game's sound module |
 | [walls-bridges.md](walls-bridges.md) | Walls (drag line, neighbour tiles) and bridges (map sites, sizing, terrain change) |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 

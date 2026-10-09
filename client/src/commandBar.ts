@@ -98,15 +98,23 @@ export class CommandBar {
     parent.appendChild(css);
   }
 
+  /** Called when the strip opens with `icons` icons (the game plays a click per icon sliding in). */
+  onOpen: ((icons: number) => void) | null = null;
+  private icons = 0;
+
   hide(): void {
     this.el.hidden = true;
+    this.icons = 0;
     this.shown = '';
   }
 
   /** `hint` is a line under the band (e.g. where to place a building); the title belongs to the top screen. */
   show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = [], theme: 'build' | 'spell' = 'build'): void {
     const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.name), theme]);
+    const wasOpen = !this.el.hidden && this.icons > 0;
     this.el.hidden = items.length === 0 && queue.length === 0 && !hint;
+    this.icons = items.length;
+    if (!wasOpen && items.length) this.onOpen?.(items.length);
     if (key === this.shown) return;
     this.shown = key;
     this.el.classList.toggle('spell', theme === 'spell');

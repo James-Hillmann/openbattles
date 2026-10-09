@@ -28,4 +28,7 @@ export * from './armies';
 export * from './armyBundle';
 export * from './effects';
 export * from './spells';
+export * from './sdat';
+export * from './sseq';
+export * from './sound';
 export * from './structures';
