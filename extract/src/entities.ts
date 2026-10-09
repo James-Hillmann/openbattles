@@ -58,6 +58,13 @@ export interface UnitStats {
   /** Ticks to build (buildings) or train (units) (+0x60). Confirmed in the emulator: Farm 360, Builder 150. */
   buildTime: number;
   /**
+   * Heroes: most magic charge (+0x64, 1000 for every hero; spells cost from it). Other entities hold
+   * 0xFFFF here, which the cast check treats as "free". docs/re-notes/spells.md
+   */
+  charge: number;
+  /** Heroes: spell ids from +0x72..+0x76 in strip order, empty slots (0) dropped. docs/re-notes/spells.md */
+  spells: number[];
+  /**
    * Footprint shape (+0x1D), an index into the game's size table (0x02001170): 1 = 1x1, 2 = 2x2,
    * 3 = 3x3, 4 = 2x3, 5 = 2x6, 6 = 2x9, 7 = 3x2, 8 = 6x2, 9 = 9x2, 10 = 1x4, 11 = 4x1.
    */
@@ -128,6 +135,8 @@ export function unitStats(recs: readonly EntityRecord[], rec: EntityRecord): Uni
     priority: r[0x70]!,
     projectile: proj === MELEE ? null : projectileStats(recs[proj]!),
     buildTime: u16(r, 0x60),
+    charge: u16(r, 0x64),
+    spells: [...r.subarray(0x72, 0x77)].filter((id) => id !== 0),
     size: r[0x1d]!,
     yield: r[0x6c]!,
     moves: (r[0x16] ? 1 : 0) | (r[0x19] ? 2 : 0) | (r[0x17] ? 4 : 0) | (r[0x18] ? 8 : 0),

@@ -2,6 +2,7 @@ import { ARMY_SLOT_TEXT, armyChoices, defaultArmies, parseArmies, readIconTable,
 import { listMaps, romFile, tryRomFile } from './bundle';
 import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
 import { entityLabels, parseLang } from './lang';
+import { readSpellTable, SPELL_NAME_TEXT, spellIcons, type SpellDef } from './spells';
 import { decodeCells, decodeChars, decodePalette, type CharData } from './nitro';
 import { renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
@@ -38,6 +39,12 @@ export interface ArmyBundle {
   stripIcons: Record<string, Rgba>;
   /** Army screen pictures (UI/FEPlayerCards) by entity name. */
   cards: Record<string, Rgba>;
+  /** The game's spell table (spells.ts); empty for an unknown game version. */
+  spells: SpellDef[];
+  /** 24x24 spell strip icons by icon number (SpellDef.icon). */
+  spellIcons: Record<number, Rgba>;
+  /** Spell names by spell id (SPELL_NAME_TEXT). */
+  spellNames: Record<number, string>;
 }
 
 export interface ArmyUnitInfo {
@@ -53,6 +60,7 @@ export interface ArmyUnitInfo {
 export const FE_TEXT = {
   selectArmy: 0,
   buildCosts: 99,
+  magicCosts: 100,
   continue: 143,
   back: 147,
   army: 149,
@@ -202,7 +210,13 @@ export function buildArmyBundle(rom: UnpackedRom, language = 'American_English')
     const pal = miniPals?.[parseMap(romFile(rom, `Maps/${m}.map`)).tileset];
     maps[m] = { title: lang[id] || m, preview: pal && renderMapPreview(rom, m, pal) };
   }
-  return { armies, prefixes, choices, slotLabels: ARMY_SLOT_TEXT.map((id) => lang[id] ?? ''), text, units, maps, heads, stripIcons, cards };
+  const spells = readSpellTable(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode) ?? [];
+  const spellIconImages = spells.length ? spellIcons(rom) : {};
+  return {
+    armies, prefixes, choices, slotLabels: ARMY_SLOT_TEXT.map((id) => lang[id] ?? ''), text, units, maps, heads, stripIcons, cards, spells,
+    spellIcons: spellIconImages,
+    spellNames: Object.fromEntries(Object.entries(SPELL_NAME_TEXT).map(([id, t]) => [id, lang[t] ?? ''])),
+  };
 }
 
 

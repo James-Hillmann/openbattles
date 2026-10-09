@@ -1,3 +1,4 @@
+import { moveSpeed } from './spells';
 import { CELL_H, CELL_W } from './config';
 import { fxToInt, type Fx } from './fixed';
 import { stepBudget, stepToward } from './motion';
@@ -119,7 +120,7 @@ function seek(w: World, u: Unit, m: Mover, target: number, claimCells: boolean, 
   const g = w.grid!;
   const here = unitCell(w, u);
   if (here === target && (!align || inAlignWindow(u))) return ARRIVED;
-  const n = stepToward(u.x, u.y, cellCenterX(cx(g, target)), cellCenterY(cy(g, target)), stepBudget(u.speed));
+  const n = stepToward(u.x, u.y, cellCenterX(cx(g, target)), cellCenterY(cy(g, target)), stepBudget(moveSpeed(u)));
   const st = n.arrived ? ARRIVED : MOVING;
   const next = cellAt(g, n.x, n.y);
   if (next !== here && claimCells && next !== u.cell) {

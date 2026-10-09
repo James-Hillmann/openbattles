@@ -43,6 +43,11 @@ import {
   type UnitType as SimUnitType,
   type TerrainGrid,
   type World,
+  type Unit,
+  type SpellDef,
+  spellTarget,
+  spellWorks,
+  isFrozen,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars, type CostAction } from './hud';
@@ -180,6 +185,7 @@ function simType(s: UnitStats): EntityType & SimUnitType {
   const faction = /^[KWPIEA]_/.test(s.name) ? s.name[0] : undefined;
   return {
     kind: index, speed, hp, priority, moves, layer, role, cost, buildTime, size, sight, yield: s.yield, ...(faction ? { faction } : {}),
+    charge: s.charge, spells: s.spells,
     attack: { damage, damageRand, cooldown, minRange, maxRange, sight, projectile },
   };
 }
@@ -243,7 +249,7 @@ function startSkirmish() {
   const settings = online?.settings ?? offlineSettings;
   // The sim writes chopped trees and footprints into the grid: every match starts from the map's own.
   const grid = { ...mapGrid, cells: mapTerrain.slice() };
-  world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines }, mapStarts, {
+  world = createSkirmish({ seed: worldSeed, grid, bonus: combatBonus, types, mineSites: mapMines, spellDefs: armyBundle?.spells ?? [] }, mapStarts, {
     prebuilt: settings?.prebase ?? false,
     rules: { mode: settings ? WIN_MODE[settings.game] : 0 },
     bricks: settings?.bank ?? START_BRICKS,
@@ -334,7 +340,7 @@ app.canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 && e.button !== 1) return;
   if (e.button === 1) e.preventDefault();
   const pan = e.button === 1 || keys.has(' ');
-  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing, additive: e.shiftKey };
+  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing && !aiming, additive: e.shiftKey };
 });
 // Chrome on Windows starts its auto-scroll on a middle press; the camera drag replaces it.
 app.canvas.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
@@ -344,7 +350,7 @@ window.addEventListener('pointerup', (e) => {
     if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
     hover = w;
-    if (!tryPlace()) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+    if (!tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
   } else if (boxRect) {
     selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, drag.additive);
   }
@@ -370,7 +376,7 @@ window.addEventListener('keydown', (e) => {
   // Space is the pan modifier in a match: don't let it press a focused button or scroll the page.
   if (e.key === ' ' && !appEl.classList.contains('menu') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault();
   keys.add(e.key.toLowerCase());
-  if (e.key === 'Escape') placing = null;
+  if (e.key === 'Escape') placing = aiming = null;
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 app.canvas.addEventListener('wheel', (e) => {
@@ -395,8 +401,8 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
   const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
-  if (placing) {
-    placing = null;
+  if (placing || aiming) {
+    placing = aiming = null;
     return;
   }
   const sel = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id));
@@ -590,6 +596,7 @@ stageEl.appendChild(endEl);
 function pickCommand(key: string) {
   const [what, idx] = key.split(':');
   const type = Number(idx);
+  if (what === 'spell') return pickSpell(type);
   if (what === 'build') placing = { type };
   else if (what === 'train') {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
@@ -653,7 +660,7 @@ function priceCanvas(cost: number): HTMLCanvasElement | null {
 }
 
 /** What the top screen's "Build Costs" panel shows while the strip is open, or null. */
-let stripCosts: { title: string; items: { icon: Rgba; cost: number }[] } | null = null;
+let stripCosts: { title: string; items: { icon: Rgba; cost: number }[]; charge?: [number, number] } | null = null;
 /** What each Build Costs icon does (the same as its strip button). */
 let costActions: CostAction[] = [];
 
@@ -696,11 +703,113 @@ function updateStrip() {
     });
     return bar.show('', list.map((st) => item(st, 'train')), queue);
   }
+  const hero = sel.find((u) => u.maxCharge > 0 && u.spells.length > 0);
+  if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero);
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
   const all = armyBuildings(localPlayer);
   const list = BUILD_ORDER.map((r) => all.find((st) => st.role === r)).filter((st): st is UnitStats => !!st);
   costs(list, 'build');
   bar.show(placing ? `Place the ${displayName(nameByIndex.get(placing.type) ?? '')}. Right-click cancels.` : '', list.map((st) => item(st, 'build')));
+}
+
+/**
+ * The hero's spell strip (the orange tab; docs/re-notes/spells.md): one icon per spell in the hero's list,
+ * greyed while the hero lacks the charge, and the top screen's "Magic Costs" panel with the charge.
+ * Spell 3 (the heal every hero gets) is never on the strip (0x020DC062 skips it).
+ */
+function showSpells(hero: Unit) {
+  const defs = world.spellDefs;
+  const shown = hero.spells.map((id) => defs[id]).filter((d): d is SpellDef => !!d && d.id !== 3);
+  const icons = armyBundle?.spellIcons ?? {};
+  const item = (d: SpellDef): CommandItem => ({
+    key: `spell:${d.id}`,
+    label: spellWorks(d.id) ? `${spellName(d)}: ${d.cost} magic` : `${spellName(d)}: not in this version yet`,
+    cost: d.cost,
+    price: priceCanvas(d.cost),
+    icon: spellIconCanvas(d.icon),
+    enabled: hero.charge > d.cost && spellWorks(d.id),
+    armed: aiming?.spell === d.id,
+  });
+  stripCosts = {
+    title: armyBundle?.text[FE_TEXT.magicCosts] ?? 'Magic Costs',
+    items: shown.filter((d) => icons[d.icon]).map((d) => ({ icon: icons[d.icon]!, cost: d.cost })),
+    charge: [hero.charge, hero.maxCharge],
+  };
+  costActions = shown.filter((d) => icons[d.icon]).map((d) => {
+    const it = item(d);
+    return { key: it.key, label: it.label, enabled: it.enabled };
+  });
+  const hint = aiming ? `${aimingHint(defs[aiming.spell])} Right-click cancels.` : '';
+  bar.show(hint, shown.map(item), [], 'spell');
+}
+
+/** Pip colours for the speed, damage and armor buffs (ours). */
+const BUFF_PIPS = [0xf8d800, 0xf83800, 0x3080f8];
+
+/**
+ * Damage and freeze spells' areas as a see-through diamond or square (ours; the game draws each
+ * spell's own effect, e.g. EarthQuakeEffect, which isn't ported yet). Heal auras and buffs aren't drawn.
+ */
+function drawSpellAreas() {
+  for (const s of world.spells) {
+    const def = world.spellDefs[s.spell];
+    if (!def || s.radius < 0 || !spellWorks(s.spell) || s.spell <= 9) continue;
+    const freeze = s.spell === 27 || s.spell === 29;
+    const r = freeze ? s.ring >> 12 : s.radius;
+    const cx = (s.cx + 0.5) * CELL_W;
+    const cy = (s.cy + 0.5) * CELL_H;
+    const pts = freeze
+      ? [cx - (r + 0.5) * CELL_W, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy + (r + 0.5) * CELL_H]
+      : [cx, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy, cx, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy];
+    overlay.poly(pts).fill({ color: freeze ? 0x60b0ff : 0xff8020, alpha: 0.18 }).stroke({ color: freeze ? 0x60b0ff : 0xff8020, width: 1 / camera.scale.x, alpha: 0.6 });
+  }
+}
+
+/** Spell name for the tooltip (the game shows none on the strip; extract's SPELL_NAME_TEXT). */
+const spellName = (d: SpellDef) => armyBundle?.spellNames?.[d.id] || `Spell ${d.id}`;
+
+const spellIconCache = new Map<number, HTMLCanvasElement>();
+function spellIconCanvas(icon: number): HTMLCanvasElement | null {
+  const img = armyBundle?.spellIcons[icon];
+  if (!img) return null;
+  let c = spellIconCache.get(icon);
+  if (!c) spellIconCache.set(icon, (c = canvasOf(img)));
+  return c;
+}
+
+/** A spell picked from the strip, waiting for the player to click its target. */
+let aiming: { spell: number; hero: number } | null = null;
+
+function pickSpell(id: number) {
+  const hero = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && u.spells.includes(id));
+  const def = world.spellDefs[id];
+  if (!hero || !def) return;
+  if (spellTarget(def) === 'none') {
+    aiming = null;
+    match.issue({ kind: 'cast', caster: hero.id, spell: id, target: 0, x: hero.x, y: hero.y });
+    return;
+  }
+  aiming = aiming?.spell === id ? null : { spell: id, hero: hero.id };
+}
+
+const aimingHint = (d: SpellDef | undefined) =>
+  !d ? '' : spellTarget(d) === 'point' ? 'Pick a spot.' : d.flags & 4 ? 'Pick an enemy unit.' : 'Pick one of your units.';
+
+/** Cast the armed spell at the clicked unit or spot. False when no spell is armed. */
+function tryCast(px: number, py: number): boolean {
+  if (!aiming) return false;
+  const def = world.spellDefs[aiming.spell];
+  const hero = world.units.find((u) => u.id === aiming!.hero);
+  if (!def || !hero) {
+    aiming = null;
+    return true;
+  }
+  const hit = selection.pick(drawn, px, py);
+  const target = hit ? world.units.find((u) => u.id === hit.id) : undefined;
+  if (spellTarget(def) === 'unit' && !target) return true; // keep aiming until a unit is clicked
+  match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: target && spellTarget(def) === 'unit' ? target.id : 0, x: fx(px), y: fx(py) });
+  aiming = null;
+  return true;
 }
 
 let hover = { x: 0, y: 0 };
@@ -825,6 +934,7 @@ app.ticker.add((t) => {
     unitSprites.delete(id);
     unitAnim.delete(id);
   }
+  drawSpellAreas();
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   selection.prune((id) => world.units.some((u) => u.id === id));
   pruneSites();
@@ -902,8 +1012,17 @@ app.ticker.add((t) => {
     s.visible = true;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
+    // Ours, not the game's (its SpellIcons*Effect pictures aren't ported yet): a frozen unit is
+    // tinted ice blue and each buff shows as a pip over the head.
+    s.tint = isFrozen(world, u) ? 0x90c8ff : 0xffffff;
+    BUFF_PIPS.forEach((color, slot) => {
+      if (u.boost & (1 << slot)) overlay.rect(Math.round(x) - 7 + slot * 5, Math.round(y) - box.anchorY - 5, 4, 4).fill(color);
+    });
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.
-    if (isSelected || u.hp < u.maxHp) drawUnitBars(overlay, Math.round(x) - box.anchorX, Math.round(y) - box.anchorY, u.hp, u.maxHp);
+    if (isSelected || u.hp < u.maxHp) {
+      const power = u.maxCharge > 0 ? { value: u.charge, max: u.maxCharge } : undefined;
+      drawUnitBars(overlay, Math.round(x) - box.anchorX, Math.round(y) - box.anchorY, u.hp, u.maxHp, power);
+    }
   }
   unitLayer.sortableChildren = true;
   drawn = nextDrawn;
