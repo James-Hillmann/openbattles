@@ -58,6 +58,7 @@ ARM9 `C5SE` 0x0214E400: 166 u32 entity indices. Entry *n* is drawn by icon cell 
 - The red strip icons of hero, builder, close combat, ranged and mounted are cell + 104 for the
   King (confirmed: 104 crown, 105 hammer), Wizard and Pirates (likely), with bank 7. For Imperial,
   Earth and Aliens we show their heads. guess: their strip icons weren't found at +104.
+- Buildings: ours swaps the type icon for the building's own portrait, shrunk (build-ui.md).
 
 ## Stat pips
 
