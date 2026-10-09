@@ -2,6 +2,7 @@ import { BANKS, GAME_TYPES, type Bank, type GameType } from '@lbw/server/protoco
 import type { ArmyBundle } from '@lbw/extract';
 import { canvasOf, defaultPick, mountArmySelect, type ArmyPick } from './armySelect';
 import { GAME_HELP, GAME_NAMES } from './lobby';
+import { mountMapPicker } from './mapPicker';
 
 /**
  * The front end: load the ROM, the main menu (Single Player / Multiplayer, as the DS's), the
@@ -107,7 +108,7 @@ export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
       <div class="screen" style="width:min(820px,100%)">
         <h1>Skirmish Setup</h1>
         <div class="panel">
-          <div class="row"><label>Map <select id="spMap">${maps.map((m) => `<option ${m === setup.map ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label></div>
+          <div id="spMapPick"></div>
           <div class="row" style="margin-top:12px">${GAME_TYPES.map((g) => `<button data-game="${g}" class="opt ${setup.game === g ? 'on' : ''}">${GAME_NAMES[g]}</button>`).join('')}</div>
           <p class="help muted">${GAME_HELP[setup.game]}</p>
           <div class="row">
@@ -138,7 +139,10 @@ export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
       };
       opp.appendChild(btn);
     }
-    el.querySelector<HTMLSelectElement>('#spMap')!.onchange = (e) => (setup.map = (e.target as HTMLSelectElement).value);
+    mountMapPicker(el.querySelector('#spMapPick')!, b, maps, setup.map, 'spMap', (m) => {
+      setup.map = m;
+      skirmish();
+    });
     el.querySelectorAll<HTMLButtonElement>('[data-game]').forEach(
       (btn) =>
         (btn.onclick = () => {

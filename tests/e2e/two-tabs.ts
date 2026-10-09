@@ -67,7 +67,7 @@ async function main() {
     await b!.waitForSelector('#mpReady');
     if (ROM) {
       await a!.selectOption('#mpMap', MAP);
-      await b!.waitForFunction((m) => document.querySelector('.mpSummary')?.textContent?.includes(m), MAP);
+      await b!.waitForSelector(`#mpMapPick[data-map=${MAP}]`);
     }
     // The guest plays the Wizard's army: picked on the army screen with a ROM, by faction without.
     if (ROM) {

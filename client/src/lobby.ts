@@ -11,6 +11,7 @@ import {
 } from '@lbw/server/protocol';
 import type { ArmyBundle } from '@lbw/extract';
 import { RelayClient, type MatchStart } from './match';
+import { mountMapPicker } from './mapPicker';
 import { canvasOf, isStock, type ArmyPick } from './armySelect';
 
 /**
@@ -214,7 +215,7 @@ export function mountLobby(el: HTMLElement, hooks: LobbyHooks, relayUrl: string)
     const summary = `
       <table class="mpSummary">
         <tr><td>Game</td><td>${GAME_NAMES[s.game]}</td></tr>
-        <tr><td>Map</td><td>${esc(maps.length ? s.map : 'bare test field')}</td></tr>
+        <tr><td>Map</td><td>${esc(maps.length ? (hooks.army()?.maps[s.map]?.title ?? s.map) : 'bare test field')}</td></tr>
         <tr><td>Random Start</td><td>${yes(s.randomStart)}</td></tr>
         <tr><td>Prebase</td><td>${yes(s.prebase)}</td></tr>
         <tr><td>Bank</td><td>${s.bank}</td></tr>
@@ -223,7 +224,6 @@ export function mountLobby(el: HTMLElement, hooks: LobbyHooks, relayUrl: string)
       ? `<div class="row">${GAME_TYPES.map((g) => `<button data-game="${g}" class="opt ${s.game === g ? 'on' : ''}">${GAME_NAMES[g]}</button>`).join('')}</div>
          <p class="help muted">${GAME_HELP[s.game]}</p>
          <div class="row">
-          ${maps.length ? `<label>Map <select id="mpMap">${maps.map((m) => `<option ${m === s.map ? 'selected' : ''}>${esc(m)}</option>`).join('')}</select></label>` : ''}
           <button id="mpRandom" class="opt ${s.randomStart ? 'on' : ''}">Random Start</button>
           <button id="mpPrebase" class="opt ${s.prebase ? 'on' : ''}">Prebase</button>
           <button id="mpBank" class="opt">Bank ${s.bank}</button>
@@ -243,7 +243,7 @@ export function mountLobby(el: HTMLElement, hooks: LobbyHooks, relayUrl: string)
             <div class="row"><span id="mpRoom" class="code">${esc(l.code)}</span><span class="muted">${l.players.length}/${l.maxPlayers}</span></div>
             ${summary}
           </div>
-          <div class="panel">${settings}</div>
+          <div class="panel">${maps.length ? '<div id="mpMapPick"></div>' : ''}${settings}</div>
         </div>
         <div class="panel">
           <table id="mpPlayers" style="width:100%;border-collapse:collapse"></table>
@@ -275,7 +275,8 @@ export function mountLobby(el: HTMLElement, hooks: LobbyHooks, relayUrl: string)
     }
 
     el.querySelectorAll<HTMLButtonElement>('[data-game]').forEach((b) => b.addEventListener('click', () => set({ game: b.dataset.game as GameType })));
-    el.querySelector<HTMLSelectElement>('#mpMap')?.addEventListener('change', (e) => set({ map: (e.target as HTMLSelectElement).value }));
+    const pick = el.querySelector<HTMLElement>('#mpMapPick');
+    if (pick) mountMapPicker(pick, hooks.army(), maps, s.map, 'mpMap', host ? (map) => set({ map }) : undefined);
     el.querySelector('#mpRandom')?.addEventListener('click', () => set({ randomStart: !s.randomStart }));
     el.querySelector('#mpPrebase')?.addEventListener('click', () => set({ prebase: !s.prebase }));
     // The DS cycles 500 -> 1000 -> 2500 on each tap.
