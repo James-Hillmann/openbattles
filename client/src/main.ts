@@ -71,7 +71,7 @@ import {
   type BridgeSite,
   addAi,
 } from '@lbw/sim';
-import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FE_TEXT, priceLabel, type ActionIcon, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
@@ -84,7 +84,11 @@ import { mountMenus } from './menus';
 import type { GameSettings, GameType } from '@lbw/server/protocol';
 import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
+import { BattleAlert } from './battleAlert';
 import { SiteFx } from './siteFx';
+import { GameAudio } from './audio';
+import { GameSound } from './gameSound';
+import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
@@ -301,6 +305,8 @@ function startSkirmish() {
   structures.clear();
   selection.ids.clear();
   placing = null;
+  // Music follows the local player's faction (King 0 .. Alien 5); custom armies use their buildings' faction (guess).
+  if (!appEl.classList.contains('menu')) sound.matchStart(Math.max(0, 'KWPIEA'.indexOf(basePrefix(localPlayer))));
   const start = getPlayer(world, localPlayer)?.start ?? -1;
   if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
@@ -387,7 +393,7 @@ app.canvas.addEventListener('pointerdown', (e) => {
     const w = toWorld(e.clientX, e.clientY);
     placing.from = { cx: Math.floor(w.x / CELL_W), cy: Math.floor(w.y / CELL_H) };
   }
-  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing && !aiming, additive: e.shiftKey };
+  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing && !aiming && !ordering, additive: e.shiftKey };
 });
 // Chrome on Windows starts its auto-scroll on a middle press; the camera drag replaces it.
 app.canvas.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
@@ -403,9 +409,15 @@ window.addEventListener('pointerup', (e) => {
     if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
     hover = w;
-    if (!tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+    const had = new Set(selection.ids);
+    if (!tryOrder(Math.round(w.x), Math.round(w.y)) && !tryPlace() && !tryCast(Math.round(w.x), Math.round(w.y))) {
+      selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
+      sound.select(had, selection.ids, world);
+    }
   } else if (boxRect) {
+    const had = new Set(selection.ids);
     selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, drag.additive);
+    sound.select(had, selection.ids, world);
   }
   drag = null;
   boxRect = null;
@@ -430,7 +442,7 @@ window.addEventListener('keydown', (e) => {
   // Space is the pan modifier in a match: don't let it press a focused button or scroll the page.
   if (e.key === ' ' && !appEl.classList.contains('menu') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault();
   keys.add(e.key.toLowerCase());
-  if (e.key === 'Escape') placing = aiming = null;
+  if (e.key === 'Escape') placing = aiming = ordering = null;
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 app.canvas.addEventListener('wheel', (e) => {
@@ -455,13 +467,21 @@ app.canvas.addEventListener('contextmenu', (e) => {
   // Quantize pointer input to whole world pixels before it enters the sim.
   const px = Math.round((e.clientX - r.left - camera.x) / camera.scale.x);
   const py = Math.round((e.clientY - r.top - camera.y) / camera.scale.y);
-  if (placing || aiming) {
-    placing = aiming = null;
+  if (placing || aiming || ordering) {
+    placing = aiming = ordering = null;
     return;
   }
   const sel = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id));
   const unitIds = sel.map((u) => u.id);
   if (unitIds.length === 0) return;
+  // Every order plays UI BACK1 (move: code 4, other orders: code 6).
+  sound.play(UI_BACK1);
+  // A building on its own: the ground tap sets its rally point (emulator: tapping the map with the
+  // Castle selected stored the cell, as Set Rally Point does).
+  if (sel.every(isBuilding)) {
+    if (sel.some(trains)) setRally(sel, px, py);
+    return;
+  }
   const builders = sel.filter((u) => u.role === ROLE_BUILDER).map((u) => u.id);
   const hit = selection.pick(drawn, px, py);
   const target = hit && world.units.find((u) => u.id === hit.id);
@@ -475,12 +495,14 @@ app.canvas.addEventListener('contextmenu', (e) => {
   const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
   if (target && target.owner === localPlayer && isBuilding(target) && isFinished(target) && target.hp < target.maxHp && fixers.length) {
     match.issue({ kind: 'repair', unitIds: fixers, target: target.id });
+    tapMark('repair', px, py);
     const rest = unitIds.filter((id) => !fixers.includes(id));
     if (rest.length) match.issue({ kind: 'move', unitIds: rest, x: fx(px), y: fx(py) });
     return;
   }
   if (target && target.owner !== localPlayer) {
     match.issue({ kind: 'attack', unitIds, target: target.id });
+    tapMark('attack', px, py);
     return;
   }
   // Builders sent to a tree chop it and keep harvesting; everyone else walks there.
@@ -493,6 +515,7 @@ app.canvas.addEventListener('contextmenu', (e) => {
     return;
   }
   match.issue({ kind: 'move', unitIds, x: fx(px), y: fx(py) });
+  tapMark('move', px, py);
 });
 
 // --- Fog of war (sim/src/fog.ts; docs/re-notes/fog.md) --------------------------
@@ -679,7 +702,8 @@ function pickCommand(key: string) {
   const [what, idx] = key.split(':');
   const type = Number(idx);
   if (what === 'spell') return pickSpell(type);
-  if (what === 'build') placing = { type };
+  if (what === 'act') return pickAction(idx as ActionKey);
+  if (what === 'build') (placing = { type }), (ordering = null);
   else if (what === 'upgrade') {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isTower(u.role));
     if (b) match.issue({ kind: 'upgrade', building: b.id });
@@ -776,6 +800,7 @@ function updateStrip() {
       return { key: it.key, label: it.label, enabled: it.enabled };
     });
   };
+  const acts = actionItems(sel);
   const b = sel.find(isBuilding);
   if (b) {
     const name = nameByIndex.get(b.kind) ?? '';
@@ -795,11 +820,11 @@ function updateStrip() {
     // queue: a 4th pick is just ignored. confirmed (emulator)
     const room = (st: UnitStats) =>
       st.role >= 1 && st.role <= 5 ? popUsed(world, localPlayer) < popCap(world, localPlayer) : st.role === 6 ? starsUsed(world, localPlayer) < starCap(world, localPlayer) : true;
-    return bar.show('', list.map((st) => ({ ...item(st, 'train'), ...(room(st) ? {} : { enabled: false }) })), queue);
+    return bar.show(orderHint(), list.map((st) => ({ ...item(st, 'train'), ...(room(st) ? {} : { enabled: false }) })), queue, 'build', acts);
   }
   const hero = sel.find((u) => u.maxCharge > 0 && u.spells.length > 0);
-  if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero);
-  if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
+  if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero, acts);
+  if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.show(orderHint(), [], [], 'build', acts);
   const all = armyBuildings(localPlayer);
   const list = BUILD_ORDER.map((r) => (STRIP_STRUCTURES[r] ? unitStats[STRIP_STRUCTURES[r]] : all.find((st) => st.role === r))).filter((st): st is UnitStats => !!st);
   // Stables and Shipyard wait for a finished Barracks and Farm, and towers and other buildings have caps
@@ -821,7 +846,7 @@ function updateStrip() {
   });
   costs(list, 'build');
   costActions = costActions.map((a) => ({ ...a, enabled: builds.find((b) => b.key === a.key)?.enabled ?? a.enabled }));
-  bar.show(placing ? placingHint(placing.type) : '', builds);
+  bar.show(placing ? placingHint(placing.type) : orderHint(), builds, [], 'build', acts);
 }
 
 /**
@@ -852,7 +877,7 @@ function showUpgrade(b: Unit, item: (st: UnitStats, verb: string) => CommandItem
  * greyed while the hero lacks the charge, and the top screen's "Magic Costs" panel with the charge.
  * Spell 3 (the heal every hero gets) is never on the strip (0x020DC062 skips it).
  */
-function showSpells(hero: Unit) {
+function showSpells(hero: Unit, acts: CommandItem[]) {
   const defs = world.spellDefs;
   const shown = hero.spells.map((id) => defs[id]).filter((d): d is SpellDef => !!d && d.id !== 3);
   const icons = armyBundle?.spellIcons ?? {};
@@ -874,8 +899,8 @@ function showSpells(hero: Unit) {
     const it = item(d);
     return { key: it.key, label: it.label, enabled: it.enabled };
   });
-  const hint = aiming ? `${aimingHint(defs[aiming.spell])} Right-click cancels.` : '';
-  bar.show(hint, shown.map(item), [], 'spell');
+  const hint = aiming ? `${aimingHint(defs[aiming.spell])} Right-click cancels.` : orderHint();
+  bar.show(hint, shown.map(item), [], 'spell', acts);
 }
 
 /** Pip colours for the speed, damage and armor buffs (ours). */
@@ -960,6 +985,192 @@ function tryCast(px: number, py: number): boolean {
   match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: unit ? unit.id : 0, x: fx(px), y: fx(py) });
   aiming = null;
   return true;
+}
+
+// --- Actions strip: Attack, Stand Ground, Patrol, Move, Stop, Set Rally Point (docs/re-notes/orders.md) ---
+
+type ActionKey = 'attack' | 'repair' | 'stand' | 'patrol' | 'move' | 'stop' | 'rally';
+/** Strip label for each order (the game's own: lang 305, 314, 306, 307, 309, 315). */
+const ACTION_LABEL: Record<ActionKey, string> = {
+  attack: 'Attack', repair: 'Repair', stand: 'Stand Ground', patrol: 'Patrol', move: 'Move', stop: 'Stop', rally: 'Set Rally Point',
+};
+
+/** An order picked from the strip, waiting for its spot (Patrol takes two: A then B). */
+let ordering: { act: 'attack' | 'repair' | 'patrol' | 'move' | 'rally'; a?: { cx: number; cy: number } } | null = null;
+
+const actionIconCache = new Map<ActionIcon, HTMLCanvasElement>();
+function actionIcon(name: ActionIcon): HTMLCanvasElement | null {
+  const img = armyBundle?.actionIcons?.[name];
+  if (!img) return null;
+  let c = actionIconCache.get(name);
+  if (!c) actionIconCache.set(name, (c = canvasOf(img)));
+  return c;
+}
+
+/** Buildings that train units (and so take a rally point). */
+const trains = (u: Unit) => isBuilding(u) && isFinished(u) && (TRAINS[u.role]?.length ?? 0) > 0;
+
+/**
+ * The blue strip for the selection. Game (strip contents, emulator): the King's is Attack, Repair,
+ * Stand Ground, Patrol, Move, Stop; the Castle's is Set Rally Point, Stop. Other units get the same
+ * list less what they can't do (no Attack or Stand Ground without a weapon, Repair for Builders and
+ * heroes only). likely for non-hero units.
+ */
+function actionItems(sel: Unit[]): CommandItem[] {
+  const b = sel.find(isBuilding);
+  const keys: ActionKey[] = b
+    ? trains(b) ? ['rally', 'stop'] : []
+    : [
+        ...(sel.some((u) => u.attack) ? (['attack'] as const) : []),
+        ...(sel.some((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO) ? (['repair'] as const) : []),
+        ...(sel.some((u) => u.attack) ? (['stand'] as const) : []),
+        ...(['patrol', 'move', 'stop'] as const),
+      ];
+  return keys.map((k) => ({
+    key: `act:${k}`,
+    label: ACTION_LABEL[k],
+    cost: 0,
+    icon: actionIcon(k),
+    enabled: true,
+    armed: ordering?.act === k,
+  }));
+}
+
+function pickAction(k: ActionKey) {
+  const sel = world.units.filter((u) => u.owner === localPlayer && u.hp > 0 && selection.ids.has(u.id));
+  if (!sel.length) return;
+  placing = aiming = null;
+  const unitIds = sel.map((u) => u.id);
+  if (k === 'stop') {
+    ordering = null;
+    return match.issue({ kind: 'stop', unitIds });
+  }
+  if (k === 'stand') {
+    ordering = null;
+    return match.issue({ kind: 'stand', unitIds });
+  }
+  ordering = ordering?.act === k ? null : { act: k };
+}
+
+function orderHint(): string {
+  if (!ordering) return '';
+  const what = {
+    attack: 'Pick an enemy to attack.',
+    repair: 'Pick one of your damaged buildings.',
+    move: 'Pick where to move.',
+    rally: 'Pick the rally point.',
+    patrol: ordering.a ? 'Pick the second patrol point.' : 'Pick the first patrol point.',
+  }[ordering.act];
+  return `${what} Right-click cancels.`;
+}
+
+function setRally(sel: Unit[], px: number, py: number) {
+  const cx = Math.floor(px / CELL_W);
+  const cy = Math.floor(py / CELL_H);
+  match.issue({ kind: 'rally', unitIds: sel.filter(trains).map((u) => u.id), cx, cy });
+  tapMark('rally', px, py);
+}
+
+/** Carry out the waiting strip order at the clicked spot. False when none is waiting. */
+function tryOrder(px: number, py: number): boolean {
+  if (!ordering) return false;
+  const sel = world.units.filter((u) => u.owner === localPlayer && u.hp > 0 && selection.ids.has(u.id));
+  const unitIds = sel.map((u) => u.id);
+  const [cx, cy] = [Math.floor(px / CELL_W), Math.floor(py / CELL_H)];
+  if (!unitIds.length) return void (ordering = null), true;
+  if (ordering.act === 'rally') setRally(sel, px, py);
+  else if (ordering.act === 'move') {
+    match.issue({ kind: 'move', unitIds, x: fx(px), y: fx(py) });
+    tapMark('move', px, py);
+  } else if (ordering.act === 'attack') {
+    const hit = selection.pick(drawn, px, py);
+    const target = hit && world.units.find((u) => u.id === hit.id);
+    if (!target || target.owner === localPlayer) return true; // keep waiting for an enemy
+    match.issue({ kind: 'attack', unitIds, target: target.id });
+    tapMark('attack', px, py);
+  } else if (ordering.act === 'repair') {
+    const hit = selection.pick(drawn, px, py);
+    const target = hit && world.units.find((u) => u.id === hit.id);
+    if (!target || target.owner !== localPlayer || !isBuilding(target) || !isFinished(target) || target.hp >= target.maxHp) return true;
+    const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
+    match.issue({ kind: 'repair', unitIds: fixers, target: target.id });
+    tapMark('repair', px, py);
+  } else if (!ordering.a) {
+    ordering.a = { cx, cy };
+    tapMark('patrol', px, py);
+    return true;
+  } else {
+    match.issue({ kind: 'patrol', unitIds, ax: ordering.a.cx, ay: ordering.a.cy, bx: cx, by: cy });
+    tapMark('patrol', px, py);
+  }
+  ordering = null;
+  return true;
+}
+
+/**
+ * Tap feedback: the order's icon at the tapped spot for 50 VBlanks (833 ms), for every order given
+ * on the map, a plain move included. confirmed (emulator); the exact image drawn there is likely.
+ */
+const MARK_MS = (50 * 1000) / 60;
+const marks: { icon: ActionIcon; x: number; y: number; at: number; sprite: Sprite }[] = [];
+const markTextures = new Map<ActionIcon, Texture>();
+
+function tapMark(icon: ActionIcon, x: number, y: number) {
+  const img = armyBundle?.actionIcons?.[icon];
+  if (!img) return;
+  let tex = markTextures.get(icon);
+  if (!tex) markTextures.set(icon, (tex = textureFrom({ ...img, data: img.data.slice() })));
+  const sprite = new Sprite(tex);
+  sprite.anchor.set(0.5);
+  sprite.position.set(x, y);
+  camera.addChild(sprite);
+  marks.push({ icon, x, y, at: performance.now(), sprite });
+}
+
+/** Ours: while a training building is selected, a small rally icon on its rally cell. */
+const rallyFlag = new Sprite();
+rallyFlag.anchor.set(0.5, 1);
+rallyFlag.scale.set(0.75);
+camera.addChild(rallyFlag);
+
+function drawOrderMarks() {
+  const now = performance.now();
+  for (let i = marks.length - 1; i >= 0; i--) {
+    if (now - marks[i]!.at < MARK_MS) continue;
+    marks[i]!.sprite.destroy();
+    marks.splice(i, 1);
+  }
+  const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && trains(u));
+  const img = armyBundle?.actionIcons?.rally;
+  rallyFlag.visible = !!(b && b.rally >= 0 && world.grid && img);
+  if (!rallyFlag.visible || !b || !world.grid) return;
+  let tex = markTextures.get('rally');
+  if (!tex) markTextures.set('rally', (tex = textureFrom({ ...img!, data: img!.data.slice() })));
+  rallyFlag.texture = tex;
+  rallyFlag.position.set(((b.rally % world.grid.width) + 0.5) * CELL_W, (Math.floor(b.rally / world.grid.width) + 1) * CELL_H);
+}
+
+/** The battle alert (battleAlert.ts): crossed swords at the bottom right; clicking views the battle. */
+const alert = new BattleAlert();
+const alertEl = document.createElement('button');
+alertEl.className = 'battlealert';
+alertEl.title = 'View Battle';
+alertEl.hidden = true;
+alertEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+alertEl.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (alert.spot) centerOn(fxToFloat(alert.spot.x as Fx), fxToFloat(alert.spot.y as Fx));
+});
+stageEl.appendChild(alertEl);
+
+function drawAlert() {
+  const show = alert.shown(performance.now());
+  if (show && !alertEl.firstChild) {
+    const c = actionIcon('alert');
+    if (c) alertEl.appendChild(Object.assign(document.createElement('canvas'), { width: 24, height: 24 })).getContext('2d')!.drawImage(c, 0, 0);
+    else alertEl.textContent = '!';
+  }
+  alertEl.hidden = !show;
 }
 
 let hover = { x: 0, y: 0 };
@@ -1068,6 +1279,7 @@ function tryPlace(): boolean {
     const { cx, cy } = placeCell(t.size);
     if (!placeable(t, cx, cy)) return true; // keep the preview up; the spot is taken
     match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
+    sound.play(UI_BACK1); // confirming a building site is a move order
   }
   placing = null;
   return true;
@@ -1126,6 +1338,8 @@ function advance(ms: number) {
     prev = before;
     followUpgrades(before);
     acc -= TICK_MS;
+    alert.observe(before.units, world.units, localPlayer, performance.now());
+    if (!appEl.classList.contains('menu')) sound.tick(before, world, localPlayer, heard);
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
     if (fog) updateFog(fog, world, localPlayer);
     tickEl.textContent = String(world.tick);
@@ -1200,7 +1414,7 @@ app.ticker.add((t) => {
     const p = prev.units.find((q) => q.id === u.id) ?? u;
     const x = fxToFloat(p.x) + (fxToFloat(u.x) - fxToFloat(p.x)) * alpha;
     const y = fxToFloat(p.y) + (fxToFloat(u.y) - fxToFloat(p.y)) * alpha;
-    nextDrawn.push({ id: u.id, owner: u.owner, x, y });
+    nextDrawn.push({ id: u.id, owner: u.owner, x, y, role: u.role });
     const isSelected = selection.ids.has(u.id);
     const bank = bankOf(u.owner) + (isSelected ? 1 : 0);
     // Models carry team colors only; a selected one gets an outline instead of the odd bank.
@@ -1277,6 +1491,8 @@ app.ticker.add((t) => {
   }
 
   drawPlacement();
+  drawOrderMarks();
+  drawAlert();
   updateStrip();
   checkGround();
   const mine = world.units.filter((u) => u.owner === localPlayer);
@@ -1317,9 +1533,52 @@ const rom = createRom({
   onArmy: (a) => {
     armyBundle = a;
     stripIconCache.clear();
+    actionIconCache.clear();
+    markTextures.clear();
+    // A (new) ROM is in: its sounds replace any cached ones.
+    audio.reset();
+    if (appEl.classList.contains('menu')) sound.menu();
   },
   onError: (m) => console.error(m),
 });
+const audio = new GameAudio({ labels: () => rom.summary()?.sound ?? null, render: (req) => rom.sound(req) });
+const sound = new GameSound(audio);
+// Touch-screen buttons play FE CLICK1 (generic button 0x020E5624); menus use the same.
+document.addEventListener('click', (e) => {
+  if (e.target instanceof Element && e.target.closest('button')) sound.play(FE_CLICK1);
+}, true);
+// Volume sliders: the game's 0..127 option bytes (a new profile has music 50, effects 127).
+for (const [id, key] of [['volMusic', 'music'], ['volFx', 'effects']] as const) {
+  const el = document.getElementById(id) as HTMLInputElement;
+  el.value = String(audio.settings[key]);
+  el.oninput = () => audio.setSettings({ ...audio.settings, [key]: Number(el.value) });
+}
+// The strip clicks once per icon as they slide in, a frame or two apart.
+bar.onOpen = (n) => {
+  for (let i = 0; i < n; i++) setTimeout(() => sound.play(UI_MENUSLIDECLICK), i * 2 * (1000 / 60));
+};
+
+/**
+ * The game only plays unit, spell and pickup sounds for units whose cell is inside the camera's
+ * rectangle with a margin (Snd_inView 0x0208936C: 2 cells left/up, 1-2 right/down of the DS view).
+ * Our view is the browser canvas, so we use it with 2 cells on every side (our adaptation).
+ */
+function heard(id: number, w: World): boolean {
+  const u = w.units.find((x) => x.id === id);
+  if (!u) return false;
+  const s = camera.scale.x;
+  const x0 = -camera.x / s;
+  const y0 = -camera.y / s;
+  const cx = Math.floor(fxToFloat(u.x) / CELL_W);
+  const cy = Math.floor(fxToFloat(u.y) / CELL_H);
+  return (
+    cx >= Math.floor(x0 / CELL_W) - 2 &&
+    cx <= Math.floor((x0 + app.screen.width / s) / CELL_W) + 2 &&
+    cy >= Math.floor(y0 / CELL_H) - 2 &&
+    cy <= Math.floor((y0 + app.screen.height / s) / CELL_H) + 2
+  );
+}
+
 rom.onGround = (name, g) => {
   if (name === mapName) ground.texture = textureFrom(g);
 };
@@ -1332,6 +1591,9 @@ function setMode(mode: 'menu' | 'game') {
   screensEl.hidden = mode === 'game';
   document.getElementById('quitAsk')!.hidden = true;
   if (mode === 'game') requestAnimationFrame(() => app.resize());
+  // Pressing Start stops the menu music; the match's music starts once it is loaded.
+  if (mode === 'menu') sound.menu();
+  else audio.stopMusic();
 }
 
 const skirmishMaps = () => skirmishFirst(rom.summary()?.maps ?? []).filter((m) => /^mp\d+$/.test(m));
@@ -1483,7 +1745,7 @@ void menus.boot();
   /** True once the online match's world is built and ticking. */
   online: () => online?.ready === true,
   local: () => localPlayer,
-  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y, role: u.role, kind: u.kind, hp: u.hp, progress: u.progress, queue: [...u.queue], prod: u.prod, job: u.job?.kind ?? null })),
+  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y, role: u.role, kind: u.kind, hp: u.hp, progress: u.progress, queue: [...u.queue], prod: u.prod, job: u.job?.kind ?? null, stance: u.stance, rally: u.rally, target: u.target })),
   player: (id: number) => getPlayer(world, id) ?? null,
   /** Select units as a click would (tests drive the strip and orders through the real input path). */
   select: (ids: number[]) => {

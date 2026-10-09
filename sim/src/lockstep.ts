@@ -117,6 +117,11 @@ export function sanitizeCommand(x: unknown): Command | null {
   if (c.kind === 'upgrade' && isInt(c.building)) return { kind: 'upgrade', building: c.building };
   if (c.kind === 'repair' && isIds(c.unitIds) && isInt(c.target)) return { kind: 'repair', unitIds: [...c.unitIds], target: c.target };
   if (c.kind === 'cancel' && isInt(c.building) && isInt(c.index)) return { kind: 'cancel', building: c.building, index: c.index };
+  if (c.kind === 'stop' && isIds(c.unitIds)) return { kind: 'stop', unitIds: [...c.unitIds] };
+  if (c.kind === 'stand' && isIds(c.unitIds)) return { kind: 'stand', unitIds: [...c.unitIds] };
+  if (c.kind === 'patrol' && isIds(c.unitIds) && isInt(c.ax) && isInt(c.ay) && isInt(c.bx) && isInt(c.by))
+    return { kind: 'patrol', unitIds: [...c.unitIds], ax: c.ax, ay: c.ay, bx: c.bx, by: c.by };
+  if (c.kind === 'rally' && isIds(c.unitIds) && isInt(c.cx) && isInt(c.cy)) return { kind: 'rally', unitIds: [...c.unitIds], cx: c.cx, cy: c.cy };
   if (c.kind === 'cast' && isInt(c.caster) && isInt(c.spell) && isInt(c.target) && isInt(c.x) && isInt(c.y))
     return { kind: 'cast', caster: c.caster, spell: c.spell, target: c.target, x: c.x as Fx, y: c.y as Fx };
   return null;

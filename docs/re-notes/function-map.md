@@ -140,6 +140,30 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x020779CC` | ARM | `ForrestSpell_update` | One 2x2 candidate a tick, 5 ticks per list cell | confirmed | spells.md |
 | `0x02053F70` | ARM | `Projectile_contact` | Per-cell contact test for flying entities | confirmed | spells.md |
 | `0x02079304` | ARM | `FireBall_aim` | Aim clamp (adds range past the tap: game bug) | confirmed | spells.md |
+| `0x02089B44` | Thumb | `Snd_openArchive` | `NNS_SndArcInit` on `Sound/sound_data.sdat`, player/stream setup | likely | sound-triggers.md |
+| `0x02088570` | Thumb | `Snd_onGameCreated` | Loads every SEQARC/bank the match needs, starts calm music | confirmed | sound-triggers.md |
+| `0x02089A8C` | Thumb | `Snd_playSeqArc` | The only SFX start: once per (arc, index) per frame, `NNS_SndArcPlaySeqArc` | confirmed | sound-triggers.md |
+| `0x02088978` | Thumb | `Snd_play` | Gate on load state, then `Snd_playSeqArc` | confirmed | |
+| `0x02089250` | Thumb | `Snd_playUnitEvent` | Entity SEQARC, index = event (0 select, 1 death, 2 strike, 4 special); view-gated | confirmed | |
+| `0x02089210` | Thumb | `Snd_playSpell` | Spell SEQARC by spell id; caster view-gated | confirmed | |
+| `0x02089290` / `0x020892F4` | Thumb | `Snd_playFe` / `Snd_playUi` | SEQARC 0 / 1 by code | confirmed | |
+| `0x020890DC` | Thumb | `Snd_playCollectable` | SEQARC 216: stud / minikit / red brick | likely | |
+| `0x0208936C` | Thumb | `Snd_inView` | Unit cell inside camera cell rect (cx-2, cy-2)..(cx+13, cy+14) | confirmed | |
+| `0x020889F8` | Thumb | `Snd_entitySeqArc` | Entity index -> SEQARC | confirmed | |
+| `0x02088CC4` | Thumb | `Snd_entityBank` | Entity index -> bank | likely | |
+| `0x02088F24` / `0x02089000` | Thumb | `Snd_spellSeqArc` / `Snd_spellBank` | Spell id -> SEQARC / bank | confirmed | |
+| `0x020897D4` | Thumb | `Snd_update` | Music hand-over, clears per-frame de-dup table `0x02155798` | confirmed | |
+| `0x02088994` | Thumb | `Snd_battleMusicTimeout` | Battle -> calm 450 ticks after the last hero-under-attack | confirmed | |
+| `0x02088538` | Thumb | `Snd_onEvent` | Events 0x0D, 0x0F, 0x36, 0x39 | likely | |
+| `0x020888E8` | Thumb | `Snd_onHeroUnderAttack` | Event 0x36: calm -> battle music | confirmed | |
+| `0x0208885C` | Thumb | `Snd_onTeamStatus` | Event 0x39: victory / defeat music | likely | |
+| `0x020898C8` / `0x020898E8` | Thumb | `Snd_setMusicFaction` / `Snd_setMusicType` | Music state at `0x0214B33C` +0xC / +8; playlist position restart | confirmed | |
+| `0x02089954` | Thumb | `Snd_prepareMusic` | Next STRM prepared on the idle stream handle | confirmed | |
+| `0x020899EC` | Thumb | `Snd_startPreparedMusic` | Start prepared stream, swap handles, apply music volume | confirmed | |
+| `0x02089A64` | Thumb | `Snd_stopMusic` | Stop the stream with a fade | confirmed | |
+| `0x02089BD4` / `0x02089C18` | Thumb | `Snd_nextPlaylistTrack` / `Snd_musicBase` | Playlist entry / first STRM per faction and type | confirmed | |
+| `0x02089860` / `0x020898A4` / `0x02089878` | Thumb | `Snd_setMasterVolume` / `Snd_setSfxVolume` / `Snd_setMusicVolume` | Volumes, clamped to 127 | likely | |
+| `0x02087A8C` | ARM | `Event_postHeroUnderAttack` | Posts event 0x36 (called from `Unit_setHp`) | likely | |
 | `0x020859D4` | ARM | `Team_countRole` | Entities of a role on a team; finished only when r2 = 1 | likely | structures.md |
 | `0x02086088` | ARM | `Team_limitLeft` | Room left in a limit group (table `0x02126CA4`) | likely | structures.md |
 | `0x02068B74` | ARM | `ConstructStructureEntityCommand::start` | Bricks, limit and prerequisite checks for a build order | confirmed (effects seen in the emulator) | structures.md |
@@ -157,3 +181,17 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x0200D8A8` | ARM | `Bridge_draw` | Swaps a finished bridge's cells for bridge metatiles | confirmed | walls-bridges.md |
 | `0x020A30A0` | THUMB | `Map_setTerrain` | Writes one terrain grid cell (+0x2E8) | confirmed | walls-bridges.md |
 | `0x0205878C` | ARM | `Bridge_collapse` | Footprint back to water; kills walkers on it, rescues heroes | likely | walls-bridges.md |
+| `0x02083830` | ARM | `Cmd_dispatchPlayerOrder` | Jump table on order type id; one handler per order | confirmed | orders.md |
+| `0x0208455C` | ARM | `Cmd_standGround` | Gives each unit CombatStandGround | confirmed | orders.md |
+| `0x02084974` | ARM | `Cmd_patrol` | Gives each unit Patrol with the two tapped points | confirmed | orders.md |
+| `0x02084B1C` | ARM | `Cmd_setRally` | Stores the rally cell on each building (+0x1AC/+0x1AD) | confirmed | orders.md |
+| `0x02084D68` | ARM | `Cmd_stop` | Gives each unit StopEntityCommand | confirmed | orders.md |
+| `0x0205A01C` | ARM | `Unit_setCommand` | Installs an entity command (current +0xF4, next +0xF8) | confirmed | orders.md |
+| `0x0206244C` | ARM | `HoldPos_ctor` | CombatHoldPosition (type 2): post at +0x20 | confirmed | orders.md |
+| `0x020629DC` | ARM | `HoldPos_update` | Scan, chase, attack, wait 20, walk back | confirmed | orders.md |
+| `0x02066530` | ARM | `StandGround_ctor` | CombatStandGround (type 4) | confirmed | orders.md |
+| `0x020724F4` | ARM | `Produce_spawn` | New unit; moves it to the rally cell if set | confirmed | orders.md |
+| `0x0205E7D4` | ARM | `Unit_setHp` | Sets HP; reports hits to the battle alert | confirmed | orders.md |
+| `0x020D9D74` | ARM | `Ui_battleAlert` | 2 s throttle, local check, stores time and camera spot | confirmed | orders.md |
+| `0x020E2480` | THUMB | `Sel_box` | Box select by role lists, capped at 9 | confirmed | orders.md |
+| `0x020E339C` | THUMB | `Sel_add` | Adds a unit unless 9 are selected | confirmed | orders.md |

@@ -41,7 +41,8 @@ export function hashWorld(w: World): number {
     mix(u.role);
     mix(u.path.length);
     for (const c of u.path) mix(c);
-    if (u.amove) mix(0x4d4f5645); // only combat moves mix in, so worlds without them keep their hashes
+    for (const v of [u.stance, u.post, u.leg, u.since, u.back, u.rally, u.route.length]) mix(v);
+    for (const c of u.route) mix(c);
     if (!w.grid) continue; // bare test worlds have no occupancy or plotters
     mix(u.cell);
     const m = u.mv;

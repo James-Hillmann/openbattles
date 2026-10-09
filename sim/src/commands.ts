@@ -28,6 +28,14 @@ export type Command =
   | { kind: 'repair'; unitIds: EntityId[]; target: EntityId }
   /** Cancel entry `index` of a building's queue (0 = the unit in training, refunded), or all of it with -1. */
   | { kind: 'cancel'; building: EntityId; index: number }
+  /** Stop: drop the current order and stand (StopCommand). On a building it cancels the unit in training. */
+  | { kind: 'stop'; unitIds: EntityId[] }
+  /** Stand Ground: stay put and attack only what is in range (CombatStandGroundCommand). */
+  | { kind: 'stand'; unitIds: EntityId[] }
+  /** Patrol between cells (ax, ay) and (bx, by), first point first (PatrolCommand). */
+  | { kind: 'patrol'; unitIds: EntityId[]; ax: number; ay: number; bx: number; by: number }
+  /** Set the rally point of production buildings to cell (cx, cy) (RallyPointCommand). */
+  | { kind: 'rally'; unitIds: EntityId[]; cx: number; cy: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
   | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 

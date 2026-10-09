@@ -11,7 +11,7 @@ import {
 const t = (kind: number, role: number, hp: number, cost: number, buildTime: number, size: number, extra: Partial<EntityType> = {}): EntityType => ({
   kind, role, hp, cost, buildTime, size, speed: size > 1 || role >= 7 ? 0 : 410, yield: 0, priority: 10, attack: null, faction: 'K', ...extra,
 });
-const hit = (damage: number) => ({ damage, damageRand: 0, cooldown: 30, minRange: 0, maxRange: 1, sight: 6, projectile: -1 });
+const hit = (damage: number) => ({ damage, damageRand: 0, cooldown: 30, minRange: 0, maxRange: 1, sight: 6, projectile: null });
 const HERO = t(1, 0, 1000, 0, 0, 1, { attack: hit(40), priority: 30 });
 const BUILDER = t(2, 1, 150, 50, 150, 1, { priority: 1 });
 const SWORD = t(3, 2, 200, 100, 200, 1, { attack: hit(20), priority: 12 });

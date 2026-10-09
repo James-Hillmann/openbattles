@@ -13,6 +13,8 @@ import {
   rebakeGround,
   tryRomFile,
   unpackRom,
+  loadSoundArchive,
+  type SoundArchive,
   type HudBundle,
   type MapBundle,
   type UnitBundle,
@@ -66,6 +68,8 @@ export type RomSummary = {
   maps: string[];
   fingerprint: string;
   inventory: { ext: string; magic: string; count: number; bytes: number }[];
+  /** Sound labels: per sequence archive its name and effect labels, and the music stream names. Null if the ROM has no sound archive. */
+  sound: { arcs: { name: string; seqs: string[] }[]; strms: string[] } | null;
 };
 
 export type WorkerRequest =
@@ -74,8 +78,12 @@ export type WorkerRequest =
   /** Rebuild the unit sheets for these team colors (0..5). */
   | { type: 'units'; teams: number[]; localTeam: number }
   /** Redraw a map's ground for the live terrain (chopped trees). */
-  | { type: 'ground'; name: string; terrain: Uint8Array };
+  | { type: 'ground'; name: string; terrain: Uint8Array }
+  /** Render a sound effect (archive, index) or decode a music stream; answered by `id`. */
+  | { type: 'sound'; id: number; effect?: { arc: number; index: number }; music?: number };
 export type WorkerResponse =
+  /** Stereo PCM at the DS mixer rate, or null for an empty slot. */
+  | { type: 'sound'; id: number; pcm: { left: Float32Array; right: Float32Array; player: number } | null }
   | { type: 'loaded'; summary: RomSummary }
   | { type: 'units'; units: UnitBundle }
   | { type: 'army'; army: ArmyBundle }
@@ -84,6 +92,7 @@ export type WorkerResponse =
   | { type: 'error'; error: string };
 
 let rom: UnpackedRom | null = null;
+let sound: SoundArchive | null = null;
 
 /** Entities whose portraits the HUD can show: every sprite unit in the unit bundle. */
 let portraitIds: string[] = [];
@@ -91,10 +100,32 @@ let portraitIds: string[] = [];
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, transfer);
 
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
+  if (e.data.type === 'sound') {
+    const { id, effect, music } = e.data;
+    let pcm: { left: Float32Array; right: Float32Array; player: number } | null = null;
+    try {
+      if (sound && effect) {
+        const p = sound.effect(effect);
+        if (p) pcm = { ...p, player: sound.effectPlayer(effect) };
+      } else if (sound && music !== undefined) {
+        const p = sound.music(music);
+        if (p) pcm = { ...p, player: -1 };
+      }
+    } catch {
+      pcm = null;
+    }
+    post({ type: 'sound', id, pcm }, pcm ? [pcm.left.buffer, ...(pcm.right.buffer !== pcm.left.buffer ? [pcm.right.buffer] : [])] : []);
+    return;
+  }
   try {
     if (e.data.type === 'load') {
       const bytes = new Uint8Array(e.data.rom);
       rom = unpackRom(bytes);
+      try {
+        sound = loadSoundArchive(rom);
+      } catch {
+        sound = null;
+      }
       post({
         type: 'loaded',
         summary: {
@@ -106,11 +137,15 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
           maps: listMaps(rom),
           fingerprint: fingerprint(bytes),
           inventory: rom.inventory,
+          sound: sound && {
+            arcs: sound.sdat.seqArcs.map((a) => ({ name: a.name, seqs: a.seqNames })),
+            strms: sound.sdat.strms.map((x) => x.name),
+          },
         },
       });
       const army = buildArmyBundle(rom);
       extraUnits = [...new Set(army.choices.flat())].filter((n) => !/^[KWPIEA]_/.test(n));
-      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons), ...rgbaBuffers(army.spellIcons)]);
+      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons), ...rgbaBuffers(army.spellIcons), ...rgbaBuffers(army.actionIcons)]);
       const u = units(rom, DEFAULT_TEAMS, LOCAL_TEAM);
       portraitIds = [...new Set([...u.sprites, ...u.models, ...u.buildings].map((s) => s.name))];
       post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);

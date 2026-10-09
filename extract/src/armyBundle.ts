@@ -2,6 +2,7 @@ import { ARMY_SLOT_TEXT, armyChoices, defaultArmies, parseArmies, readIconTable,
 import { listMaps, romFile, tryRomFile } from './bundle';
 import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
 import { entityLabels, parseLang } from './lang';
+import { actionIcons, type ActionIcon } from './actions';
 import { readSpellTable, SPELL_NAME_TEXT, spellIcons, type SpellDef } from './spells';
 import { decodeCells, decodeChars, decodePalette, type CharData } from './nitro';
 import { renderCell, type Rgba } from './render';
@@ -43,6 +44,8 @@ export interface ArmyBundle {
   spells: SpellDef[];
   /** 24x24 spell strip icons by icon number (SpellDef.icon). */
   spellIcons: Record<number, Rgba>;
+  /** The blue Actions strip's order icons and the battle alert icon (actions.ts). */
+  actionIcons: Partial<Record<ActionIcon, Rgba>>;
   /** Spell names by spell id (SPELL_NAME_TEXT). */
   spellNames: Record<number, string>;
 }
@@ -217,6 +220,7 @@ export function buildArmyBundle(rom: UnpackedRom, language = 'American_English')
   return {
     armies, prefixes, choices, slotLabels: ARMY_SLOT_TEXT.map((id) => lang[id] ?? ''), text, units, maps, heads, stripIcons, cards, spells,
     spellIcons: spellIconImages,
+    actionIcons: actionIcons(rom),
     spellNames: Object.fromEntries(Object.entries(SPELL_NAME_TEXT).map(([id, t]) => [id, lang[t] ?? ''])),
   };
 }
