@@ -1,5 +1,5 @@
 import type { Graphics } from 'pixi.js';
-import { TOP_H, TOP_W, composeTopScreen, iconFrame, type HudBundle, type TopScreenState } from '@lbw/extract';
+import { COST_PANEL, TOP_H, TOP_W, composeTopScreen, iconFrame, type HudBundle, type TopScreenState } from '@lbw/extract';
 import { HP_BANDS, POWER_COLORS, barCells, hpBand, litCells } from './bars';
 
 /**
@@ -7,23 +7,61 @@ import { HP_BANDS, POWER_COLORS, barCells, hpBand, litCells } from './bars';
  * 256x192 canvas shown at 2x above the sidebar, the way the DS shows it above
  * the battlefield. Recomposed only when what it shows changes.
  */
+export interface CostAction {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
+/** On-screen scale of the top screen (CSS px per DS px). */
+const TOP_SCALE = 2;
+
 export class HudView {
   readonly canvas = document.createElement('canvas');
+  /** The canvas plus a layer of buttons over the Build Costs icons. */
+  private readonly wrap = document.createElement('div');
+  private readonly hits = document.createElement('div');
   private hud: HudBundle | null = null;
   private shown = '';
+  private shownHits = '';
 
-  constructor(parent: HTMLElement) {
+  constructor(parent: HTMLElement, private readonly onPick: (key: string) => void) {
     this.canvas.width = TOP_W;
     this.canvas.height = TOP_H;
     this.canvas.className = 'topscreen';
-    this.canvas.hidden = true;
-    parent.prepend(this.canvas);
+    this.wrap.className = 'topwrap';
+    this.wrap.hidden = true;
+    this.hits.className = 'costhits';
+    this.wrap.append(this.canvas, this.hits);
+    parent.prepend(this.wrap);
   }
 
   setBundle(hud: HudBundle): void {
     this.hud = hud;
     this.shown = '';
-    this.canvas.hidden = false;
+    this.wrap.hidden = false;
+  }
+
+  /**
+   * Make the Build Costs icons work like their strip buttons (ours: on the DS that panel is only a
+   * list). `actions` lines up with the panel's items; empty when the panel isn't shown.
+   */
+  setActions(actions: readonly CostAction[]): void {
+    const key = JSON.stringify(actions);
+    if (key === this.shownHits) return;
+    this.shownHits = key;
+    this.hits.replaceChildren(
+      ...actions.map((a, i) => {
+        const b = document.createElement('button');
+        b.title = a.label;
+        b.disabled = !a.enabled;
+        const x = COST_PANEL.iconX + COST_PANEL.step * (i % COST_PANEL.cols);
+        const y = COST_PANEL.iconY + COST_PANEL.step * Math.floor(i / COST_PANEL.cols);
+        Object.assign(b.style, { left: `${x * TOP_SCALE}px`, top: `${y * TOP_SCALE}px`, width: `${24 * TOP_SCALE}px`, height: `${24 * TOP_SCALE}px` });
+        b.onclick = () => this.onPick(a.key);
+        return b;
+      }),
+    );
   }
 
   /** The HUD's label (name, max HP) for an entity, by internal id (e.g. `K_Swordsman`). */

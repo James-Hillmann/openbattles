@@ -1,18 +1,15 @@
-import { ascii, u16 } from './bytes';
+import { u16 } from './bytes';
 import { decodeChars, decodePalette, type CharData } from './nitro';
 import type { Rgba } from './render';
-
-/**
- * Entity blueprints (BP/Entities.ebp, after PMOC): `BPNZ`, then 0x7C-byte records,
- * then a string table at STRINGS holding each entity's name followed by its asset path.
- * See docs/re-notes/formats.md "BPNZ".
- */
-const RECORD = 0x7c;
-const STRINGS = 0xfa08;
+import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
+import { buildModelUnits, type ModelUnit } from './modelSprites';
+import type { ModelClips } from './modelClips';
 
 export interface EntityInfo {
   /** Record index in the table. */
   index: number;
+  /** Entity index (+0x04): the key the game's per-entity tables use (combat bonuses, model clips). */
+  entityIndex: number;
   /** Global id (+0x06). */
   id: number;
   name: string;
@@ -22,25 +19,20 @@ export interface EntityInfo {
   speed: number;
 }
 
-export function parseEntities(ebp: Uint8Array): EntityInfo[] {
-  if (ascii(ebp, 0, 4) !== 'BPNZ') throw new Error('Not an entity table (BPNZ)');
-  const out: EntityInfo[] = [];
-  for (let index = 0; 4 + (index + 1) * RECORD <= STRINGS; index++) {
-    const r = 4 + index * RECORD;
-    // Only record 0 has its name at offset 0; past the last entity the offsets read 0 again.
-    if (index > 0 && u16(ebp, r) === 0) break;
-    const nameAt = STRINGS + u16(ebp, r);
-    if (nameAt >= ebp.length) break;
-    const name = ascii(ebp, nameAt, 64);
-    if (!name) break;
-    out.push({ index, id: u16(ebp, r + 6), name, asset: ascii(ebp, nameAt + name.length + 1, 64), speed: u16(ebp, r + 0x0c) });
-  }
-  return out;
+/**
+ * Units and buildings (kind-0 records) of BP/Entities.ebp, for sprites. Records vary in size by
+ * kind, so this walks them with `parseEntityRecords` (see docs/re-notes/formats.md "BPNZ").
+ */
+export function parseEntities(ebp: Uint8Array | readonly EntityRecord[]): EntityInfo[] {
+  const recs = ebp instanceof Uint8Array ? parseEntityRecords(ebp) : ebp;
+  return recs
+    .filter((r) => r.kind === 0)
+    .map((r) => ({ index: r.index, entityIndex: u16(r.raw, 4), id: u16(r.raw, 6), name: r.name, asset: r.sprite, speed: u16(r.raw, 0x0c) }));
 }
 
 /**
  * The three sprite layouts units use, by asset suffix. Everything else that moves
- * (siege, flyers, ships, the Giant) is a 3D model under Models/ and isn't drawn yet.
+ * (siege, flyers, ships, the Giant) is a 3D model under Models/, drawn by modelSprites.ts.
  *
  * - `hero` (`_hrm`, `_hrf`, also campaign heroes): one file per facing, `_w0..4` walk and `_a0..4`
  *   attack, 6 frames of 24 px in a row. Idle is walk frame 0 (confirmed in the emulator).
@@ -56,7 +48,8 @@ export type SpriteLayout = 'hero' | 'infantry' | 'mounted';
 export function spriteLayout(asset: string): SpriteLayout | null {
   if (!asset.startsWith('Sprites/')) return null;
   if (asset.endsWith('_bld_mtd')) return 'mounted';
-  if (/_(eng|mel|rgd)$/.test(asset)) return 'infantry';
+  // Bonus characters with the same three-sheet (_0/_1/_2) files: police, criminals, dwarf and troll axemen.
+  if (/_(eng|mel|rgd|pol|crm|axe)$/.test(asset)) return 'infantry';
   return 'hero';
 }
 
@@ -72,8 +65,15 @@ export interface UnitSprite {
   name: string;
   speed: number;
   layout: SpriteLayout;
-  /** Frame size in px (square). */
-  frame: number;
+  /** Frame size in px. */
+  frameW: number;
+  frameH: number;
+  /** Facing rows: 5 (back, back-right, right, front-right, front); left facings are mirrored. */
+  rows: number;
+  mirrored: boolean;
+  /** Pixel in the frame that sits on the unit's position. */
+  anchorX: number;
+  anchorY: number;
   atlas: Rgba;
   idle: number;
   /** Looped while moving. The game finishes the current pass before going idle. */
@@ -177,7 +177,13 @@ export function buildUnitSprites(
         name: e.name,
         speed: e.speed,
         layout,
-        frame: c.frame,
+        frameW: c.frame,
+        frameH: c.frame,
+        rows: FACINGS,
+        mirrored: true,
+        // Feet 5 px above the frame's bottom edge (24 px: the old 0.8 anchor; 32 px: guess).
+        anchorX: c.frame / 2,
+        anchorY: c.frame - 5,
         atlas: { width, height, data },
         idle: c.idle,
         walk: c.walk,
@@ -190,6 +196,11 @@ export function buildUnitSprites(
 
 /** Units share one palette file; its 16-color banks are team colors (see formats.md). */
 export const UNIT_PALETTE = 'KingFaction.NCLR';
+/**
+ * Bank of light greys every unit is drawn with for a moment after taking damage (the white hit
+ * flash). Matched pixel for pixel in the emulator; see docs/re-notes/combat.md.
+ */
+export const FLASH_BANK = 12;
 
 /** The six playable factions, by entity name prefix. */
 export const FACTIONS = [
@@ -201,36 +212,102 @@ export const FACTIONS = [
   { prefix: 'A', name: 'Aliens' },
 ] as const;
 
+/**
+ * A building's picture for one team bank. Buildings sit in the top of their faction's
+ * `_bld_mtd` sheet: entity +0x20 (u16) is the first 8x8 tile (row-major, 32 tiles a row)
+ * and +0x1E/+0x1F the width/height in tiles. likely: every King building lines up.
+ */
+export interface BuildingSprite {
+  key: string;
+  name: string;
+  image: Rgba;
+}
+
+export function buildingRect(raw: Uint8Array, sheetTilesWide: number): { x: number; y: number; w: number; h: number } {
+  const tile = raw[0x20]! | (raw[0x21]! << 8);
+  return { x: (tile % sheetTilesWide) * 8, y: Math.floor(tile / sheetTilesWide) * 8, w: raw[0x1e]! * 8, h: raw[0x1f]! * 8 };
+}
+
 export interface UnitBundle {
-  /** Every sprite unit of the playable factions, for each requested team bank. */
+  /** Buildings of the playable factions, for each requested team bank. */
+  buildings: BuildingSprite[];
+  /** Sprite units of the playable factions, for each requested team bank. */
   sprites: UnitSprite[];
-  /** Units drawn from 3D models (siege, flyers, ships). Listed so the client can say what is missing. */
-  models: EntityInfo[];
+  /** Units drawn from 3D models, for each requested team bank. */
+  models: ModelUnit[];
+  /** Movers we couldn't draw (model missing or not decodable). */
+  missing: EntityInfo[];
+  /** Combat and movement stats per entity name, for every sprite unit (see docs/re-notes/combat.md). */
+  stats: Record<string, UnitStats>;
 }
 
 /**
  * Read the entity table and build sprite atlases for the playable factions' units.
- * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`).
+ * `fixPalette` patches the decoded palette first (e.g. `applyTeamColors`); `clipsFor` gives a
+ * model unit's animation clips (e.g. `modelClips` from ARM9).
  */
 export function buildUnitBundle(
   file: (path: string) => Uint8Array | undefined,
   banks: readonly number[],
   fixPalette?: (pal: Uint8Array) => void,
+  clipsFor: (e: EntityInfo) => ModelClips | null = () => null,
+  /** More units to draw beyond the six factions' (e.g. the bonus characters an army can field). */
+  extra: readonly string[] = [],
 ): UnitBundle {
   const need = (p: string) => {
     const d = file(p);
     if (!d) throw new Error(`File not in ROM: ${p}`);
     return d;
   };
-  const entities = parseEntities(need('BP/Entities.ebp'));
-  const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name);
+  const records = parseEntityRecords(need('BP/Entities.ebp'));
+  const entities = parseEntities(records);
+  const playable = (e: EntityInfo) => /^[KWPIEA]_/.test(e.name) || extra.includes(e.name);
   const palette = decodePalette(need(UNIT_PALETTE));
   fixPalette?.(palette);
-  return {
-    sprites: buildUnitSprites(entities, (p) => {
-      const d = file(p);
-      return d ? decodeChars(d) : undefined;
-    }, palette, banks, playable),
-    models: entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/')),
-  };
+  const sprites = buildUnitSprites(entities, (p) => {
+    const d = file(p);
+    return d ? decodeChars(d) : undefined;
+  }, palette, banks, playable);
+  const modelUnits = entities.filter((e) => playable(e) && e.speed !== 0xffff && e.asset.startsWith('Models/'));
+  // Models take the team colors only; odd ("selected") banks are drawn with an outline instead.
+  const models = buildModelUnits(modelUnits, file, palette, banks.filter((b) => b % 2 === 0), clipsFor);
+  const stats: Record<string, UnitStats> = {};
+  const names = [...sprites, ...models].map((s) => s.name);
+  // Extra units get stats even when we can't draw them yet, so they still play.
+  for (const name of new Set([...names, ...extra])) {
+    const rec = records.find((r) => r.name === name);
+    if (rec?.kind === 0) stats[name] = unitStats(records, rec);
+  }
+  const buildings: BuildingSprite[] = [];
+  const sheets = new Map<string, CharData | undefined>();
+  for (const rec of records) {
+    if (rec.kind !== 0 || !/^[KWPIEA]_/.test(rec.name) || !rec.sprite.endsWith('_bld_mtd')) continue;
+    const st = unitStats(records, rec);
+    if (st.speed !== 0xffff) continue;
+    stats[rec.name] = st;
+    if (!sheets.has(rec.sprite)) {
+      const d = file(`${rec.sprite}.NCBR`);
+      sheets.set(rec.sprite, d ? decodeChars(d) : undefined);
+    }
+    const sh = sheets.get(rec.sprite);
+    if (!sh) continue;
+    const r = buildingRect(rec.raw, sh.tilesWide);
+    if (!r.w || !r.h) continue;
+    const sw = sh.tilesWide * 8;
+    for (const bank of banks) {
+      const data = new Uint8ClampedArray(r.w * r.h * 4);
+      for (let y = 0; y < r.h; y++)
+        for (let x = 0; x < r.w; x++) {
+          const v = sh.pixels[(r.y + y) * sw + r.x + x];
+          if (!v) continue;
+          const o = (bank * 16 + v) * 4;
+          data.set([palette[o]!, palette[o + 1]!, palette[o + 2]!, 255], (y * r.w + x) * 4);
+        }
+      buildings.push({ key: `${rec.name}@${bank}`, name: rec.name, image: { width: r.w, height: r.h, data } });
+    }
+  }
+  // Walls and bridges belong to every army and are drawn into the map layer (structures.ts), not as sprites.
+  for (const rec of records) if (rec.kind === 0 && /^(Wall|Bridge(Small|Medium|Large)[HV])$/.test(rec.name)) stats[rec.name] = unitStats(records, rec);
+  const drawn = new Set(names);
+  return { buildings, sprites, models, stats, missing: entities.filter((e) => playable(e) && e.speed !== 0xffff && !drawn.has(e.name)) };
 }

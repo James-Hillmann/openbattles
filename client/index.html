@@ -4,34 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenBattles</title>
-    <style>
-      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-      body { margin: 0; background: #111; color: #ddd; display: grid; grid-template-columns: 1fr 536px; height: 100vh; }
-      #stage { position: relative; overflow: hidden; }
-      #side { border-left: 1px solid #333; padding: 12px; overflow: auto; font-size: 13px; }
-      #side h2 { font-size: 14px; margin: 0 0 8px; }
-      table { border-collapse: collapse; width: 100%; }
-      td, th { border-bottom: 1px solid #2a2a2a; padding: 2px 4px; text-align: left; }
-      code { color: #9cf; }
-      .muted { color: #888; }
-      .err { color: #f77; }
-      select { margin: 8px 0; }
-      #factions label { display: block; }
-      canvas { image-rendering: pixelated; }
-      .topscreen { display: block; width: 512px; height: 384px; margin-bottom: 12px; }
-    </style>
   </head>
   <body>
-    <div id="stage"></div>
-    <aside id="side">
-      <h2>Sandbox</h2>
-      <p class="muted">Click a unit to select it (shift adds), shift+drag to box-select, right-click to move the selection, F to play its attack. Drag or WASD to pan, wheel to zoom. Tick <code id="tick">0</code>, hash <code id="hash">-</code></p>
-      <div id="factions"></div>
-      <h2>Your ROM</h2>
-      <p class="muted">Pick your own LEGO Battles dump. It is read locally in a worker and never uploaded.</p>
-      <input id="rom" type="file" accept=".nds" />
-      <div id="rominfo"></div>
-    </aside>
+    <div id="app" class="menu">
+      <div id="stage"></div>
+      <aside id="side">
+        <div class="hudbar">
+          <button class="brick small" id="quit">Quit</button>
+          <span id="net"></span>
+          <button class="brick small" id="helpBtn">?</button>
+        </div>
+        <div class="panel ask" id="quitAsk" hidden>
+          <span>Quit this match?</span>
+          <button class="brick small red" id="quitYes">Quit</button>
+          <button class="brick small" id="quitNo">Keep playing</button>
+        </div>
+        <div class="panel help-keys" id="help" hidden>
+          <h2>Controls</h2>
+          <dl>
+            <dt>Select</dt><dd>Click a unit or building. Drag a box around your units. Shift adds to the selection.</dd>
+            <dt>Orders</dt><dd>Right-click the ground to move, an enemy to attack, a tree to chop it (Builders), your unfinished building to help build it.</dd>
+            <dt>Build / train</dt><dd>Select a Builder, Castle or Barracks, then click an icon on the red strip or on Build Costs above. Place a building with a click; right-click or Esc cancels.</dd>
+            <dt>Camera</dt><dd>Arrow keys or WASD, middle-drag or Space + drag, mouse wheel to zoom.</dd>
+          </dl>
+        </div>
+        <div class="dev" id="dev" hidden>Tick <code id="tick">0</code>, hash <code id="hash">-</code></div>
+      </aside>
+    </div>
+    <div id="screens"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

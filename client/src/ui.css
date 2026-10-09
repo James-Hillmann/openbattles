@@ -1,0 +1,148 @@
+/*
+ * Front end in the style of the DS game's menus (emulator screenshots in docs/re-notes/armies.md):
+ * deep blue backdrop, navy panels with a bright blue rim, an orange rim on the selected item,
+ * blue LEGO-brick buttons (studs on top). Colours picked off the emulator's screens.
+ */
+:root {
+  color-scheme: dark;
+  --bg0: #020a3a;
+  --bg1: #0b2a8a;
+  --panel: #07164f;
+  --panel2: #0a1d66;
+  --rim: #2f6df0;
+  --rim-hi: #7fb0ff;
+  --pick: #f8a800;
+  --text: #ffffff;
+  --muted: #9fb4e8;
+  --red: #e01010;
+  --red-dark: #7a0000;
+  --brick: #1f5ee8;
+  --brick-dark: #0b2f9a;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+}
+
+html, body { margin: 0; height: 100%; }
+body { background: radial-gradient(120% 90% at 50% 20%, var(--bg1), var(--bg0) 70%); color: var(--text); overflow: hidden; }
+canvas { image-rendering: pixelated; }
+
+/* ---- layout: battlefield + DS top screen ---- */
+#app { display: grid; grid-template-columns: 1fr auto; height: 100vh; }
+#stage { position: relative; overflow: hidden; background: #000; }
+#side { display: flex; flex-direction: column; gap: 10px; padding: 10px; background: linear-gradient(#0a1d66, #020a3a); border-left: 3px solid var(--rim); width: 512px; overflow: auto; }
+#side[hidden] { display: none; }
+.topscreen { display: block; width: 512px; height: 384px; border-radius: 6px; box-shadow: 0 0 0 3px #000, 0 0 0 5px var(--rim); }
+#app.menu #side { display: none; }
+#app.menu #stage { background: transparent; }
+#app.menu #stage canvas { visibility: hidden; }
+
+/* ---- front-end screens ---- */
+#screens { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; z-index: 10; overflow: auto; }
+#screens[hidden] { display: none; }
+.screen { width: min(1040px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.screen h1 { margin: 0; text-align: center; font-size: 30px; letter-spacing: 1px; text-shadow: 0 3px 0 #000, 0 0 12px #3a7bff; }
+.screen h2 { margin: 0 0 6px; font-size: 18px; text-align: center; text-shadow: 0 2px 0 #000; }
+.panel { background: linear-gradient(var(--panel2), var(--panel)); border: 3px solid var(--rim); border-radius: 12px; box-shadow: inset 0 0 0 2px #000a, 0 4px 0 #000a; padding: 14px; }
+.muted { color: var(--muted); }
+.err { color: #ff8a80; text-shadow: 0 1px 0 #000; }
+.row { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+
+.logo { font: 900 64px/1 'Arial Black', 'Trebuchet MS', sans-serif; text-align: center; color: #ffd400; letter-spacing: 2px;
+  -webkit-text-stroke: 3px #b00000; text-shadow: 0 6px 0 #6b0000, 0 10px 18px #000; }
+.logo small { display: block; font-size: 18px; color: #fff; -webkit-text-stroke: 0; letter-spacing: 6px; text-shadow: 0 2px 0 #000; margin-top: 8px; }
+
+/* Blue LEGO brick button: studs along the top edge. */
+.brick { position: relative; min-width: 140px; padding: 14px 22px 10px; margin-top: 8px; border: 0; border-radius: 4px; cursor: pointer;
+  background: linear-gradient(var(--brick), var(--brick-dark)); color: #fff; font: bold 18px/1 inherit; font-family: inherit;
+  box-shadow: inset 0 2px 0 #7fb0ff, inset 0 -3px 0 #061c66, 0 3px 0 #000; text-shadow: 0 2px 0 #000; }
+.brick::before { content: ''; position: absolute; left: 6px; right: 6px; top: -6px; height: 7px;
+  background: radial-gradient(circle at 7px 4px, #5d93ff 3px, #2a5fe0 4px, transparent 5px) 0 0 / 16px 7px repeat-x; }
+.brick:hover:not(:disabled) { filter: brightness(1.2); }
+.brick:disabled { filter: grayscale(0.8) brightness(0.6); cursor: default; }
+.brick.red { background: linear-gradient(#ff3a2a, #a80000); box-shadow: inset 0 2px 0 #ff9a8a, inset 0 -3px 0 #600, 0 3px 0 #000; }
+.brick.red::before { background: radial-gradient(circle at 7px 4px, #ff7a6a 3px, #d01a10 4px, transparent 5px) 0 0 / 16px 7px repeat-x; }
+.brick.small { min-width: 0; padding: 10px 14px 8px; font-size: 14px; }
+
+/* Big square menu icons like the DS main menu. */
+.tile { width: 200px; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px;
+  background: linear-gradient(#1d4fd0, #0a2477); border: 4px solid #4d86ff; border-radius: 16px; cursor: pointer; color: #fff; font: bold 20px inherit; font-family: inherit;
+  box-shadow: inset 0 0 0 2px #000a, 0 6px 0 #000a; text-shadow: 0 2px 0 #000; }
+.tile:hover { border-color: var(--pick); box-shadow: inset 0 0 0 2px #000a, 0 0 0 3px #000, 0 0 18px var(--pick); }
+.tile canvas { width: 128px; height: 128px; }
+.tile .cards { display: flex; }
+.tile .cards canvas { width: 72px; height: 108px; margin: 0 -10px; border-radius: 6px; }
+
+input[type='text'], select { background: #020a3a; color: #fff; border: 2px solid var(--rim); border-radius: 6px; padding: 8px 10px; font: inherit; font-size: 16px; }
+label { display: inline-flex; gap: 8px; align-items: center; }
+
+/* Option toggles (game type, prebase, bank). */
+.opt { padding: 10px 14px; border-radius: 10px; border: 3px solid var(--rim); background: var(--panel); color: #fff; font: bold 15px inherit; font-family: inherit; cursor: pointer; }
+.opt.on { border-color: var(--pick); box-shadow: 0 0 10px var(--pick); }
+.help { min-height: 1.3em; text-align: center; }
+
+/* ---- army screen ---- */
+.army { display: grid; grid-template-columns: 290px 230px 1fr; gap: 14px; align-items: start; }
+.army .card { position: relative; }
+.army .card canvas { width: 256px; height: 384px; display: block; }
+.army .stats { display: grid; grid-template-columns: 26px 1fr; gap: 8px 10px; align-items: center; font: bold 18px inherit; font-family: inherit; }
+.army .stats .name { grid-column: 1 / -1; text-align: center; font-size: 22px; }
+.army .stats .slot { grid-column: 1 / -1; text-align: center; color: var(--muted); }
+.pips { display: flex; gap: 4px; }
+.pips i { width: 11px; height: 11px; transform: rotate(45deg); background: #1338a8; box-shadow: inset 0 0 0 1px #4d7dff; }
+.pips i.on { background: #d6e4ff; box-shadow: inset 0 0 0 1px #fff; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; justify-items: center; }
+.slots .hero { grid-column: 1 / -1; }
+.coin { width: 56px; height: 56px; border-radius: 50%; padding: 0; border: 3px solid transparent; background: radial-gradient(#3a3f55, #11152a); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 0 #000; position: relative; }
+.coin canvas { width: 48px; height: 48px; }
+.coin:hover { border-color: var(--rim-hi); }
+.coin.sel { border-color: #fff; box-shadow: 0 0 0 2px #000, 0 0 12px #fff; }
+.coin.cur { border-color: var(--pick); box-shadow: 0 0 0 2px #000, 0 0 12px var(--pick); }
+.coin small { position: absolute; bottom: -18px; font-size: 11px; white-space: nowrap; color: var(--muted); }
+.choices { display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
+.armies { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.armies .coin { margin-bottom: 18px; }
+
+/* ---- lobby ---- */
+.lobby { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.lobby table { width: 100%; border-collapse: collapse; font-size: 16px; }
+.lobby td { padding: 6px 4px; border-bottom: 1px solid #ffffff22; }
+.lobby td:first-child { color: var(--muted); }
+.chip { display: inline-block; width: 18px; height: 18px; border-radius: 3px; vertical-align: middle; box-shadow: 0 0 0 2px #000; }
+.chip.big { width: 34px; height: 34px; border: 0; color: #fff; font: bold 16px inherit; font-family: inherit; cursor: pointer; padding: 0; margin: 4px; text-shadow: 0 1px 0 #000; }
+.code { font: bold 34px monospace; letter-spacing: 6px; color: var(--pick); text-shadow: 0 2px 0 #000; }
+.minis { display: flex; gap: 2px; }
+.minis canvas { width: 32px; height: 32px; }
+
+/* ---- in game ---- */
+.hudbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+#net { color: var(--pick); font-weight: bold; }
+.endbanner { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font: 900 56px 'Arial Black', sans-serif; color: #ffd400; -webkit-text-stroke: 2px #800; text-shadow: 3px 4px 0 #000; pointer-events: none; }
+.dev { font-size: 12px; color: var(--muted); }
+.dev code { color: #9cf; }
+.help-keys { font-size: 13px; line-height: 1.5; }
+
+/* ---- map select: the DS's framed minimap with the name bar and arrows under it ---- */
+.mappick { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 6px 0; }
+.mapframe { padding: 8px; border-radius: 14px; background: linear-gradient(#2f6df0, #0b2f9a); box-shadow: inset 0 0 0 3px #7fb0ff55, 0 0 0 3px #000a, 0 4px 0 #000a; }
+.mapframe canvas { display: block; width: 192px; height: 192px; border: 3px solid #020a3a; border-radius: 4px; background: #000; }
+.mapbar { display: flex; align-items: center; gap: 6px; }
+.mapbar select, .mapbar .mapname { min-width: 220px; text-align: center; text-align-last: center; font: bold 18px inherit; font-family: inherit; color: #fff;
+  background: linear-gradient(#8fb4ff, #4f7fe8 55%, #3a68d8); border: 2px solid #c8dcff; border-radius: 3px; padding: 4px 10px; text-shadow: 1px 1px 0 #102060, -1px 0 0 #102060; }
+.mapbar select option { color: #000; text-shadow: none; }
+.mapbar .arrow { width: 34px; height: 30px; padding: 0; border: 0; border-radius: 6px; cursor: pointer; color: #fff; font-size: 14px;
+  background: linear-gradient(#3a7bff, #1f5ee8 60%, #0b2f9a); box-shadow: 0 3px 0 #000a; }
+.mapbar .arrow:hover { filter: brightness(1.2); }
+
+/* ---- top screen: Build Costs icons are buttons (ours; on the DS the panel is only a list) ---- */
+.topwrap { position: relative; width: 512px; flex: none; }
+.topwrap[hidden] { display: none; }
+.costhits button { position: absolute; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 2px; }
+.costhits button:hover:not(:disabled) { box-shadow: 0 0 0 2px #fff, 0 0 10px #fff; background: #ffffff22; }
+.costhits button:disabled { cursor: not-allowed; background: repeating-conic-gradient(#600c 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.ask { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.ask[hidden], .help-keys[hidden] { display: none; }
+.help-keys h2 { margin-bottom: 8px; }
+.help-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.help-keys dt { font-weight: bold; color: var(--pick); }
+.help-keys dd { margin: 0; }

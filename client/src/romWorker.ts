@@ -3,24 +3,59 @@ import {
   applyTeamColors,
   buildHudBundle,
   buildMapBundle,
+  FLASH_BANK,
   buildUnitBundle,
+  buildArmyBundle,
+  type ArmyBundle,
+  modelClips,
   hex,
   listMaps,
+  rebakeGround,
   tryRomFile,
   unpackRom,
   type HudBundle,
   type MapBundle,
   type UnitBundle,
+  type Rgba,
   type UnpackedRom,
 } from '@lbw/extract';
 
 /**
- * Palette banks the sandbox draws: 0 red (you), 2 blue (opponent); bank + 1 is
- * the same team selected, with its outline.
+ * Palette banks the sandbox draws by default: 0 red (you), 2 blue (opponent); bank + 1
+ * is the same team selected, with its outline; FLASH_BANK for the hit flash. An online
+ * match asks for its players' colors instead (team color c = bank 2c).
  */
-const TEAM_BANKS = [0, 1, 2, 3];
+const DEFAULT_TEAMS = [0, 1];
 /** Team whose selection outline is yellow (the local player's, red). */
 const LOCAL_TEAM = 0;
+
+/** Characters an army can field beyond the six factions' own (bonus heroes, Dwarves, Trolls, ...). */
+let extraUnits: string[] = [];
+
+/** Units in the given team colors; `localTeam` gets the yellow selection outline. */
+function units(r: UnpackedRom, teams: readonly number[], localTeam: number): UnitBundle {
+  const banks = [...teams.flatMap((t) => [2 * t, 2 * t + 1]), FLASH_BANK];
+  return buildUnitBundle(
+    (path) => tryRomFile(r, path),
+    banks,
+    (pal) => applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, localTeam),
+    (e) => modelClips(r.arm9, r.header.arm9.ramAddress, r.header.gameCode, e.entityIndex),
+    extraUnits,
+  );
+}
+
+const rgbaBuffers = (images: Record<string, { data: Uint8ClampedArray }>) => Object.values(images).map((i) => i.data.buffer as ArrayBuffer);
+
+/**
+ * Identifies the ROM for the lobby: players with different dumps would build different
+ * worlds and desync, so the relay only pairs matching fingerprints. FNV-1a over the
+ * cartridge header, which holds the game code, version and the header/secure-area CRCs.
+ */
+function fingerprint(bytes: Uint8Array): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < Math.min(0x160, bytes.length); i++) h = Math.imul(h ^ bytes[i]!, 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
 
 export type RomSummary = {
   title: string;
@@ -29,14 +64,23 @@ export type RomSummary = {
   overlays: number;
   files: number;
   maps: string[];
+  fingerprint: string;
   inventory: { ext: string; magic: string; count: number; bytes: number }[];
 };
 
-export type WorkerRequest = { type: 'load'; rom: ArrayBuffer } | { type: 'map'; name: string };
+export type WorkerRequest =
+  | { type: 'load'; rom: ArrayBuffer }
+  | { type: 'map'; name: string }
+  /** Rebuild the unit sheets for these team colors (0..5). */
+  | { type: 'units'; teams: number[]; localTeam: number }
+  /** Redraw a map's ground for the live terrain (chopped trees). */
+  | { type: 'ground'; name: string; terrain: Uint8Array };
 export type WorkerResponse =
   | { type: 'loaded'; summary: RomSummary }
   | { type: 'units'; units: UnitBundle }
+  | { type: 'army'; army: ArmyBundle }
   | { type: 'map'; bundle: MapBundle; hud: HudBundle }
+  | { type: 'ground'; name: string; ground: Rgba }
   | { type: 'error'; error: string };
 
 let rom: UnpackedRom | null = null;
@@ -49,7 +93,8 @@ const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMe
 self.onmessage = (e: MessageEvent<WorkerRequest>) => {
   try {
     if (e.data.type === 'load') {
-      rom = unpackRom(new Uint8Array(e.data.rom));
+      const bytes = new Uint8Array(e.data.rom);
+      rom = unpackRom(bytes);
       post({
         type: 'loaded',
         summary: {
@@ -59,20 +104,29 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
           overlays: rom.overlays.length,
           files: rom.files.length,
           maps: listMaps(rom),
+          fingerprint: fingerprint(bytes),
           inventory: rom.inventory,
         },
       });
-      const r = rom;
-      const units = buildUnitBundle((path) => tryRomFile(r, path), TEAM_BANKS, (pal) =>
-        applyTeamColors(pal, r.arm9, r.header.arm9.ramAddress, r.header.gameCode, LOCAL_TEAM),
-      );
-      portraitIds = [...new Set(units.sprites.map((s) => s.name))];
-      post({ type: 'units', units }, units.sprites.map((s) => s.atlas.data.buffer));
+      const army = buildArmyBundle(rom);
+      extraUnits = [...new Set(army.choices.flat())].filter((n) => !/^[KWPIEA]_/.test(n));
+      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons), ...rgbaBuffers(army.spellIcons)]);
+      const u = units(rom, DEFAULT_TEAMS, LOCAL_TEAM);
+      portraitIds = [...new Set([...u.sprites, ...u.models, ...u.buildings].map((s) => s.name))];
+      post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
+    } else if (e.data.type === 'units') {
+      if (!rom) throw new Error('No ROM loaded');
+      const u = units(rom, e.data.teams, e.data.localTeam);
+      post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
+    } else if (e.data.type === 'ground') {
+      if (!rom) throw new Error('No ROM loaded');
+      const ground = rebakeGround(rom, e.data.name, e.data.terrain);
+      post({ type: 'ground', name: e.data.name, ground }, [ground.data.buffer]);
     } else {
       if (!rom) throw new Error('No ROM loaded');
       const bundle = buildMapBundle(rom, e.data.name);
       const hud = buildHudBundle(rom, portraitIds);
-      const transfer = [bundle.ground.data.buffer, ...(bundle.minimap ? [bundle.minimap.data.buffer] : [])];
+      const transfer = [bundle.ground.data.buffer, ...(bundle.minimap ? [bundle.minimap.data.buffer] : []), ...(bundle.structures ? [bundle.structures.wallTiles.data.buffer, bundle.structures.bridgeCells.data.buffer] : [])];
       post({ type: 'map', bundle, hud }, transfer as Transferable[]);
     }
   } catch (err) {

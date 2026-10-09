@@ -2,7 +2,23 @@ import type { Fx } from './fixed';
 import type { EntityId, PlayerId } from './state';
 
 /** Everything a player can do. These are what lockstep sends over the wire. */
-export type Command = { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx };
+export type Command =
+  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx }
+  | { kind: 'attack'; unitIds: EntityId[]; target: EntityId }
+  /** Builders chop the tree in cell (cx, cy) and keep harvesting nearby trees. */
+  | { kind: 'harvest'; unitIds: EntityId[]; cx: number; cy: number }
+  /** Pay for and place a building of entity kind `type` with its top-left at (cx, cy); the builders go build it. */
+  | { kind: 'build'; unitIds: EntityId[]; type: number; cx: number; cy: number }
+  /** Builders go work on an existing unfinished building. */
+  | { kind: 'construct'; unitIds: EntityId[]; site: EntityId }
+  /** Builders build a line of walls (entity kind `type`) from cell (fx, fy) to (tx, ty), paying as each piece starts. */
+  | { kind: 'wall'; unitIds: EntityId[]; type: number; fx: number; fy: number; tx: number; ty: number }
+  /** Builders build the bridge `type` at the map bridge site whose top-left is (cx, cy). */
+  | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
+  /** Queue a unit of entity kind `type` at a production building. */
+  | { kind: 'train'; building: EntityId; type: number }
+  /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
+  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 
 /** A command stamped with who issued it and the tick it executes on. */
 export interface ScheduledCommand {

@@ -8,6 +8,10 @@ export interface Pickable {
   /** Where the unit is drawn this frame, in world pixels (sprite anchor point). */
   x: number;
   y: number;
+  /** Hit box in world pixels, for buildings; units use HIT around their anchor. */
+  box?: { l: number; t: number; r: number; b: number };
+  /** Buildings are picked by click only, never by a box drag. */
+  building?: boolean;
 }
 
 /**
@@ -23,7 +27,8 @@ export class Selection {
   pick(units: readonly Pickable[], x: number, y: number): Pickable | undefined {
     let best: Pickable | undefined;
     for (const u of units) {
-      if (x < u.x - HIT.left || x > u.x + HIT.right || y < u.y - HIT.up || y > u.y + HIT.down) continue;
+      const b = u.box ?? { l: u.x - HIT.left, r: u.x + HIT.right, t: u.y - HIT.up, b: u.y + HIT.down };
+      if (x < b.l || x > b.r || y < b.t || y > b.b) continue;
       if (!best || u.y >= best.y) best = u;
     }
     return best;
@@ -34,6 +39,8 @@ export class Selection {
     const u = this.pick(units, x, y);
     if (!additive) this.ids.clear();
     if (u && u.owner === player) {
+      // A building is selected on its own, like in the game.
+      if (u.building || [...this.ids].some((id) => units.find((p) => p.id === id)?.building)) this.ids.clear();
       if (additive && this.ids.has(u.id)) this.ids.delete(u.id);
       else this.ids.add(u.id);
     }
@@ -44,7 +51,7 @@ export class Selection {
     const [l, r] = x0 < x1 ? [x0, x1] : [x1, x0];
     const [t, b] = y0 < y1 ? [y0, y1] : [y1, y0];
     if (!additive) this.ids.clear();
-    for (const u of units) if (u.owner === player && u.x >= l && u.x <= r && u.y >= t && u.y <= b) this.ids.add(u.id);
+    for (const u of units) if (u.owner === player && !u.building && u.x >= l && u.x <= r && u.y >= t && u.y <= b) this.ids.add(u.id);
   }
 
   /** Drop ids of units that no longer exist. */

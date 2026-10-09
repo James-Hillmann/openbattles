@@ -20,13 +20,26 @@ out/venv/bin/python tools/emu/ramdump.py game.nds out/boot.dst out/ram.bin
 ## Getting to a skirmish (USA ROM)
 
 1. Tap the title screen, create a profile, then type a name and tap Ok.
-2. Tap Single Player twice, then the second option twice. That opens the skirmish map picker.
+2. Tap Single Player (88,62) once, then the second option (175,90) twice. That opens the skirmish map picker.
 3. Use the arrows at (208,135) to pick a map, then tap Continue (215,165) four times.
+
+On The Pond (default map) with the default CPU, the Wizard's swordsmen reach your King about
+6000 frames after the match starts, which makes a handy combat test.
+
+## Economy watches
+
+The local player's object is at `0x0224D350` in a King skirmish; bricks are the u32 at +0x90.
+`desmume.memory.register_write(0x0224D3E0, cb, 4)` logs every change, and the return address on the
+stack names the caller (see `docs/re-notes/economy.md`). Selecting a unit and tapping the red tab at
+(8,50) opens its build/train strip on the bottom screen; a building preview is confirmed with the
+check mark that appears at the left edge. Hold the d-pad to scroll the camera (it accelerates).
 
 ## What's been checked this way
 
 - Trees: the baked ground and terrain layers in RAM match `bakeTrees()` on mp01, mp02 and mp03
   (see `docs/re-notes/formats.md`, "Trees").
+- Combat: melee damage, random rolls and cooldowns logged with exec hooks on `0x02050B70` and
+  `0x02050BC4` (`desmume.memory.register_exec`) match `sim/src/combat.ts` (see docs/re-notes/combat.md).
 - The map renderer is pixel-exact against the bottom screen, apart from sprites and fog of war.
 - HUD: the top screen we compose (frame, icons, counters, portrait, name, HP) matches the emulator pixel for
   pixel with the King and with the Builder selected. Tap a unit at its bottom-screen position (y - 192 in the

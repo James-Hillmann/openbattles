@@ -3,21 +3,27 @@ import { buildUnitSprites, parseEntities, spriteLayout, type EntityInfo } from '
 
 const u16le = (v: number) => [v & 0xff, v >> 8];
 
-/** Synthetic BPNZ: records of 0x7C bytes, strings at 0xFA08. Made-up names. */
+/**
+ * Synthetic BPNZ: the given units as 0x7C-byte kind-0 records, padded to the game's record count
+ * with 0x70-byte kind-2 records, then the string table. Made-up names.
+ */
 function ebp(entries: { name: string; asset: string; speed: number }[]): Uint8Array {
-  const d = new Uint8Array(0xfa08 + 256);
+  const count = 0x227;
+  const strings = entries.map((e) => `${e.name}\0${e.asset}\0`).join('');
+  const recBytes = entries.length * 0x7c + (count - entries.length) * 0x70;
+  const d = new Uint8Array(4 + recBytes + strings.length);
   d.set([0x42, 0x50, 0x4e, 0x5a], 0);
   let str = 0;
+  let r = 4;
   entries.forEach((e, i) => {
-    const r = 4 + i * 0x7c;
     d.set(u16le(str), r);
     d.set(u16le(0x100 + i), r + 6);
     d.set(u16le(e.speed), r + 0x0c);
-    for (const s of [e.name, e.asset]) {
-      d.set([...s].map((c) => c.charCodeAt(0)), 0xfa08 + str);
-      str += s.length + 1;
-    }
+    str += e.name.length + e.asset.length + 2;
+    r += 0x7c;
   });
+  for (let i = entries.length; i < count; i++, r += 0x70) d[r + 8] = 2;
+  d.set([...strings].map((c) => c.charCodeAt(0)), r);
   return d;
 }
 
@@ -47,7 +53,7 @@ describe('unit atlases', () => {
   const sheet = (w: number, h: number, v: number) => ({ tilesWide: w / 8, tilesHigh: h / 8, bpp: 4 as const, pixels: new Uint8Array(w * h).fill(v) });
 
   it('packs infantry idle, walk and attack into facing rows', () => {
-    const e: EntityInfo = { index: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
+    const e: EntityInfo = { index: 0, entityIndex: 0, id: 1, name: 'X_Mel', asset: 'Sprites/x_mel', speed: 410 };
     // Idle strip = index 1, walk sheet = 2, attack sheet = 3.
     const files: Record<string, ReturnType<typeof sheet>> = {
       'Sprites/x_mel_0.NCBR': sheet(128, 32, 1),
@@ -63,7 +69,7 @@ describe('unit atlases', () => {
     const out = buildUnitSprites([e], (p) => files[p], pal, [0, 2]);
     expect(out.map((s) => s.key)).toEqual(['X_Mel@0', 'X_Mel@2']);
     const s = out[0]!;
-    expect([s.atlas.width, s.atlas.height, s.frame]).toEqual([11 * 24, 5 * 24, 24]);
+    expect([s.atlas.width, s.atlas.height, s.frameW, s.frameH, s.rows]).toEqual([11 * 24, 5 * 24, 24, 24, 5]);
     const px = (col: number, row: number) => s.atlas.data[((row * 24 + 12) * s.atlas.width + col * 24 + 12) * 4];
     expect([px(0, 0), px(1, 4), px(5, 2), px(6, 1), px(10, 3)]).toEqual([1, 2, 2, 3, 3]);
     expect(s.walk).toEqual([1, 2, 3, 4, 5, 0]);

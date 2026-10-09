@@ -5,6 +5,7 @@ import { minimapDotColors } from './minimap';
 import { decodeCells, decodeChars, decodePalette, decodeScreen, type CharData } from './nitro';
 import { blitTile, renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
+import { buildParticleFx, type ParticleFx } from './effects';
 
 /**
  * The in-game top screen (256x192): red brick frame, name / portrait / minimap
@@ -25,6 +26,40 @@ export interface HudBundle {
   nameFont: Font;
   /** Minimap dot colors by palette index (4 red, 5 blue); undefined for unmapped game versions. */
   minimapDots?: [number, number, number][];
+  /** 24x24 build/train strip icons by entity name, for the entities whose icon number is known (COMMAND_ICONS). */
+  commandIcons: Record<string, Rgba>;
+  /** The dust cloud and flying studs over building sites (docs/re-notes/build-ui.md). */
+  particles?: ParticleFx;
+}
+
+/**
+ * Icon number in `UI/MiniHeadsGame.NCGR` (a grid of 24x24 cells, 16 a row) per entity, read off both
+ * screens in the emulator (docs/re-notes/hud.md). confirmed for these King entities; where the game
+ * keeps this mapping, and the other factions' numbers, are open.
+ */
+export const COMMAND_ICONS: Record<string, number> = {
+  K_Castle: 9, K_LumberMill: 10, K_Mine: 11, K_Farm: 12, K_Barracks: 13, K_Stables: 14, K_Tower: 15,
+  K_King: 104, K_Engineer: 105, K_Shipyard: 151,
+};
+/** MiniHeadsGame is drawn with WorldViewTop_Back bank 7, the same red as the strip's texture palette. confirmed */
+const COMMAND_ICON_BANK = 7;
+
+/** One 24x24 icon cell. Reads pixels directly: the sheet has 1440 tiles and blitTile keeps only 10 bits of a tile number. */
+function commandIcon(chars: CharData, pal: Uint8Array, i: number): Rgba {
+  const out = blank(24, 24);
+  const x0 = (i % 16) * 24;
+  const y0 = Math.floor(i / 16) * 24;
+  for (let y = 0; y < 24; y++) {
+    for (let x = 0; x < 24; x++) {
+      const sx = x0 + x;
+      const sy = y0 + y;
+      const v = chars.pixels[((sy >> 3) * chars.tilesWide + (sx >> 3)) * 64 + (sy & 7) * 8 + (sx & 7)]!;
+      if (!v) continue;
+      const o = (COMMAND_ICON_BANK * 16 + v) * 4;
+      out.data.set([pal[o]!, pal[o + 1]!, pal[o + 2]!, 255], (y * 24 + x) * 4);
+    }
+  }
+  return out;
 }
 
 /** Where things sit on the top screen (confirmed against the emulator unless noted). */
@@ -125,7 +160,13 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const p = portrait(rom, id);
     if (p) portraits[id] = p;
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), minimapDots: minimapDotColors(rom) };
+  const heads = tryRomFile(rom, 'UI/MiniHeadsGame.NCGR');
+  const commandIcons: Record<string, Rgba> = {};
+  if (heads) {
+    const hc = decodeChars(heads);
+    for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
+  }
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom) };
 }
 
 /** What the top screen shows this frame. */
@@ -133,13 +174,18 @@ export interface TopScreenState {
   bricks: number;
   minifigs: number;
   minifigCap: number;
-  /** Third counter (spinning red star): special units and their cap (likely; see hud.md). */
+  /** Third counter (spinning red star): special units against their cap (see docs/re-notes/economy.md). */
   star: [number, number];
   /** Drives the icon animations. */
   timeMs: number;
   /** The selected entity, if any: index into `labels`, and its current HP. */
   selected?: { entity: number; hp: number };
   minimap?: MinimapState;
+  /**
+   * While the build/train strip is open: the panel title ("Build Costs") and what the strip offers. Replaces the minimap.
+   * The hero's spell strip shows "Magic Costs" the same way, plus the hero's charge and most charge.
+   */
+  costs?: { title: string; items: { icon: Rgba; cost: number }[]; charge?: [number, number] };
 }
 
 /** Minimap contents, all in minimap pixels (map px * 1.5 / cell size, i.e. x / 16, y * 3 / 32). */
@@ -161,6 +207,37 @@ function draw(out: Rgba, img: Rgba, px: number, py: number): void {
       out.data.set(img.data.subarray(s, s + 4), (dy * out.width + dx) * 4);
     }
   }
+}
+
+/**
+ * A number in the status-bar digit font, packed tight (each glyph cropped to its own columns, 1 px
+ * apart) so four digits fit under a 24 px strip icon. Ours: the game only prints prices on the top
+ * screen's Build Costs panel, on its 8 px grid.
+ */
+export function priceLabel(hud: HudBundle, n: number): Rgba {
+  const cols = (g: Rgba) => {
+    let lo = g.width;
+    let hi = -1;
+    for (let y = 0; y < g.height; y++) {
+      for (let x = 0; x < g.width; x++) {
+        if (!g.data[(y * g.width + x) * 4 + 3]) continue;
+        lo = Math.min(lo, x);
+        hi = Math.max(hi, x);
+      }
+    }
+    return hi < 0 ? [0, -1] : [lo, hi];
+  };
+  const glyphs = [...String(n)].map((c) => hud.glyphs[c]).filter((g): g is Rgba => !!g);
+  const spans = glyphs.map(cols);
+  const width = Math.max(1, spans.reduce((w, [lo, hi]) => w + hi! - lo! + 2, -1));
+  const out = blank(width, 8);
+  let x = 0;
+  glyphs.forEach((g, i) => {
+    const [lo, hi] = spans[i]!;
+    draw(out, g, x - lo!, 0);
+    x += hi! - lo! + 2;
+  });
+  return out;
 }
 
 function drawDigits(out: Rgba, hud: HudBundle, text: string, x: number, y: number): void {
@@ -199,6 +276,39 @@ function drawMinimap(out: Rgba, m: MinimapState): void {
   }
 }
 
+/**
+ * "Build Costs" panel (emulator, Builder and Castle selected): a dark panel over the minimap's
+ * place, x 136-239, y 40-167, holding the strip's icons in rows of three at x 144 + 32n,
+ * y 40 + 32n, each cost on the 8 px tile grid in the row under its icon, centred. confirmed
+ * against the King Builder's ten buildings.
+ */
+export const COST_PANEL = { x: 136, y: 40, w: 104, h: 128, iconX: 144, iconY: 40, step: 32, cols: 3, rgb: [40, 32, 48] } as const;
+
+/**
+ * "Magic Costs" (hero selected, spell strip open): the hero's charge as "now/most" on the panel's
+ * bottom text row, centred on x 184 on the 8 px grid like the HP. confirmed in the emulator with
+ * 1000/1000 (x 144), 901/1000 and 96/1000 (x 152), y 128.
+ */
+export const CHARGE_TEXT = { centerX: 184, y: 128 } as const;
+
+function drawCosts(out: Rgba, hud: HudBundle, items: readonly { icon: Rgba; cost: number }[], charge?: [number, number]): void {
+  const P = COST_PANEL;
+  for (let y = P.y; y < P.y + P.h; y++)
+    for (let x = P.x; x < P.x + P.w; x++) out.data.set([P.rgb[0], P.rgb[1], P.rgb[2], 255], (y * TOP_W + x) * 4);
+  items.forEach((it, i) => {
+    const x = P.iconX + (i % P.cols) * P.step;
+    const y = P.iconY + Math.floor(i / P.cols) * P.step;
+    if (y + 32 > P.y + P.h + 8) return;
+    draw(out, it.icon, x, y);
+    const text = String(it.cost);
+    drawDigits(out, hud, text, Math.floor((x + 12 - text.length * 4) / 8) * 8, y + 24);
+  });
+  if (charge) {
+    const text = `${charge[0]}/${charge[1]}`;
+    drawDigits(out, hud, text, Math.floor(CHARGE_TEXT.centerX / 8 - text.length / 2) * 8, CHARGE_TEXT.y);
+  }
+}
+
 /** Name text color: sub BG palette bank 0 color 14 (white 0x7FFF). */
 const NAME_RGB: [number, number, number] = [255, 255, 255];
 
@@ -212,7 +322,8 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   drawDigits(out, hud, String(s.bricks), L.counters.bricks, L.counters.y);
   drawDigits(out, hud, `${s.minifigs}/${s.minifigCap}`, L.counters.minifigs, L.counters.y);
   drawDigits(out, hud, `${s.star[0]}/${s.star[1]}`, L.counters.star, L.counters.y);
-  if (s.minimap) drawMinimap(out, s.minimap);
+  if (s.costs) drawCosts(out, hud, s.costs.items, s.costs.charge);
+  else if (s.minimap) drawMinimap(out, s.minimap);
   const label = s.selected ? hud.labels[s.selected.entity] : undefined;
   if (s.selected && label) {
     const p = hud.portraits[label.id];
@@ -223,7 +334,7 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
       }
       draw(out, p, L.portrait.x, L.portrait.y);
     }
-    const name = renderText(hud.nameFont, label.display, NAME_RGB);
+    const name = renderText(hud.nameFont, s.costs?.title ?? label.display, NAME_RGB);
     draw(out, name, (L.nameSpan - name.width) >> 1, L.nameY);
     const hp = `${Math.max(0, s.selected.hp)}/${label.maxHp}`;
     // On the 8 px tile grid, centered under the portrait.
