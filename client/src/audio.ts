@@ -16,11 +16,22 @@ export interface SoundSource {
   render(req: { effect: { arc: number; index: number } } | { music: number }): Promise<SoundPcm | null>;
 }
 
-/** The game's option bytes: 0..127 each (profile options; a new profile has music 50, effects 127). */
+/**
+ * `music` and `effects` are the game's option bytes, 0..127 (a new profile has music 50, effects 127).
+ * `volume` (0..100) and `muted` are ours: the on-screen control in front of both, because the DS's
+ * full scale out of a small speaker is far louder through headphones or desk speakers.
+ */
 export interface AudioSettings {
   music: number;
   effects: number;
+  volume: number;
+  muted: boolean;
 }
+
+/** Starting position of our on-screen volume: 40% is -16 dB on the curve below. */
+export const DEFAULT_VOLUME = 40;
+/** Our on-screen volume, 0..100, to gain: squared, so the slider feels even across its length. */
+export const masterGain = (v: number): number => (Math.min(100, Math.max(0, v)) / 100) ** 2;
 
 /** A 0..127 volume through the sound library's curve (20 log10(v / 127) dB, `SNDi_DecibelTable`). */
 export const volumeGain = (v: number): number => (v <= 0 ? 0 : 10 ** (decibel(Math.min(127, v)) / 200));
@@ -46,13 +57,15 @@ export class GameAudio {
   /** Music stream being decoded. */
   private pendingMusic: string | null = null;
   private labelIndex: Map<string, { arc: number; index: number }> | null = null;
-  settings: AudioSettings = { music: 50, effects: 127 };
+  settings: AudioSettings = { music: 50, effects: 127, volume: DEFAULT_VOLUME, muted: false };
 
   constructor(private source: SoundSource) {
     try {
       const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null') as Partial<AudioSettings> | null;
       const ok = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 127;
-      if (s && ok(s.music) && ok(s.effects)) this.settings = { music: s.music, effects: s.effects };
+      if (s && ok(s.music) && ok(s.effects)) this.settings = { ...this.settings, music: s.music, effects: s.effects };
+      if (s && typeof s.volume === 'number' && s.volume >= 0 && s.volume <= 100) this.settings.volume = s.volume;
+      if (s && typeof s.muted === 'boolean') this.settings.muted = s.muted;
     } catch {
       /* storage blocked: defaults */
     }
@@ -105,6 +118,7 @@ export class GameAudio {
   }
 
   private applySettings() {
+    if (this.master) this.master.gain.value = this.settings.muted ? 0 : masterGain(this.settings.volume);
     if (this.musicBus) this.musicBus.gain.value = volumeGain(this.settings.music);
     if (this.fxBus) this.fxBus.gain.value = volumeGain(this.settings.effects);
   }
