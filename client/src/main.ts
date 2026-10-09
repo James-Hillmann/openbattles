@@ -48,6 +48,8 @@ import {
   spellTarget,
   spellWorks,
   isFrozen,
+  canTarget,
+  TAP_POINT,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars, type CostAction } from './hud';
@@ -436,7 +438,7 @@ app.canvas.addEventListener('contextmenu', (e) => {
 
 /** Enemy units outside our vision aren't drawn. guess: not yet checked in the emulator. */
 function hiddenByFog(u: World['units'][number]): boolean {
-  if (!fog || u.owner === localPlayer) return false;
+  if (!fog || u.owner === localPlayer || u.tracked) return false; // Tracking shows its target through fog (likely)
   const [cx, cy] = visionCell(u);
   return !isVisible(fog, cx, cy);
 }
@@ -792,8 +794,16 @@ function pickSpell(id: number) {
   aiming = aiming?.spell === id ? null : { spell: id, hero: hero.id };
 }
 
-const aimingHint = (d: SpellDef | undefined) =>
-  !d ? '' : spellTarget(d) === 'point' ? 'Pick a spot.' : d.flags & 4 ? 'Pick an enemy unit.' : 'Pick one of your units.';
+function aimingHint(d: SpellDef | undefined): string {
+  if (!d) return '';
+  if (spellTarget(d) === 'point') return 'Pick a spot.';
+  const f = d.flags;
+  if (f & 0x20) return 'Pick an enemy transport or siege unit.';
+  if (f & 0x10) return 'Pick one of your mines.';
+  if (f & 8) return 'Pick one of your Builders.';
+  if (f & 4) return f & TAP_POINT ? 'Pick an enemy or a spot.' : 'Pick an enemy.';
+  return 'Pick one of your units.';
+}
 
 /** Cast the armed spell at the clicked unit or spot. False when no spell is armed. */
 function tryCast(px: number, py: number): boolean {
@@ -806,8 +816,10 @@ function tryCast(px: number, py: number): boolean {
   }
   const hit = selection.pick(drawn, px, py);
   const target = hit ? world.units.find((u) => u.id === hit.id) : undefined;
-  if (spellTarget(def) === 'unit' && !target) return true; // keep aiming until a unit is clicked
-  match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: target && spellTarget(def) === 'unit' ? target.id : 0, x: fx(px), y: fx(py) });
+  const unit = spellTarget(def) === 'unit' && target && canTarget(world, def, localPlayer, target) ? target : undefined;
+  // Keep aiming until a unit the spell takes is clicked (unit spells that also take a spot cast there).
+  if (spellTarget(def) === 'unit' && !unit && !(def.flags & TAP_POINT)) return true;
+  match.issue({ kind: 'cast', caster: hero.id, spell: def.id, target: unit ? unit.id : 0, x: fx(px), y: fx(py) });
   aiming = null;
   return true;
 }

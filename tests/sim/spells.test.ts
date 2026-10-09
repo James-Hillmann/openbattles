@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUFF_TICKS,
+  TERRAIN_OPEN,
+  cellCenterX,
+  cellCenterY,
   CELL_H,
   CELL_W,
   cloneWorld,
@@ -8,6 +11,7 @@ import {
   fx,
   hashWorld,
   moveSpeed,
+  placeBuilding,
   sanitizeCommand,
   spawnUnit,
   spellTarget,
@@ -42,6 +46,11 @@ DEFS[13] = big(13, [5, 50, 12, 50], 0x40, 600);
 DEFS[20] = big(20, [3, 50, 6, 60], 4, 400);
 DEFS[25] = big(25, [5, 50, 10, 60], 1, 600);
 DEFS[29] = big(29, [0, 0, 0, 0], 1, 400);
+DEFS[15] = { ...big(15, [0, 0, 0, 0], 0x40, 600), b7: 0 };
+DEFS[26] = big(26, [0, 0, 0, 0], 0x40, 300);
+DEFS[30] = { ...big(30, [0, 0, 0, 0], 4, 300), b7: 6, time: 240 };
+DEFS[32] = big(32, [0, 0, 0, 0], 0x20, 300);
+DEFS[33] = { ...big(33, [5, 50, 9, 65], 4, 500), time: 30 };
 for (let i = 0; i < 35; i++) DEFS[i] ??= def(i, 10, 5, 1, 300);
 
 const melee = (damage: number, damageRand: number, cooldown: number) => ({
@@ -322,5 +331,66 @@ describe('freeze ring', () => {
     expect(far.frozen).toBeGreaterThan(w.tick);
     run(w, 30);
     expect(w.spells.some((s) => s.spell === 29)).toBe(false);
+  });
+});
+
+describe('utility spells', () => {
+  it('Lightning: a record-33 damage area around the hero 14 ticks after the cast', () => {
+    const w = world();
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [15] });
+    const castTick = w.tick;
+    cast(w, hero.id, 15, 0, 0);
+    run(w, 13);
+    expect(w.spells.some((s) => s.spell === 33)).toBe(false);
+    run(w, 1);
+    const bolt = w.spells.find((s) => s.spell === 33)!;
+    expect(bolt.start).toBe(castTick + 14);
+    expect([bolt.dmg >> 12, bolt.chance >> 12, bolt.left]).toEqual([9, 65, 30]);
+  });
+
+  it('Teleport: the hero lands next to its base 23 ticks after the cast', () => {
+    const cells = new Uint8Array(24 * 24).fill(TERRAIN_OPEN);
+    const w = createWorld({ seed: 1, grid: { width: 24, height: 24, cells }, spellDefs: DEFS, players: [{ id: 0, team: 0, bricks: 0, status: 0, start: -1, reservedPop: 0, reservedStars: 0 }] });
+    placeBuilding(w, 0, { kind: 10, role: 7, size: 3, hp: 3000, speed: 0xffff }, 10, 10);
+    const hero = spawnUnit(w, 0, cellCenterX(2), cellCenterY(2), { ...HERO, spells: [26] });
+    cast(w, hero.id, 26, 0, 0);
+    run(w, 22);
+    expect([hero.x, hero.y]).toEqual([cellCenterX(2), cellCenterY(2)]);
+    run(w, 1);
+    expect([hero.x, hero.y]).toEqual([cellCenterX(10), cellCenterY(9)]); // the ring search's first cell: straight up
+    run(w, 2);
+    expect(w.spells.some((s) => s.spell === 26)).toBe(false);
+  });
+
+  it('Tracking marks an enemy for 240 ticks', () => {
+    const w = world();
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [30] });
+    const own = spawnUnit(w, 0, ...at(6, 5), GUARD);
+    const foe = spawnUnit(w, 1, ...at(9, 5), GUARD);
+    cast(w, hero.id, 30, 0, 0, own.id);
+    expect(own.tracked).toBe(0);
+    cast(w, hero.id, 30, 0, 0, foe.id);
+    expect(foe.tracked).toBe(1);
+    run(w, 239);
+    expect(foe.tracked).toBe(1);
+    run(w, 2);
+    expect(foe.tracked).toBe(0);
+  });
+
+  it('Hot Wire takes over an enemy transport or siege unit for good', () => {
+    const w = world();
+    w.players.push({ id: 0, team: 0, bricks: 0, status: 0, start: -1, reservedPop: 0, reservedStars: 0 }, { id: 1, team: 1, bricks: 0, status: 0, start: -1, reservedPop: 0, reservedStars: 0 });
+    const hero = spawnUnit(w, 0, ...at(5, 5), { ...HERO, spells: [32] });
+    const guard = spawnUnit(w, 1, ...at(8, 5), GUARD);
+    const boat = spawnUnit(w, 1, ...at(9, 5), { ...GUARD, role: 5 });
+    cast(w, hero.id, 32, 0, 0, guard.id);
+    expect(w.spells.some((s) => s.spell === 32)).toBe(false);
+    cast(w, hero.id, 32, 0, 0, boat.id);
+    expect(boat.owner).toBe(1);
+    run(w, 1);
+    expect(boat.owner).toBe(0);
+    run(w, 100);
+    expect(boat.owner).toBe(0);
+    expect(w.spells.some((s) => s.spell === 32)).toBe(false);
   });
 });
