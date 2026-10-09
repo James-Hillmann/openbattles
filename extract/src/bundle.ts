@@ -24,6 +24,8 @@ export interface MapBundle {
   starts: StartRecord[];
   /** Cells where a Mine may stand (top-left of its footprint). */
   mineSites: { x: number; y: number }[];
+  /** Pickup records from EVNT: cell and the mission blueprint index (8 = Blue Stud on skirmish maps). */
+  pickups: { x: number; y: number; item: number }[];
   /** Bridge sites from the MARK section (top-left of the span). */
   bridgeMarks: { x: number; y: number; vertical: boolean }[];
   /** Forest points for the computer opponent (MARK type 0). */
@@ -94,6 +96,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));
   return {
     name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus,
-    starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, forestMarks: map.forestMarks, towerMarks: map.towerMarks, structures,
+    starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, forestMarks: map.forestMarks, towerMarks: map.towerMarks, structures, pickups: map.pickups,
   };
 }

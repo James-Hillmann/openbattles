@@ -23,6 +23,15 @@ The win condition ends up in `GameRuleManager +4` (pointer at `0x02155084`):
 **0 hero, 1 all units, 2 bricks**. Confirmed by starting a game with each option
 and reading the field.
 
+## Random starting positions (confirmed code and RAM)
+
+`0x020A2C48` builds the slot-to-player table at `[[0x02156BD0]+0x320]` (count +0x324). With the
+option off (`0x020A2BEC`) slot i goes to the i-th team. With it on, the free list is every slot the
+map has (0..3 on mp01), and each present player in turn takes a random remaining one through
+`0x0208339C` (`MATH_Rand32`). Read with it on: [1, 255, 0, 255]. The sim does the same with the
+seeded RNG (`randomSlots` in skirmish.ts), so both lockstep clients draw the same slots. Which
+player draws first is likely (team order).
+
 ## Start setup: the map's EVNT section (likely; spot-checked in the emulator)
 
 Reader `Map_readEvnt` `0x020A3BB0`: groups of `'L'`, u8 group id, body, until `'!'`.
@@ -135,4 +144,4 @@ flood fill with the unit's own mask instead.
 
 - Fog of war: see [fog.md](fog.md).
 - Buildings' footprints. The sim gives a building its record's cell only. **guess**
-- Pickups and what they give; brick income.
+- Pickups: see [pickups.md](pickups.md). Score stats: [score.md](score.md).

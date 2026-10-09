@@ -10,6 +10,8 @@ import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type Ga
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
+import { pickupsStep } from './pickups';
+import { countBuilt, countDeath } from './stats';
 import { orderRepair, orderUpgrade } from './structures';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
@@ -44,7 +46,7 @@ export function createWorld({ seed, grid = null, bonus = null, players = [], rul
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], ai: [],
+    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], pickups: [], nextPickup: 1, lastDead: [], ai: [],
   };
 }
 
@@ -105,6 +107,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     cell: -1,
     mv: null,
     lastHit: NEVER,
+    lastHitBy: -1,
     born: w.tick,
     priority: type.priority ?? 0,
     moves: type.moves ?? MOVES_GROUND,
@@ -145,6 +148,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
 /** Spawn an entity of a ROM type in a map cell (production and construction sites). */
 const spawnInCell: SpawnFn = (w, owner, t, cell) => {
   const { x, y } = cellPos(w.grid!, cell);
+  countBuilt(w, owner, t.role); // a trained unit (0x02072228)
   return spawnUnit(w, owner, x, y, t);
 };
 
@@ -318,6 +322,7 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (w.grid) moveOnMap(w, u);
     else moveUnit(u);
   }
+  pickupsStep(w);
   if (w.types.length > 0) economyStep(w, spawnInCell, placeBuilding);
   // A bridge going down takes the ground units on it with it, so they die this tick too.
   if (w.grid) for (const b of w.units) if (b.hp === 0 && b.role === ROLE_BRIDGE) collapseBridge(w, b);
@@ -327,7 +332,11 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (isBuilding(u)) clearFootprint(w, u);
   }
   w.units = w.units.filter((u) => u.hp > 0);
-  for (const u of dead) onUnitLost(w, u.owner);
+  w.lastDead = dead;
+  for (const u of dead) {
+    countDeath(w, u);
+    onUnitLost(w, u.owner);
+  }
   checkBricks(w);
   w.tick++;
 }
@@ -345,7 +354,8 @@ export function cloneWorld(w: World): World {
     projectiles: w.projectiles.map((p) => ({ ...p })),
     spells: w.spells.map((s) => ({ ...s, units: [...s.units] })),
     scanQueue: [...w.scanQueue],
-    players: w.players.map((p) => ({ ...p })),
+    pickups: w.pickups.map((p) => ({ ...p })),
+    players: w.players.map((p) => ({ ...p, ...(p.stats ? { stats: { built: [...p.stats.built], lost: [...p.stats.lost], destroyed: [...p.stats.destroyed], bricks: p.stats.bricks } } : {}) })),
     // The renderer's copy never steps, so it can share the AI state.
     ai: w.ai,
   };

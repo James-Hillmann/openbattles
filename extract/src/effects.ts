@@ -1,5 +1,6 @@
 import { romFile, tryRomFile } from './bundle';
 import { decodeChars, decodePalette } from './nitro';
+import { renderSheet } from './render';
 import type { Rgba } from './render';
 import type { UnpackedRom } from './rom';
 
@@ -35,6 +36,12 @@ export interface ParticleFx {
   dust: ParticleAnim;
   /** `Particles/LegoStudConstruction.hps` (50 frames). */
   studs: ParticleAnim;
+  /** `Particles/LegoStudDestroy.hps`: a building's studs bursting when it dies (docs/re-notes/death.md). */
+  studDestroy?: ParticleAnim;
+  /** `Particles/LegoSmallStudDestroy.hps`: the same for a unit. */
+  smallStudDestroy?: ParticleAnim;
+  /** The Blue Stud's spinning gold brick, 16x16 frames (docs/re-notes/pickups.md "Look"). */
+  blueStud?: Rgba[];
   /** Sprite pictures by hash (hex), cut from `UI/AllInOne/CastleEffects` with palette bank 0. */
   sprites: Record<string, Rgba>;
 }
@@ -91,12 +98,16 @@ export function buildParticleFx(rom: UnpackedRom): ParticleFx | undefined {
   if (!dustFile || !studFile || !ui) return undefined;
   const dust = decodeHps(dustFile);
   const studs = decodeHps(studFile);
+  const destroyFile = tryRomFile(rom, 'Particles/LegoStudDestroy.hps');
+  const smallFile = tryRomFile(rom, 'Particles/LegoSmallStudDestroy.hps');
+  const studDestroy = destroyFile ? decodeHps(destroyFile) : undefined;
+  const smallStudDestroy = smallFile ? decodeHps(smallFile) : undefined;
   // A 256x256 4bpp bitmap stored linearly (not as tiles), drawn with palette bank 0.
   const sheet = decodeChars(romFile(rom, 'UI/AllInOne/CastleEffects.NCBR'));
   const pal = decodePalette(romFile(rom, 'UI/AllInOne/CastleEffects.NCLR'));
   const stride = sheet.tilesWide * 8;
   const sprites: Record<string, Rgba> = {};
-  for (const p of [...dust.flat(), ...studs.flat()]) {
+  for (const p of [...dust, ...studs, ...(studDestroy ?? []), ...(smallStudDestroy ?? [])].flat()) {
     if (sprites[p.sprite]) continue;
     const r = spriteRect(ui, parseInt(p.sprite, 16));
     if (!r) continue;
@@ -111,5 +122,29 @@ export function buildParticleFx(rom: UnpackedRom): ParticleFx | undefined {
     }
     sprites[p.sprite] = img;
   }
-  return { dust, studs, sprites };
+  const blueStud = buildBlueStud(rom);
+  return { dust, studs, sprites, ...(blueStud ? { blueStud } : {}), ...(studDestroy ? { studDestroy } : {}), ...(smallStudDestroy ? { smallStudDestroy } : {}) };
+}
+
+/**
+ * `Sprites/CastleItems.NCBR` is a 64x128 linear 4bpp sheet of 16x16 item pictures drawn with
+ * `Sprites/KingFaction.NCLR` bank 0. The Blue Stud on the map spins through the five gold-brick
+ * pictures (row 1 col 3, row 2 cols 0-3), each held 3 VBlanks: the pictures and the period are
+ * confirmed against the emulator, the order within the spin is likely.
+ */
+export const BLUE_STUD_CELLS = [7, 8, 9, 10, 11];
+export const BLUE_STUD_VBLANKS = 3;
+
+function buildBlueStud(rom: UnpackedRom): Rgba[] | undefined {
+  const items = tryRomFile(rom, 'Sprites/CastleItems.NCBR');
+  const palFile = tryRomFile(rom, 'Sprites/KingFaction.NCLR');
+  if (!items || !palFile) return undefined;
+  const sheet = renderSheet(decodeChars(items), decodePalette(palFile), 0);
+  return BLUE_STUD_CELLS.map((c) => {
+    const img: Rgba = { width: 16, height: 16, data: new Uint8ClampedArray(16 * 16 * 4) };
+    const x0 = (c % 4) * 16;
+    const y0 = Math.floor(c / 4) * 16;
+    for (let y = 0; y < 16; y++) img.data.set(sheet.data.subarray(((y0 + y) * sheet.width + x0) * 4, ((y0 + y) * sheet.width + x0 + 16) * 4), y * 64);
+    return img;
+  });
 }

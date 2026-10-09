@@ -86,6 +86,7 @@ import type { SkirmishSetup } from './menus';
 import { CommandBar, type CommandItem } from './commandBar';
 import { BattleAlert } from './battleAlert';
 import { SiteFx } from './siteFx';
+import { MatchExtras, scoreTable } from './matchExtras';
 import { GameAudio } from './audio';
 import { GameSound } from './gameSound';
 import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
@@ -162,6 +163,8 @@ const structureLayer = new Container();
 camera.addChild(structureLayer);
 const structures = new StructureView(structureLayer);
 const unitLayer = new Container();
+/** Pickups, death bursts and the score table (matchExtras.ts). */
+const extras = new MatchExtras(unitLayer);
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
@@ -285,6 +288,8 @@ function startSkirmish() {
     rules: { mode: settings ? WIN_MODE[settings.game] : 0 },
     bricks: settings?.bank ?? START_BRICKS,
     slots: Array.from({ length: players }, (_, p) => p),
+    randomStart: settings?.randomStart ?? false,
+    pickups: mapPickups,
     armies: Array.from({ length: players }, (_, p) => {
       const army = pickOf(p);
       return army ? { units: army.units.map((n) => unitStats[n]?.index ?? -1), base: basePrefix(p) } : undefined;
@@ -299,6 +304,7 @@ function startSkirmish() {
   mapGrid = grid;
   groundTrees = treeCount(grid.cells);
   adopt(world);
+  extras.reset();
   for (const sp of unitSprites.values()) sp.destroy();
   unitSprites.clear();
   unitAnim.clear();
@@ -324,6 +330,7 @@ let mapMines: number[] = [];
 /** Forest points the computer opponent picks trees from (map MARK type 0). */
 let mapForest: number[] = [];
 let mapTowers: number[] = [];
+let mapPickups: { x: number; y: number; item: number }[] = [];
 /** The map's bridge sites, each with the bridge that fits it. */
 let mapBridges: BridgeSite[] = [];
 let mapName = '';
@@ -350,6 +357,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   hudBundle = hud;
   priceCanvases.clear();
   siteFx = hud.particles ? new SiteFx(hud.particles) : null;
+  extras.setParticles(hud.particles, textureFrom);
   minimap = b.minimap;
   minimapDots = hud.minimapDots ?? [];
   combatBonus = b.combatBonus;
@@ -357,6 +365,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
   mapTerrain = b.terrain.slice();
   mapStarts = b.starts;
+  mapPickups = b.pickups ?? [];
   mapMines = b.mineSites.map((m) => m.y * b.width + m.x);
   mapForest = b.forestMarks.map((m) => m.y * b.width + m.x);
   mapTowers = b.towerMarks.map((m) => m.y * b.width + m.x);
@@ -1344,6 +1353,7 @@ function advance(ms: number) {
     if (!appEl.classList.contains('menu')) sound.tick(before, world, localPlayer, heard);
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
     if (fog) updateFog(fog, world, localPlayer);
+    extras.onTick(world, animTime / TICK_MS, (u) => !hiddenByFog(u));
     tickEl.textContent = String(world.tick);
     hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
   }
@@ -1394,6 +1404,8 @@ app.ticker.add((t) => {
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
   drawFog();
+  // Pickups show once their cell has been explored (guess: not checked against the game's fog).
+  extras.render(world, animTime / TICK_MS, (c) => !fog || fog.explored[c] === 1);
   structures.draw(world, (o) => teamColor[o] ?? o, hiddenByFog);
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
@@ -1503,7 +1515,13 @@ app.ticker.add((t) => {
   const selectedEntity = selectedName ? hudView.entityIndex(selectedName) : -1;
   const me = getPlayer(world, localPlayer);
   endEl.hidden = !me || me.status === PLAYING;
-  if (me && me.status !== PLAYING) endEl.textContent = me.status === WON ? 'Victory!' : 'Defeat';
+  if (me && me.status !== PLAYING && endEl.dataset.tick !== String(world.tick)) {
+    // The banner, then the score table (docs/re-notes/score.md).
+    endEl.dataset.tick = String(world.tick);
+    const banner = me.status === WON ? armyBundle?.text[FE_TEXT.victory] || 'Victory!' : armyBundle?.text[FE_TEXT.defeated] || 'Defeat';
+    const names = world.players.map((p) => (p.id === localPlayer ? 'You' : `P${p.id + 1}`));
+    endEl.innerHTML = `<div>${banner.replace(/[&<>]/g, '')}</div><div class="score">${scoreTable(world, armyBundle?.text ?? {}, !!online, names)}</div>`;
+  }
   hudView.setActions(stripCosts ? costActions : []);
   hudView.update({
     costs: stripCosts ?? undefined,
@@ -1643,7 +1661,7 @@ const menus = mountMenus(screensEl, {
 let offlineSettings: GameSettings | null = null;
 
 async function startOffline(setup: SkirmishSetup) {
-  offlineSettings = { game: setup.game, map: setup.map, randomStart: false, prebase: setup.prebase, bank: setup.bank };
+  offlineSettings = { game: setup.game, map: setup.map, randomStart: setup.randomStart, prebase: setup.prebase, bank: setup.bank };
   const b = armyBundle!;
   picks = [validPick(myPick) ?? defaultPick(b), defaultPick(b, setup.opponent)];
   setMode('game');

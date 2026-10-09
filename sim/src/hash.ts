@@ -133,6 +133,12 @@ export function hashWorld(w: World): number {
     mix(w.scanQueue.length);
     for (const id of w.scanQueue) mix(id);
   }
+  // Pickups: only once a map has placed any, so other worlds keep their hashes.
+  if (w.nextPickup > 1) {
+    mix(w.nextPickup);
+    mix(w.pickups.length);
+    for (const p of w.pickups) for (const v of [p.id, p.type, p.cell, p.owner, p.mode, p.role]) mix(v);
+  }
   if (w.ai.length > 0) hashAi(w.ai, mix);
   return h >>> 0;
 }

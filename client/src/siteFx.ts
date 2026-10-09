@@ -56,7 +56,7 @@ const PAD_BOTTOM = 40;
 
 export class SiteFx {
   private sites = new Map<number, Site>();
-  private sprites = new Map<string, { w: number; h: number; data: Uint8ClampedArray }>();
+  private sprites = new Map<string, ParticleSprite>();
 
   constructor(private readonly fx: ParticleFx) {
     for (const [k, v] of Object.entries(fx.sprites)) this.sprites.set(k, { w: v.width, h: v.height, data: v.data });
@@ -114,7 +114,7 @@ export class SiteFx {
       const ps = anim(l)[frame(l)]!;
       const ax = box.left + box.w * l.at - ox;
       const y = (l.y ?? ay) - oy;
-      for (let i = ps.length - 1; i >= 0; i--) this.particle(s, ps[i]!, ax, y);
+      for (let i = ps.length - 1; i >= 0; i--) drawParticle(s.img, s.covered, this.sprites.get(ps[i]!.sprite), ps[i]!, ax, y);
     }
     s.canvas.getContext('2d')!.putImageData(s.img, 0, 0);
     return { canvas: s.canvas, x: ox, y: oy };
@@ -124,40 +124,47 @@ export class SiteFx {
   prune(keep: (id: number) => boolean): void {
     for (const id of this.sites.keys()) if (!keep(id)) this.sites.delete(id);
   }
+}
 
-  /** One textured square: `size` px, centred on the particle, turned by rot, tinted by (c + 1) / 32. */
-  private particle(s: Site, p: Particle, ax: number, ay: number): void {
-    if (p.a === 0) return;
-    const sp = this.sprites.get(p.sprite);
-    if (!sp) return;
-    const { width, height, data } = s.img;
-    const half = p.size / 2;
-    const th = (p.rot * 2 * Math.PI) / 65536;
-    const c = Math.cos(th);
-    const sn = Math.sin(th);
-    const cx = ax + p.x;
-    const cy = ay + p.y;
-    const r = Math.ceil(half * Math.SQRT2) + 1;
-    const alpha = Math.min(255, Math.round((p.a * 255) / 31));
-    for (let py = Math.max(0, Math.floor(cy - r)); py <= Math.min(height - 1, cy + r); py++) {
-      for (let px = Math.max(0, Math.floor(cx - r)); px <= Math.min(width - 1, cx + r); px++) {
-        const k = py * width + px;
-        if (s.covered[k]) continue;
-        const dx = px + 0.5 - cx;
-        const dy = py + 0.5 - cy;
-        const lx = c * dx + sn * dy;
-        const ly = -sn * dx + c * dy;
-        if (lx < -half || lx >= half || ly < -half || ly >= half) continue;
-        const u = Math.floor(((lx + half) / p.size) * sp.w);
-        const v = Math.floor(((ly + half) / p.size) * sp.h);
-        const t = (v * sp.w + u) * 4;
-        if (!sp.data[t + 3]) continue;
-        s.covered[k] = 1;
-        data[k * 4] = (sp.data[t]! * (p.r + 1)) >> 5;
-        data[k * 4 + 1] = (sp.data[t + 1]! * (p.g + 1)) >> 5;
-        data[k * 4 + 2] = (sp.data[t + 2]! * (p.b + 1)) >> 5;
-        data[k * 4 + 3] = alpha;
-      }
+export interface ParticleSprite {
+  w: number;
+  h: number;
+  data: Uint8ClampedArray;
+}
+
+/**
+ * One textured square into `img`: `size` px, centred on the particle, turned by rot, tinted by
+ * (c + 1) / 32. Pixels already in `covered` stay (first particle to touch a pixel wins).
+ */
+export function drawParticle(img: ImageData, covered: Uint8Array, sp: ParticleSprite | undefined, p: Particle, ax: number, ay: number): void {
+  if (p.a === 0 || !sp) return;
+  const { width, height, data } = img;
+  const half = p.size / 2;
+  const th = (p.rot * 2 * Math.PI) / 65536;
+  const c = Math.cos(th);
+  const sn = Math.sin(th);
+  const cx = ax + p.x;
+  const cy = ay + p.y;
+  const r = Math.ceil(half * Math.SQRT2) + 1;
+  const alpha = Math.min(255, Math.round((p.a * 255) / 31));
+  for (let py = Math.max(0, Math.floor(cy - r)); py <= Math.min(height - 1, cy + r); py++) {
+    for (let px = Math.max(0, Math.floor(cx - r)); px <= Math.min(width - 1, cx + r); px++) {
+      const k = py * width + px;
+      if (covered[k]) continue;
+      const dx = px + 0.5 - cx;
+      const dy = py + 0.5 - cy;
+      const lx = c * dx + sn * dy;
+      const ly = -sn * dx + c * dy;
+      if (lx < -half || lx >= half || ly < -half || ly >= half) continue;
+      const u = Math.floor(((lx + half) / p.size) * sp.w);
+      const v = Math.floor(((ly + half) / p.size) * sp.h);
+      const t = (v * sp.w + u) * 4;
+      if (!sp.data[t + 3]) continue;
+      covered[k] = 1;
+      data[k * 4] = (sp.data[t]! * (p.r + 1)) >> 5;
+      data[k * 4 + 1] = (sp.data[t + 1]! * (p.g + 1)) >> 5;
+      data[k * 4 + 2] = (sp.data[t + 2]! * (p.b + 1)) >> 5;
+      data[k * 4 + 3] = alpha;
     }
   }
 }
