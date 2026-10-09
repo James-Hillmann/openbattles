@@ -2,6 +2,7 @@ import { MOVES_GROUND, cellCenterX, cellCenterY, isWalkableCode, type TerrainGri
 import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from './state';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
+import { sendToRally } from './orders';
 import { fpH, fpW } from './footprint';
 import { BRIDGE_EXIT_TICKS, bridgeExit, finishBridge, isWallingOn, stepBridgeJob, stepWallJob } from './walls';
 
@@ -557,7 +558,7 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
   if (p && takesStar(t.role)) p.reservedStars--;
   b.queue.shift();
   b.prod = PROD_READY;
-  spawn(w, b.owner, t, c);
+  sendToRally(w, b, spawn(w, b.owner, t, c));
 }
 
 function stepMine(w: World, m: Unit): void {

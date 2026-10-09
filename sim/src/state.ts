@@ -87,6 +87,24 @@ export interface Unit {
   frozen: number;
   /** 1 while marked by a Tracking spell (game: unit +0x155): shown through fog. */
   tracked: number;
+  // Orders and stances (sim/src/orders.ts, docs/re-notes/orders.md).
+  /**
+   * What the unit does when it has no order of its own (game: the entity command it runs):
+   * STANCE_HOLD guards `post`, STANCE_STAND stands ground, STANCE_PATROL walks `route`, STANCE_MOVE
+   * is a player's move order (no target scan until it arrives).
+   */
+  stance: number;
+  /** Cell the unit guards and walks back to (game: CombatHoldPosition +0x20), -1 for none. */
+  post: number;
+  /** Patrol: the two cells it walks between, and which one it is heading for (0 or 1). */
+  route: number[];
+  leg: number;
+  /** Tick the current stance started: its once-a-second target scan counts from here (game: command +0x48). */
+  since: number;
+  /** Hold and patrol: tick to head back after losing a target (20 ticks later), 0 for none. */
+  back: number;
+  /** Production buildings: the rally cell trained units walk to (game: building +0x1AC), -1 for none. */
+  rally: number;
 }
 
 /** What a builder is doing. Cells are y * width + x. */

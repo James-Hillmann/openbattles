@@ -15,6 +15,10 @@ import {
   type SpawnFn,
 } from './economy';
 import { fpH, fpW } from './footprint';
+import { STANCE_HOLD, STANCE_MOVE, cellUnder, orderPatrol, orderRally, orderStand, orderStop } from './orders';
+
+/** Cell index of (cx, cy), or -1 off the map. */
+const cellIndex = (g: TerrainGrid, cx: number, cy: number): number => (cx < 0 || cy < 0 || cx >= g.width || cy >= g.height ? -1 : cy * g.width + cx);
 import { collapseBridge, orderBridge, orderWall } from './walls';
 
 export interface WorldInit {
@@ -121,9 +125,17 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     grace: 0,
     frozen: 0,
     tracked: 0,
+    stance: STANCE_HOLD,
+    post: -1,
+    route: [],
+    leg: 0,
+    since: w.tick,
+    back: 0,
+    rally: -1,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
+  u.post = cellUnder(w, u); // a new unit guards the cell it appears on (game: its first command is a hold)
   startAura(w, u);
   return u;
 }
@@ -170,6 +182,8 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
         u.target = null;
         u.ordered = false;
         u.job = null;
+        u.stance = STANCE_MOVE;
+        u.back = 0;
       }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
       else
@@ -188,6 +202,9 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
           u.target = t.id;
           u.ordered = true;
           u.job = null;
+          // The attack command replaces any stance; when it ends the unit holds where it stands.
+          u.stance = STANCE_HOLD;
+          u.back = 0;
         }
       }
       break;
@@ -215,6 +232,18 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
       break;
     case 'cast':
       orderCast(w, player, cmd);
+      break;
+    case 'stop':
+      orderStop(w, player, cmd.unitIds);
+      break;
+    case 'stand':
+      orderStand(w, player, cmd.unitIds);
+      break;
+    case 'patrol':
+      if (w.grid) orderPatrol(w, player, cmd.unitIds, cellIndex(w.grid, cmd.ax, cmd.ay), cellIndex(w.grid, cmd.bx, cmd.by));
+      break;
+    case 'rally':
+      orderRally(w, player, cmd.unitIds, cmd.cx, cmd.cy);
       break;
   }
 }
@@ -292,7 +321,7 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs] })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], route: [...u.route], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs] })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],
