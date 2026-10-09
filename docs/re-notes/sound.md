@@ -77,6 +77,9 @@ start it full. guess
 - Music plays at 0.36 of full scale in the emulator. The game sets the stream volume from the
   profile's music option, 50 in a new profile (sound-triggers.md "Volumes"); 50 on the decibel curve
   is -8.1 dB = 0.39. The last 0.8 dB is unexplained. likely
+- In a match the level is the same: a King skirmish recorded from the emulator plays `KING_CAMPAIGN_5`
+  at 0.393 of full scale (correlation 0.996), exactly the 0.39 our music bus applies at option 50. So our
+  music-to-effects balance is the game's. confirmed
 - Our sliders are those two option bytes (0..127, music 50 and effects 127 by default), through the
   same decibel curve.
 - In front of both sits our own volume control (bottom right, always visible, with mute), which the DS
