@@ -103,6 +103,7 @@ export class CommandBar {
       for (const it of items) {
         const b = document.createElement('button');
         b.title = it.label;
+        b.dataset.key = it.key;
         b.disabled = !it.enabled;
         b.classList.toggle('armed', !!it.armed);
         if (it.icon) b.appendChild(copy(it.icon));
