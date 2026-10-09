@@ -311,7 +311,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   startSkirmish();
 }
 
-// --- Camera: drag with left mouse, or arrow keys / WASD ------------------------
+// --- Camera: drag with the middle mouse button (or Space + drag), or arrow keys / WASD ---
 
 function centerOn(x: number, y: number) {
   camera.x = Math.round(app.screen.width / 2 - x * camera.scale.x);
@@ -326,21 +326,27 @@ function toWorld(clientX: number, clientY: number): { x: number; y: number } {
   return { x: (clientX - r.left - camera.x) / camera.scale.x, y: (clientY - r.top - camera.y) / camera.scale.y };
 }
 
-// Left button: click selects a unit (shift adds), drag pans, shift+drag box-selects.
-let drag: { x: number; y: number; startX: number; startY: number; moved: boolean; box: boolean } | null = null;
+// Left button: click selects a unit (shift adds), drag draws a box and selects your units in it
+// (shift adds them). Middle button, or Space held with the left, drags the camera.
+let drag: { x: number; y: number; startX: number; startY: number; moved: boolean; pan: boolean; box: boolean; additive: boolean } | null = null;
 let boxRect: { x0: number; y0: number; x1: number; y1: number } | null = null;
 app.canvas.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, box: e.shiftKey };
+  if (e.button !== 0 && e.button !== 1) return;
+  if (e.button === 1) e.preventDefault();
+  const pan = e.button === 1 || keys.has(' ');
+  drag = { x: e.clientX - camera.x, y: e.clientY - camera.y, startX: e.clientX, startY: e.clientY, moved: false, pan, box: !pan && !placing, additive: e.shiftKey };
 });
+// Chrome on Windows starts its auto-scroll on a middle press; the camera drag replaces it.
+app.canvas.addEventListener('mousedown', (e) => e.button === 1 && e.preventDefault());
 window.addEventListener('pointerup', (e) => {
   if (!drag) return;
   if (!drag.moved) {
+    if (drag.pan) return void (drag = null);
     const w = toWorld(e.clientX, e.clientY);
     hover = w;
     if (!tryPlace()) selection.click(drawn, localPlayer, w.x, w.y, e.shiftKey);
   } else if (boxRect) {
-    selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, true);
+    selection.box(drawn, localPlayer, boxRect.x0, boxRect.y0, boxRect.x1, boxRect.y1, drag.additive);
   }
   drag = null;
   boxRect = null;
@@ -361,6 +367,8 @@ window.addEventListener('pointermove', (e) => {
 });
 const keys = new Set<string>();
 window.addEventListener('keydown', (e) => {
+  // Space is the pan modifier in a match: don't let it press a focused button or scroll the page.
+  if (e.key === ' ' && !appEl.classList.contains('menu') && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault();
   keys.add(e.key.toLowerCase());
   if (e.key === 'Escape') placing = null;
 });
@@ -892,7 +900,7 @@ app.ticker.add((t) => {
   if (boxRect) {
     const l = Math.min(boxRect.x0, boxRect.x1);
     const t = Math.min(boxRect.y0, boxRect.y1);
-    overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).stroke({ color: 0xffff00, width: 1 / camera.scale.x });
+    overlay.rect(l, t, Math.abs(boxRect.x1 - boxRect.x0), Math.abs(boxRect.y1 - boxRect.y0)).fill({ color: 0xffff00, alpha: 0.12 }).stroke({ color: 0xffff00, width: 2 / camera.scale.x });
   }
 
   drawPlacement();
@@ -1098,6 +1106,7 @@ void menus.boot();
     for (const id of ids) selection.ids.add(id);
   },
   /** World pixel -> page pixel, for clicking. */
+  selected: () => [...selection.ids],
   toScreen: (x: number, y: number) => {
     const r = app.canvas.getBoundingClientRect();
     return { x: r.left + camera.x + x * camera.scale.x, y: r.top + camera.y + y * camera.scale.y };
