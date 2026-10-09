@@ -46,6 +46,8 @@ import {
   type Unit,
   type SpellDef,
   spellTarget,
+  spellWorks,
+  isFrozen,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars, type CostAction } from './hud';
@@ -721,11 +723,11 @@ function showSpells(hero: Unit) {
   const icons = armyBundle?.spellIcons ?? {};
   const item = (d: SpellDef): CommandItem => ({
     key: `spell:${d.id}`,
-    label: `${spellName(d)}: ${d.cost} magic`,
+    label: spellWorks(d.id) ? `${spellName(d)}: ${d.cost} magic` : `${spellName(d)}: not in this version yet`,
     cost: d.cost,
     price: priceCanvas(d.cost),
     icon: spellIconCanvas(d.icon),
-    enabled: hero.charge > d.cost,
+    enabled: hero.charge > d.cost && spellWorks(d.id),
     armed: aiming?.spell === d.id,
   });
   stripCosts = {
@@ -741,8 +743,30 @@ function showSpells(hero: Unit) {
   bar.show(hint, shown.map(item), [], 'spell');
 }
 
-/** Spell name for the tooltip. The game shows none on the strip; which LOC string names which spell is not traced yet. */
-const spellName = (d: SpellDef) => `Spell ${d.id}`;
+/** Pip colours for the speed, damage and armor buffs (ours). */
+const BUFF_PIPS = [0xf8d800, 0xf83800, 0x3080f8];
+
+/**
+ * Damage and freeze spells' areas as a see-through diamond or square (ours; the game draws each
+ * spell's own effect, e.g. EarthQuakeEffect, which isn't ported yet). Heal auras and buffs aren't drawn.
+ */
+function drawSpellAreas() {
+  for (const s of world.spells) {
+    const def = world.spellDefs[s.spell];
+    if (!def || s.radius < 0 || !spellWorks(s.spell) || s.spell <= 9) continue;
+    const freeze = s.spell === 27 || s.spell === 29;
+    const r = freeze ? s.ring >> 12 : s.radius;
+    const cx = (s.cx + 0.5) * CELL_W;
+    const cy = (s.cy + 0.5) * CELL_H;
+    const pts = freeze
+      ? [cx - (r + 0.5) * CELL_W, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy + (r + 0.5) * CELL_H]
+      : [cx, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy, cx, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy];
+    overlay.poly(pts).fill({ color: freeze ? 0x60b0ff : 0xff8020, alpha: 0.18 }).stroke({ color: freeze ? 0x60b0ff : 0xff8020, width: 1 / camera.scale.x, alpha: 0.6 });
+  }
+}
+
+/** Spell name for the tooltip (the game shows none on the strip; extract's SPELL_NAME_TEXT). */
+const spellName = (d: SpellDef) => armyBundle?.spellNames?.[d.id] || `Spell ${d.id}`;
 
 const spellIconCache = new Map<number, HTMLCanvasElement>();
 function spellIconCanvas(icon: number): HTMLCanvasElement | null {
@@ -768,7 +792,8 @@ function pickSpell(id: number) {
   aiming = aiming?.spell === id ? null : { spell: id, hero: hero.id };
 }
 
-const aimingHint = (d: SpellDef | undefined) => (d && spellTarget(d) === 'unit' ? 'Pick a unit.' : 'Pick a spot.');
+const aimingHint = (d: SpellDef | undefined) =>
+  !d ? '' : spellTarget(d) === 'point' ? 'Pick a spot.' : d.flags & 4 ? 'Pick an enemy unit.' : 'Pick one of your units.';
 
 /** Cast the armed spell at the clicked unit or spot. False when no spell is armed. */
 function tryCast(px: number, py: number): boolean {
@@ -909,6 +934,7 @@ app.ticker.add((t) => {
     unitSprites.delete(id);
     unitAnim.delete(id);
   }
+  drawSpellAreas();
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   selection.prune((id) => world.units.some((u) => u.id === id));
   pruneSites();
@@ -986,6 +1012,12 @@ app.ticker.add((t) => {
     s.visible = true;
     s.position.set(Math.round(x), Math.round(y));
     s.zIndex = y;
+    // Ours, not the game's (its SpellIcons*Effect pictures aren't ported yet): a frozen unit is
+    // tinted ice blue and each buff shows as a pip over the head.
+    s.tint = isFrozen(world, u) ? 0x90c8ff : 0xffffff;
+    BUFF_PIPS.forEach((color, slot) => {
+      if (u.boost & (1 << slot)) overlay.rect(Math.round(x) - 7 + slot * 5, Math.round(y) - box.anchorY - 5, 4, 4).fill(color);
+    });
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.
     if (isSelected || u.hp < u.maxHp) {
       const power = u.maxCharge > 0 ? { value: u.charge, max: u.maxCharge } : undefined;

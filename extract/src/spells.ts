@@ -99,3 +99,15 @@ export function spellIcons(rom: UnpackedRom): Record<number, Rgba> {
   });
   return out;
 }
+
+/**
+ * LOC string naming each spell. No code maps a record to a name (the strip shows none), so this is
+ * by meaning: the effect classes each spell creates (EarthQuakeEffect...), its class and its heroes.
+ * likely, except 11 (Crystal Cache: the alien heroes' Forrest spell) and 29 (ESP or Lockdown) which are guesses.
+ */
+export const SPELL_NAME_TEXT: Record<number, number> = {
+  3: 294, 4: 287, 5: 288, 6: 289, 7: 290, 8: 291, 9: 292,
+  10: 262, 11: 281, 12: 271, 13: 263, 14: 265, 15: 264, 16: 266, 17: 267, 18: 268, 19: 269,
+  20: 270, 21: 277, 22: 276, 23: 272, 24: 273, 25: 275, 26: 274, 27: 278, 28: 279, 29: 283,
+  30: 282, 31: 285, 32: 284,
+};
