@@ -243,7 +243,8 @@ export function combatStep(w: World, u: Unit): void {
     stopMove(w, u);
     t = undefined;
   }
-  const scanning = t ? !u.ordered : u.tx === null;
+  // A combat move (move mode 2) keeps looking while it walks; a plain move doesn't.
+  const scanning = t ? !u.ordered : u.tx === null || u.amove;
   if (scanning && (w.tick - u.born) % SCAN_PERIOD === SCAN_PHASE) {
     const pick = pickTarget(w, u);
     if (pick) {

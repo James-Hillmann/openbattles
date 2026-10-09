@@ -102,7 +102,8 @@ const isIds = (v: unknown): v is number[] => Array.isArray(v) && v.length <= 256
 export function sanitizeCommand(x: unknown): Command | null {
   if (typeof x !== 'object' || x === null) return null;
   const c = x as Record<string, unknown>;
-  if (c.kind === 'move' && isIds(c.unitIds) && isInt(c.x) && isInt(c.y)) return { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx };
+  if (c.kind === 'move' && isIds(c.unitIds) && isInt(c.x) && isInt(c.y))
+    return c.mode === 2 ? { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx, mode: 2 } : { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx };
   if (c.kind === 'attack' && isIds(c.unitIds) && isInt(c.target)) return { kind: 'attack', unitIds: [...c.unitIds], target: c.target };
   if (c.kind === 'harvest' && isIds(c.unitIds) && isInt(c.cx) && isInt(c.cy)) return { kind: 'harvest', unitIds: [...c.unitIds], cx: c.cx, cy: c.cy };
   if (c.kind === 'build' && isIds(c.unitIds) && isInt(c.type) && isInt(c.cx) && isInt(c.cy))

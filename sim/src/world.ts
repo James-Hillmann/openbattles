@@ -3,6 +3,7 @@ import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
+import { aiStep } from './ai';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
 import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
@@ -39,7 +40,7 @@ export function createWorld({ seed, grid = null, bonus = null, players = [], rul
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [],
+    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], ai: [],
   };
 }
 
@@ -122,6 +123,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     grace: 0,
     frozen: 0,
     tracked: 0,
+    amove: false,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
@@ -171,6 +173,7 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
         u.target = null;
         u.ordered = false;
         u.job = null;
+        u.amove = cmd.mode === 2;
       }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
       else
@@ -189,6 +192,7 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
           u.target = t.id;
           u.ordered = true;
           u.job = null;
+          u.amove = false;
         }
       }
       break;
@@ -268,6 +272,8 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (c.tick !== w.tick) throw new Error(`command for tick ${c.tick} applied on ${w.tick}`);
     applyCommand(w, c.player, c.cmd);
   }
+  // Computer opponents decide after the people's commands and give theirs through the same path.
+  for (const ai of w.ai) for (const cmd of aiStep(w, ai)) applyCommand(w, ai.player, cmd);
   for (const u of w.units) {
     refreshBoost(u);
     regenCharge(u);
@@ -308,5 +314,7 @@ export function cloneWorld(w: World): World {
     spells: w.spells.map((s) => ({ ...s, units: [...s.units] })),
     scanQueue: [...w.scanQueue],
     players: w.players.map((p) => ({ ...p })),
+    // The renderer's copy never steps, so it can share the AI state.
+    ai: w.ai,
   };
 }

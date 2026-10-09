@@ -23,6 +23,11 @@ export interface GameMap {
   mineSites: { x: number; y: number }[];
   /** Bridge sites (MARK lists 7 and 8): the top-left cell of the span and its direction. */
   bridgeMarks: { x: number; y: number; vertical: boolean }[];
+  /**
+   * MARK list type 0: points the computer opponent picks forests from (HarvestDecide 0x020965CC reads
+   * them through 0x02093978). 21 on mp01. confirmed (emulator, workers trace)
+   */
+  forestMarks: { x: number; y: number }[];
   /** Starting units and buildings per start slot, in file order (EVNT section). */
   starts: StartRecord[];
   /** Pickups placed at map start (EVNT section): cell and collectable blueprint index. */
@@ -64,7 +69,7 @@ export function parseMap(d: Uint8Array): GameMap {
   if (groundStart < 0x2b + n) throw new Error('TERR section too short');
   const ground = new Uint16Array(n);
   for (let i = 0; i < n; i++) ground[i] = u16(d, groundStart + i * 2);
-  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), bridgeMarks: readBridgeMarks(d), ...readEvents(d) };
+  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), bridgeMarks: readBridgeMarks(d), forestMarks: readMarks(d, 0), ...readEvents(d) };
 }
 
 /** MINE section: four lists of `L`, u8 count, count x (u8 x, u8 y). Only the second is ever non-empty. */
@@ -97,6 +102,23 @@ function readBridgeMarks(d: Uint8Array): { x: number; y: number; vertical: boole
   while (d[p] === 0x4c) {
     const type = d[p + 1]!, n = d[p + 2]!;
     if (type === 7 || type === 8) for (let i = 0; i < n; i++) out.push({ x: d[p + 3 + i * 3]!, y: d[p + 4 + i * 3]!, vertical: type === 8 });
+    p += 3 + n * 3;
+  }
+  return out;
+}
+
+/** Every point of MARK lists of one type. */
+function readMarks(d: Uint8Array, want: number): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  let p: number;
+  try {
+    p = indexOfTag(d, 'MARK') + 4;
+  } catch {
+    return out;
+  }
+  while (d[p] === 0x4c) {
+    const type = d[p + 1]!, n = d[p + 2]!;
+    if (type === want) for (let i = 0; i < n; i++) out.push({ x: d[p + 3 + i * 3]!, y: d[p + 4 + i * 3]! });
     p += 3 + n * 3;
   }
   return out;

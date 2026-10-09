@@ -1,4 +1,5 @@
 import type { World } from './state';
+import { hashAi } from './ai/state';
 
 /**
  * FNV-1a over every sim field in a fixed order. Clients compare this every
@@ -40,6 +41,7 @@ export function hashWorld(w: World): number {
     mix(u.role);
     mix(u.path.length);
     for (const c of u.path) mix(c);
+    if (u.amove) mix(0x4d4f5645); // only combat moves mix in, so worlds without them keep their hashes
     if (!w.grid) continue; // bare test worlds have no occupancy or plotters
     mix(u.cell);
     const m = u.mv;
@@ -130,5 +132,6 @@ export function hashWorld(w: World): number {
     mix(w.scanQueue.length);
     for (const id of w.scanQueue) mix(id);
   }
+  if (w.ai.length > 0) hashAi(w.ai, mix);
   return h >>> 0;
 }

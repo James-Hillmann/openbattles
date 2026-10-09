@@ -1,5 +1,6 @@
 import type { Fx } from './fixed';
 import type { Rng } from './rng';
+import type { AiPlayer } from './ai/state';
 import type { TerrainGrid, TerrainMask } from './terrain';
 
 export type PlayerId = number;
@@ -87,6 +88,8 @@ export interface Unit {
   frozen: number;
   /** 1 while marked by a Tracking spell (game: unit +0x155): shown through fog. */
   tracked: number;
+  /** Walking under a combat move (move mode 2): keeps scanning for enemies on the way. */
+  amove: boolean;
 }
 
 /** What a builder is doing. Cells are y * width + x. */
@@ -255,6 +258,8 @@ export interface World {
   nextSpell: number;
   /** Spells waiting for their area scan, front first; one is scanned per tick (game: 0x02075FBC). */
   scanQueue: number[];
+  /** Computer opponents (sim/src/ai), by player id; empty when every player is a person. */
+  ai: AiPlayer[];
 }
 
 /**

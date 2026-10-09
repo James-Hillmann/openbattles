@@ -69,6 +69,7 @@ import {
   wallLine,
   isWalkableCode,
   type BridgeSite,
+  addAi,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
@@ -289,6 +290,8 @@ function startSkirmish() {
       return st ? simType(st) : null;
     },
   });
+  // Offline, the second army is the computer opponent (sim/src/ai). Online matches are people only.
+  if (!online) addAi(world, 1, 0, mapForest);
   mapGrid = grid;
   groundTrees = treeCount(grid.cells);
   adopt(world);
@@ -312,6 +315,8 @@ let mapGrid: TerrainGrid | null = null;
 let mapTerrain = new Uint8Array(0);
 let mapStarts: StartSpawn[] = [];
 let mapMines: number[] = [];
+/** Forest points the computer opponent picks trees from (map MARK type 0). */
+let mapForest: number[] = [];
 /** The map's bridge sites, each with the bridge that fits it. */
 let mapBridges: BridgeSite[] = [];
 let mapName = '';
@@ -346,6 +351,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   mapTerrain = b.terrain.slice();
   mapStarts = b.starts;
   mapMines = b.mineSites.map((m) => m.y * b.width + m.x);
+  mapForest = b.forestMarks.map((m) => m.y * b.width + m.x);
   mapBridges = bridgeSitesOf(b.bridgeMarks, (x, y, v) => sizeBridge({ width: b.width, height: b.height, cells: b.terrain }, x, y, v), b.width);
   structures.setArt(b.structures);
   mapName = b.name;
