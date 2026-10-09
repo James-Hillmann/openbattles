@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MOVES_FLYING, MOVES_GROUND, MOVES_WATER, cellCenterX, cellCenterY, createWorld, exitCell, hashWorld, isInside, spawnUnit, step,
+  MOVES_FLYING, MOVES_GROUND, MOVES_WATER, STANCE_HOLD, cellCenterX, cellCenterY, createWorld, exitCell, hashWorld, isInside, spawnUnit, step,
   type Command, type ScheduledCommand, type TerrainGrid, type Unit, type UnitType, type World,
 } from '@lbw/sim';
 
@@ -171,6 +171,21 @@ describe('transports', () => {
       return hashWorld(w);
     };
     expect(go()).toBe(go());
+  });
+
+  it('a patrolling unit rides quietly and guards its landing cell', () => {
+    const w = world();
+    const ship = put(w, SHIP, 10, 8);
+    const sw = put(w, SWORD, 9, 8);
+    run(w, 1, [{ kind: 'patrol', unitIds: [sw.id], ax: 9, ay: 8, bx: 2, by: 8 }]);
+    run(w, 1, [{ kind: 'load', unitIds: [sw.id], transport: ship.id }]);
+    expect(sw.carrier).toBe(ship.id);
+    run(w, 100);
+    expect(sw.carrier).toBe(ship.id);
+    expect(sw.mv).toBeNull();
+    run(w, 1, [{ kind: 'unload', transports: [ship.id] }]);
+    expect(sw.stance).toBe(STANCE_HOLD);
+    expect(sw.post).toBe(sw.cell);
   });
 
   it('ground units still default to walking terrain', () => {

@@ -102,8 +102,11 @@ The same container code serves the Base and Lumber Mill (Builders go inside them
 - The game's order strip (blue tab) has Load (stairs icon) for units and Load + Unload (crane icon)
   for a transport. The unit's Load arms a tap on a transport (tip LOC 1031: "To load units onto a
   Transport, select units then touch on a Transport.").
-- Ours: right-click your own transport with units selected to load them; select the transport for
-  an Unload button and its riders in 4 round + 2 star slots.
+- Ours: the Actions strip has Load for units (then click a transport; right-clicking one does the
+  same) and Unload for a transport. A selected transport shows its riders in 4 round + 2 star slots.
+- Walking to a transport replaces the unit's combat command, so a boarding unit doesn't stop to fight.
+  likely (it's one entity command at a time). When boarding gives up, and after getting off, the unit
+  guards its cell like after any finished order. guess (not traced for these two cases).
 - **Not done**: the transport's own Load button (the ship goes to pick units up).
 
 ## Memory layout (unit)

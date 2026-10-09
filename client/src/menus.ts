@@ -13,6 +13,7 @@ export interface SkirmishSetup {
   map: string;
   game: GameType;
   prebase: boolean;
+  randomStart: boolean;
   bank: Bank;
   /** Army name of the computer's side. */
   opponent: string;
@@ -43,7 +44,7 @@ export interface Menus {
 }
 
 export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
-  const setup: SkirmishSetup = { map: 'mp01', game: 'hunt-the-hero', prebase: false, bank: 500, opponent: 'Wizard' };
+  const setup: SkirmishSetup = { map: 'mp01', game: 'hunt-the-hero', prebase: false, randomStart: false, bank: 500, opponent: 'Wizard' };
 
   function load(note = '') {
     el.innerHTML = `
@@ -113,13 +114,14 @@ export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
           <p class="help muted">${GAME_HELP[setup.game]}</p>
           <div class="row">
             <button id="spPrebase" class="opt ${setup.prebase ? 'on' : ''}">Prebase</button>
+            <button id="spRandom" class="opt ${setup.randomStart ? 'on' : ''}">Random Start</button>
             <button id="spBank" class="opt">Bank ${setup.bank}</button>
           </div>
         </div>
         <div class="panel">
-          <h2>Opponent</h2>
+          <h2>CPU</h2>
           <div class="armies" id="spOpp"></div>
-          <p class="muted" style="text-align:center;margin:0">The computer side doesn't play yet: its units hold their ground.</p>
+          <p class="muted" style="text-align:center;margin:0">The computer plays this army the way the game's own CPU does.</p>
         </div>
         <div class="row spread">
           <button class="brick small" id="spBack">&#x2190; Back</button>
@@ -152,6 +154,10 @@ export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
     );
     el.querySelector<HTMLButtonElement>('#spPrebase')!.onclick = () => {
       setup.prebase = !setup.prebase;
+      skirmish();
+    };
+    el.querySelector<HTMLButtonElement>('#spRandom')!.onclick = () => {
+      setup.randomStart = !setup.randomStart;
       skirmish();
     };
     el.querySelector<HTMLButtonElement>('#spBank')!.onclick = () => {

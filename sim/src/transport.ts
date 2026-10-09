@@ -1,5 +1,6 @@
 import { findById } from './combat';
 import { ROLE_TRANSPORT, cellPos, isBuilding, rectDist, standCell } from './economy';
+import { STANCE_HOLD, holdHere } from './orders';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import type { EntityId, PlayerId, Unit, World } from './state';
 import { fpH, fpW } from './footprint';
@@ -88,26 +89,26 @@ export function orderLoad(w: World, player: PlayerId, ids: readonly EntityId[], 
 function boardStep(w: World, u: Unit): void {
   const b = u.board!;
   const t = findById(w.units, b.transport);
-  if (!t || t.hp === 0 || isCarried(t) || !w.grid) {
-    u.board = null;
-    return;
-  }
+  if (!t || t.hp === 0 || isCarried(t) || !w.grid) return endBoard(w, u);
   const g = w.grid;
   const here = u.cell >= 0 ? u.cell : unitCell(w, u);
   if (rectDist(g, here, unitCell(w, t), fpW(t.size), fpH(t.size)) === 1) {
     if (hasRoom(w, t, u)) embark(w, t, u);
-    else u.board = null;
+    else endBoard(w, u);
     return;
   }
   if (u.mv) return;
-  if (b.tries > 4) {
-    u.board = null;
-    return;
-  }
+  if (b.tries > 4) return endBoard(w, u);
   b.tries++;
   // guess: the game picks its cell with 0x0207F99C (not traced); we take the nearest free one, like builders.
   const c = standCell(w, u, unitCell(w, t), fpW(t.size), fpH(t.size));
   if (c >= 0) orderMove(w, u, c);
+}
+
+/** The boarding order is over without getting on: the unit guards where it stands, like any finished order. */
+function endBoard(w: World, u: Unit): void {
+  u.board = null;
+  holdHere(w, u);
 }
 
 /** Get on (UnitContainer add 0x0205B2DC): off the map, orders dropped. */
@@ -120,6 +121,10 @@ function embark(w: World, t: Unit, u: Unit): void {
   u.ordered = false;
   u.job = null;
   u.board = null;
+  u.stance = STANCE_HOLD;
+  u.post = -1;
+  u.route = [];
+  u.back = 0;
   u.carrier = t.id;
   u.x = t.x;
   u.y = t.y;
@@ -169,6 +174,8 @@ function disembark(w: World, t: Unit, p: Unit): boolean {
   p.carrier = 0;
   t.cargo.splice(t.cargo.indexOf(p.id), 1);
   placeUnit(w, p);
+  // guess: off the boat the unit guards its landing cell, the idle command every finished order leaves.
+  holdHere(w, p);
   return true;
 }
 

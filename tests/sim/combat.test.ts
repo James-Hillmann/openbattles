@@ -344,6 +344,6 @@ describe('combat determinism', () => {
     const w = battle(log.seed);
     replay(w, log);
     expect(w.units.length).toBeLessThan(10);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"ca11ec0"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"d4676fe6"`);
   });
 });

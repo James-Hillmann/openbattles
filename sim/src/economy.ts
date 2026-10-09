@@ -2,6 +2,9 @@ import { MOVES_GROUND, cellCenterX, cellCenterY, isWalkableCode, type TerrainGri
 import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from './state';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
+import { countBricks, countBuilt } from './stats';
+import { sendToRally } from './orders';
+import { finishUpgrade, isTower, mayBuild, stepRepair, stepUpgrade } from './structures';
 import { fpH, fpW } from './footprint';
 import { BRIDGE_EXIT_TICKS, bridgeExit, finishBridge, isWallingOn, stepBridgeJob, stepWallJob } from './walls';
 
@@ -113,6 +116,12 @@ export function getPlayer(w: World, id: PlayerId): Player | undefined {
 
 export function addBricks(p: Player, n: number): void {
   p.bricks = Math.min(MAX_BRICKS, p.bricks + n);
+}
+
+/** Income: addBricks plus the score screen's "Bricks Collected" (0x020A6660, called at every income site). */
+export function earnBricks(p: Player, n: number): void {
+  addBricks(p, n);
+  countBricks(p, n);
 }
 
 /** Pay n bricks if the player has them (0x020866F0). */
@@ -315,6 +324,7 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const p = getPlayer(w, player);
   const builders = ownBuilders(w, player, ids);
   if (!t || !p || t.role < ROLE_BASE || isStructure(t.role) || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
+  if (!mayBuild(w, player, t)) return; // prerequisites and building limits (structures.ts)
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
   for (const u of builders) setBuildJob(w, u, site);
@@ -443,6 +453,9 @@ function stepJob(w: World, u: Unit, place: PlaceFn): void {
       u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
       return;
     }
+    case 'repair':
+      stepRepair(w, u);
+      return;
     case 'inside': {
       const b = findById(w.units, job.building);
       if (!b || b.hp <= 0) {
@@ -461,7 +474,7 @@ function stepJob(w: World, u: Unit, place: PlaceFn): void {
         removeUnit(w, u);
         const p = getPlayer(w, u.owner);
         // The logging buff (spell 19, buff slot 3) doubles the load; it counts only if still on at drop-off (0x0206D1A0).
-        if (p) addBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
+        if (p) earnBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
         u.carrying = false;
       }
       if (--job.timer > 0) return;
@@ -505,6 +518,7 @@ function stepConstruction(w: World, s: Unit): void {
   const after = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
   s.hp = Math.min(s.maxHp, s.hp + after - before);
   if (!isFinished(s)) return;
+  countBuilt(w, s.owner, s.role); // ConstructStructureEntityCommand counts it once it is finished
   if (s.role === ROLE_MINE) s.payout = MINE_TICKS;
   if (s.role === ROLE_BRIDGE) finishBridge(w, s);
   for (const u of w.units) {
@@ -557,7 +571,7 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
   if (p && takesStar(t.role)) p.reservedStars--;
   b.queue.shift();
   b.prod = PROD_READY;
-  spawn(w, b.owner, t, c);
+  sendToRally(w, b, spawn(w, b.owner, t, c));
 }
 
 function stepMine(w: World, m: Unit): void {
@@ -566,22 +580,26 @@ function stepMine(w: World, m: Unit): void {
   const t = w.types[m.kind];
   const p = getPlayer(w, m.owner);
   // The mining buff (spell 17, buff slot 4) doubles the payout, not the interval (0x0206D7D0; likely).
-  if (t && p) addBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
+  if (t && p) earnBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
 }
 
 /** Economy for one tick, after combat and movement. */
 export function economyStep(w: World, spawn: SpawnFn, place: PlaceFn): void {
   if (w.grid && w.occ) {
     for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u, place); // frozen builders wait (spells.ts)
+    const upgraded: Unit[] = [];
     for (const b of w.units) {
       if (b.hp <= 0 || !isBuilding(b)) continue;
       if (!isFinished(b)) stepConstruction(w, b);
       else if (b.role === ROLE_MINE) stepMine(w, b);
-      else stepProduction(w, b, spawn);
+      else if (isTower(b.role)) {
+        if (stepUpgrade(w, b)) upgraded.push(b);
+      } else stepProduction(w, b, spawn);
     }
+    for (const b of upgraded) finishUpgrade(w, b, place); // after the loop: it swaps the tower for a new entity
   }
   // The game bumps its time counter, then pays out when it is a multiple of 60 s.
-  if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) addBricks(p, TRICKLE_BRICKS);
+  if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) earnBricks(p, TRICKLE_BRICKS);
 }
 
 /** Free a destroyed building's footprint. */

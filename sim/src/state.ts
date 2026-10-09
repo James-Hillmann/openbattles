@@ -1,5 +1,6 @@
 import type { Fx } from './fixed';
 import type { Rng } from './rng';
+import type { AiPlayer } from './ai/state';
 import type { TerrainGrid, TerrainMask } from './terrain';
 
 export type PlayerId = number;
@@ -36,6 +37,8 @@ export interface Unit {
   lastAttack: number;
   /** Tick of the last damage taken (drives the client's white hit flash), or NEVER. */
   lastHit: number;
+  /** Player whose damage landed last, or -1: who gets the "destroyed" stat when it dies (stats.ts). */
+  lastHitBy: PlayerId;
   /** Tick the unit was spawned. Sets the phase of its once-a-second target scan. */
   born: number;
   /** Target priority (+0x70): enemies scanning for a target prefer higher. Static per unit type. */
@@ -61,7 +64,7 @@ export interface Unit {
   job: Job | null;
   /** Builder is carrying a load of bricks back. */
   carrying: boolean;
-  /** Production buildings: entity kinds waiting to be trained, front first. */
+  /** Production buildings: entity kinds waiting to be trained, front first. A tower: the level it is upgrading to. */
   queue: number[];
   /** Ticks spent on queue[0]. */
   prod: number;
@@ -87,6 +90,24 @@ export interface Unit {
   frozen: number;
   /** 1 while marked by a Tracking spell (game: unit +0x155): shown through fog. */
   tracked: number;
+  // Orders and stances (sim/src/orders.ts, docs/re-notes/orders.md).
+  /**
+   * What the unit does when it has no order of its own (game: the entity command it runs):
+   * STANCE_HOLD guards `post`, STANCE_STAND stands ground, STANCE_PATROL walks `route`, STANCE_MOVE
+   * is a player's move order (no target scan until it arrives).
+   */
+  stance: number;
+  /** Cell the unit guards and walks back to (game: CombatHoldPosition +0x20), -1 for none. */
+  post: number;
+  /** Patrol: the two cells it walks between, and which one it is heading for (0 or 1). */
+  route: number[];
+  leg: number;
+  /** Tick the current stance started: its once-a-second target scan counts from here (game: command +0x48). */
+  since: number;
+  /** Hold and patrol: tick to head back after losing a target (20 ticks later), 0 for none. */
+  back: number;
+  /** Production buildings: the rally cell trained units walk to (game: building +0x1AC), -1 for none. */
+  rally: number;
   // Transports (sim/src/transport.ts, docs/re-notes/transports.md).
   /** The transport this unit rides in (game: unit +0x114), or 0. A carried unit is off the map. */
   carrier: EntityId;
@@ -121,7 +142,12 @@ export type Job =
    */
   | { kind: 'wall'; type: number; cells: number[]; i: number; site: EntityId }
   /** Go build a bridge of kind `type` with its top-left at `cell`. */
-  | { kind: 'bridge'; type: number; cell: number };
+  | { kind: 'bridge'; type: number; cell: number }
+  /**
+   * Repair `building` from next to it (Builders and heroes; structures.ts). `hp` and `bricks` carry the
+   * fractions of the per-tick rates, 20.12 fixed point (RepairStructureAction +0x20 / +0x24).
+   */
+  | { kind: 'repair'; building: EntityId; hp: number; bricks: number };
 
 /** A spot where a bridge can go: its top-left cell and the bridge entity that fits there. */
 export interface BridgeSite {
@@ -263,6 +289,32 @@ export interface World {
   nextSpell: number;
   /** Spells waiting for their area scan, front first; one is scanned per tick (game: 0x02075FBC). */
   scanQueue: number[];
+  /** Computer opponents (sim/src/ai), by player id; empty when every player is a person. */
+  ai: AiPlayer[];
+  /** Pickups lying on the map, sorted by id (pickups.ts). */
+  pickups: Pickup[];
+  /** Next pickup id (pickups count separately from units). */
+  nextPickup: number;
+  /**
+   * Units and buildings that died in the last step, as they were (for death effects). Read-only
+   * output for the renderer: nothing in the sim reads it, so it is not hashed.
+   */
+  lastDead: Unit[];
+}
+
+/** A pickup on the map (game: Sim::CollectableItem); see sim/src/pickups.ts. */
+export interface Pickup {
+  id: number;
+  /** Collectable type (blueprint type byte): PICKUP_HEALTH, PICKUP_MANA, PICKUP_STUD. */
+  type: number;
+  /** Map cell, y * width + x. */
+  cell: number;
+  /** Owner (CollectableItem +0xE4); only matters in mode 1. */
+  owner: PlayerId;
+  /** 1 only the owner's units may take it, 2 anyone's (+0x174). */
+  mode: number;
+  /** Role that may take it, or ANY_ROLE (+0x178). */
+  role: number;
 }
 
 /**
@@ -357,6 +409,19 @@ export interface Player {
    * use the faction of whatever does the building or training (the old sandbox rule).
    */
   army?: PlayerArmy;
+  /** Score screen counters (stats.ts); skirmish players have them from the start. */
+  stats?: PlayerStats;
+}
+
+/**
+ * The game's per-player match stats (0x0215711C + player * 0xA4): counts per class
+ * [minifigures, specials, buildings] (stats.ts statClass), and bricks earned.
+ */
+export interface PlayerStats {
+  built: number[];
+  lost: number[];
+  destroyed: number[];
+  bricks: number;
 }
 
 /** A picked army: the units it trains and the faction whose buildings it builds. */

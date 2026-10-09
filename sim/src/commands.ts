@@ -3,7 +3,12 @@ import type { EntityId, PlayerId } from './state';
 
 /** Everything a player can do. These are what lockstep sends over the wire. */
 export type Command =
-  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx }
+  /**
+   * Walk to (x, y). `mode` is the game's MoveEntities mode (command +0x34): 0 or absent a plain move,
+   * 2 a combat move (CombatMoveEntityCommand: fight whatever comes in sight on the way). The computer
+   * opponent uses both (docs/re-notes/ai.md); 1 is not ported.
+   */
+  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx; mode?: number }
   | { kind: 'attack'; unitIds: EntityId[]; target: EntityId }
   /** Builders chop the tree in cell (cx, cy) and keep harvesting nearby trees. */
   | { kind: 'harvest'; unitIds: EntityId[]; cx: number; cy: number }
@@ -17,8 +22,20 @@ export type Command =
   | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
+  /** Upgrade a finished Tower (or Tower II) to the next level. */
+  | { kind: 'upgrade'; building: EntityId }
+  /** Builders and heroes repair one of the player's damaged buildings. */
+  | { kind: 'repair'; unitIds: EntityId[]; target: EntityId }
   /** Cancel entry `index` of a building's queue (0 = the unit in training, refunded), or all of it with -1. */
   | { kind: 'cancel'; building: EntityId; index: number }
+  /** Stop: drop the current order and stand (StopCommand). On a building it cancels the unit in training. */
+  | { kind: 'stop'; unitIds: EntityId[] }
+  /** Stand Ground: stay put and attack only what is in range (CombatStandGroundCommand). */
+  | { kind: 'stand'; unitIds: EntityId[] }
+  /** Patrol between cells (ax, ay) and (bx, by), first point first (PatrolCommand). */
+  | { kind: 'patrol'; unitIds: EntityId[]; ax: number; ay: number; bx: number; by: number }
+  /** Set the rally point of production buildings to cell (cx, cy) (RallyPointCommand). */
+  | { kind: 'rally'; unitIds: EntityId[]; cx: number; cy: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
   | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx }
   /** Units walk to transport `transport` and board it (game: GarrisonCommand). */

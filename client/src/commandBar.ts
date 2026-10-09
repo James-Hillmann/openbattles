@@ -87,6 +87,12 @@ export class CommandBar {
       .cmdbar.spell button { border-right-color: #983800; }
       .cmdbar.spell .price { border-top-color: #983800; }
       .cmdbar.spell button:disabled::after { background: repeating-conic-gradient(#3080f8 0 25%, transparent 0 50%) 0 0 / ${2 * SCALE}px ${2 * SCALE}px; opacity: 1; }
+      /* The blue Actions strip (blue tab, above the red one in the game): order icons, no prices. Colours from the
+         strip texture's blue bank. */
+      .cmdbar .band.act { height: ${ICON * SCALE}px; background: #68a8f8; border-top-color: #b8d8f8; border-bottom-color: #2058a8; margin-bottom: ${4 * SCALE}px; }
+      .cmdbar .band.act::before { background: #4888e0; border-right-color: #2058a8; }
+      .cmdbar .band.act::after { background: linear-gradient(90deg, #68a8f8 40%, #b8d8f8 40% 60%, #4888e0 60%); }
+      .cmdbar .band.act button { height: ${ICON * SCALE}px; background: #68a8f8; border-right-color: #2058a8; }
       .cmdbar button.armed { outline: 3px solid #fff; outline-offset: -3px; }
       /* The game's three queue slots (top screen, under the portrait): 24x24 recessed boxes, each queued unit's
          head with an 8x8 red no-entry badge at its lower right that cancels it. */
@@ -95,7 +101,7 @@ export class CommandBar {
         border: 2px solid; border-color: #180808 #604040 #604040 #180808; position: relative; }
       .cmdbar .queue button:disabled::after { display: none; }
       /* A transport's specials slots (ours: the game draws star-shaped slots on the top screen). */
-      .cmdbar .queue button.star { border-color: #806000 #f8d800 #f8d800 #806000; border-radius: 0; }
+      .cmdbar .queue button.star { border-color: #806000 #f8d800 #f8d800 #806000; }
       .cmdbar .queue canvas { width: 100%; height: 100%; display: block; }
       .cmdbar .queue b { position: absolute; right: 0; bottom: 0; width: ${8 * SCALE}px; height: ${8 * SCALE}px; border-radius: 50%;
         background: #e01010; border: 1px solid #fff; box-sizing: border-box; }
@@ -104,19 +110,46 @@ export class CommandBar {
     parent.appendChild(css);
   }
 
+  /** Called when the strip opens with `icons` icons (the game plays a click per icon sliding in). */
+  onOpen: ((icons: number) => void) | null = null;
+  private icons = 0;
+
   hide(): void {
     this.el.hidden = true;
+    this.icons = 0;
     this.shown = '';
   }
 
   /** `hint` is a line under the band (e.g. where to place a building); the title belongs to the top screen. */
-  show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = [], theme: 'build' | 'spell' = 'build'): void {
-    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.name), theme]);
-    this.el.hidden = items.length === 0 && queue.length === 0 && !hint;
+  show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = [], theme: 'build' | 'spell' = 'build', actions: readonly CommandItem[] = []): void {
+    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost, i.armed]), queue.map((q) => q.name), theme, actions.map((i) => [i.key, i.armed, !!i.icon])]);
+    const wasOpen = !this.el.hidden && this.icons > 0;
+    this.el.hidden = items.length === 0 && queue.length === 0 && actions.length === 0 && !hint;
+    this.icons = items.length;
+    if (!wasOpen && items.length) this.onOpen?.(items.length);
     if (key === this.shown) return;
     this.shown = key;
     this.el.classList.toggle('spell', theme === 'spell');
     this.el.replaceChildren();
+    if (actions.length) {
+      const band = document.createElement('div');
+      band.className = 'band act';
+      for (const it of actions) {
+        const b = document.createElement('button');
+        b.title = it.label;
+        b.dataset.key = it.key;
+        b.classList.toggle('armed', !!it.armed);
+        if (it.icon) b.appendChild(copy(it.icon));
+        else b.appendChild(Object.assign(document.createElement('span'), { className: 'name', textContent: it.label }));
+        b.addEventListener('pointerdown', (e) => e.stopPropagation());
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onPick(it.key);
+        });
+        band.appendChild(b);
+      }
+      this.el.appendChild(band);
+    }
     if (items.length) {
       const band = document.createElement('div');
       band.className = 'band';
@@ -134,7 +167,7 @@ export class CommandBar {
           const c = copy(it.price);
           c.style.width = `${it.price.width * SCALE}px`;
           price.appendChild(c);
-        } else price.textContent = it.cost < 0 ? '' : String(it.cost);
+        } else price.textContent = String(it.cost);
         b.appendChild(price);
         b.addEventListener('pointerdown', (e) => e.stopPropagation());
         b.addEventListener('click', (e) => {

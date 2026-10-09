@@ -11,12 +11,16 @@ when they explain something; never paste decompiler output wholesale.
 | [formats.md](formats.md) | File formats: layout tables, what's known, what isn't |
 | [movement.md](movement.md) | Walking, cell occupancy, waiting, sidestepping, the path search |
 | [hud.md](hud.md) | Top-screen HUD, selection outline, bars over units |
+| [structures.md](structures.md) | Tower upgrades, repair, build prerequisites and building limits |
 | [skirmish.md](skirmish.md) | Skirmish options, start setup, win and loss, terrain per unit type |
 | [fog.md](fog.md) | Fog of war: vision circles, visible and explored grids |
 | [armies.md](armies.md) | The army screen, unit pools per slot, the icon table, Build Costs panel |
 | [unlocks.md](unlocks.md) | What the game unlocks over time (we unlock everything) |
 | [multiplayer.md](multiplayer.md) | DS wireless setup screens, the command lockstep netcode, and our online version |
+| [sound.md](sound.md) | The sound archive (effects, banks, samples, music streams), driver numbers, levels vs the emulator |
+| [sound-triggers.md](sound-triggers.md) | When each sound effect and music track plays, the game's sound module |
 | [walls-bridges.md](walls-bridges.md) | Walls (drag line, neighbour tiles) and bridges (map sites, sizing, terrain change) |
+| [ai.md](ai.md) | The skirmish computer opponent: objects, timing, economy, army, what isn't ported |
 | [transports.md](transports.md) | Transports: who boards, capacity, the exit-cell ring search, sinking |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 

@@ -1,4 +1,5 @@
 import type { World } from './state';
+import { hashAi } from './ai/state';
 
 /**
  * FNV-1a over every sim field in a fixed order. Clients compare this every
@@ -40,6 +41,8 @@ export function hashWorld(w: World): number {
     mix(u.role);
     mix(u.path.length);
     for (const c of u.path) mix(c);
+    for (const v of [u.stance, u.post, u.leg, u.since, u.back, u.rally, u.route.length]) mix(v);
+    for (const c of u.route) mix(c);
     if (!w.grid) continue; // bare test worlds have no occupancy or plotters
     mix(u.cell);
     const m = u.mv;
@@ -84,7 +87,8 @@ export function hashWorld(w: World): number {
       else if (j.kind === 'wall') {
         mix(5), mix(j.type), mix(j.i), mix(j.site), mix(j.cells.length);
         for (const c of j.cells) mix(c);
-      } else (mix(6), mix(j.type), mix(j.cell));
+      } else if (j.kind === 'bridge') (mix(6), mix(j.type), mix(j.cell));
+      else (mix(7), mix(j.building), mix(j.hp), mix(j.bricks));
     }
   }
   if (w.grid) {
@@ -129,6 +133,13 @@ export function hashWorld(w: World): number {
     mix(w.scanQueue.length);
     for (const id of w.scanQueue) mix(id);
   }
+  // Pickups: only once a map has placed any, so other worlds keep their hashes.
+  if (w.nextPickup > 1) {
+    mix(w.nextPickup);
+    mix(w.pickups.length);
+    for (const p of w.pickups) for (const v of [p.id, p.type, p.cell, p.owner, p.mode, p.role]) mix(v);
+  }
+  if (w.ai.length > 0) hashAi(w.ai, mix);
   // Transports: only once someone has boarded or is boarding, so other worlds keep their hashes.
   if (w.units.some((u) => u.carrier !== 0 || u.cargo.length > 0 || u.board)) {
     for (const u of w.units) {

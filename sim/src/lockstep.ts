@@ -102,7 +102,8 @@ const isIds = (v: unknown): v is number[] => Array.isArray(v) && v.length <= 256
 export function sanitizeCommand(x: unknown): Command | null {
   if (typeof x !== 'object' || x === null) return null;
   const c = x as Record<string, unknown>;
-  if (c.kind === 'move' && isIds(c.unitIds) && isInt(c.x) && isInt(c.y)) return { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx };
+  if (c.kind === 'move' && isIds(c.unitIds) && isInt(c.x) && isInt(c.y))
+    return c.mode === 2 ? { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx, mode: 2 } : { kind: 'move', unitIds: [...c.unitIds], x: c.x as Fx, y: c.y as Fx };
   if (c.kind === 'attack' && isIds(c.unitIds) && isInt(c.target)) return { kind: 'attack', unitIds: [...c.unitIds], target: c.target };
   if (c.kind === 'harvest' && isIds(c.unitIds) && isInt(c.cx) && isInt(c.cy)) return { kind: 'harvest', unitIds: [...c.unitIds], cx: c.cx, cy: c.cy };
   if (c.kind === 'build' && isIds(c.unitIds) && isInt(c.type) && isInt(c.cx) && isInt(c.cy))
@@ -113,7 +114,14 @@ export function sanitizeCommand(x: unknown): Command | null {
   if (c.kind === 'bridge' && isIds(c.unitIds) && isInt(c.type) && isInt(c.cx) && isInt(c.cy))
     return { kind: 'bridge', unitIds: [...c.unitIds], type: c.type, cx: c.cx, cy: c.cy };
   if (c.kind === 'train' && isInt(c.building) && isInt(c.type)) return { kind: 'train', building: c.building, type: c.type };
+  if (c.kind === 'upgrade' && isInt(c.building)) return { kind: 'upgrade', building: c.building };
+  if (c.kind === 'repair' && isIds(c.unitIds) && isInt(c.target)) return { kind: 'repair', unitIds: [...c.unitIds], target: c.target };
   if (c.kind === 'cancel' && isInt(c.building) && isInt(c.index)) return { kind: 'cancel', building: c.building, index: c.index };
+  if (c.kind === 'stop' && isIds(c.unitIds)) return { kind: 'stop', unitIds: [...c.unitIds] };
+  if (c.kind === 'stand' && isIds(c.unitIds)) return { kind: 'stand', unitIds: [...c.unitIds] };
+  if (c.kind === 'patrol' && isIds(c.unitIds) && isInt(c.ax) && isInt(c.ay) && isInt(c.bx) && isInt(c.by))
+    return { kind: 'patrol', unitIds: [...c.unitIds], ax: c.ax, ay: c.ay, bx: c.bx, by: c.by };
+  if (c.kind === 'rally' && isIds(c.unitIds) && isInt(c.cx) && isInt(c.cy)) return { kind: 'rally', unitIds: [...c.unitIds], cx: c.cx, cy: c.cy };
   if (c.kind === 'cast' && isInt(c.caster) && isInt(c.spell) && isInt(c.target) && isInt(c.x) && isInt(c.y))
     return { kind: 'cast', caster: c.caster, spell: c.spell, target: c.target, x: c.x as Fx, y: c.y as Fx };
   return null;

@@ -125,9 +125,9 @@ Each unit has an AI component (unit +0x2A0) with a tick counter (+0x48).
 - **Radius:** sight (+0x71) for units; max range (+0x6F) for buildings (role 8-19).
 - **Results** come back 0-5 ticks later (the search is queued). The sim applies them at once
   (guess that this doesn't matter visibly).
-- The sim scans while idle or attacking an enemy it picked itself; not while walking under a move
-  order, and it never drops a target the player ordered (guess: which AI states those orders map
-  to is not traced). Buildings don't exist in the sim yet, so it always searches by sight.
+- The sim scans while holding, patrolling or attacking an enemy it picked itself; not while
+  walking under a move order, and it never drops a target the player ordered. Idle units hold a
+  post and measure the pick from it; Stand Ground only takes enemies in range (orders.md).
 - **Pick** (`0x020638A8`): drop candidates outside `min range <= d <= sight + max range`. A candidate
   in attack range always beats one that isn't; otherwise higher priority (+0x70) wins. On equal
   terms the earlier candidate stays. The list order is unknown, so the sim breaks ties by nearest,

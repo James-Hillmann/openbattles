@@ -3,12 +3,16 @@ import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
+import { aiStep } from './ai';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
 import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
+import { pickupsStep } from './pickups';
+import { countBuilt, countDeath } from './stats';
+import { orderRepair, orderUpgrade } from './structures';
 import { isCarried, orderLoad, orderUnload, transportDeaths, transportStep } from './transport';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
@@ -16,6 +20,10 @@ import {
   type SpawnFn,
 } from './economy';
 import { fpH, fpW } from './footprint';
+import { STANCE_HOLD, STANCE_MOVE, cellUnder, orderPatrol, orderRally, orderStand, orderStop } from './orders';
+
+/** Cell index of (cx, cy), or -1 off the map. */
+const cellIndex = (g: TerrainGrid, cx: number, cy: number): number => (cx < 0 || cy < 0 || cx >= g.width || cy >= g.height ? -1 : cy * g.width + cx);
 import { collapseBridge, orderBridge, orderWall } from './walls';
 
 export interface WorldInit {
@@ -39,7 +47,7 @@ export function createWorld({ seed, grid = null, bonus = null, players = [], rul
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [],
+    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], pickups: [], nextPickup: 1, lastDead: [], ai: [],
   };
 }
 
@@ -100,6 +108,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     cell: -1,
     mv: null,
     lastHit: NEVER,
+    lastHitBy: -1,
     born: w.tick,
     priority: type.priority ?? 0,
     moves: type.moves ?? MOVES_GROUND,
@@ -122,12 +131,20 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     grace: 0,
     frozen: 0,
     tracked: 0,
+    stance: STANCE_HOLD,
+    post: -1,
+    route: [],
+    leg: 0,
+    since: w.tick,
+    back: 0,
+    rally: -1,
     carrier: 0,
     cargo: [],
     board: null,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
+  u.post = cellUnder(w, u); // a new unit guards the cell it appears on (game: its first command is a hold)
   startAura(w, u);
   return u;
 }
@@ -135,6 +152,7 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
 /** Spawn an entity of a ROM type in a map cell (production and construction sites). */
 const spawnInCell: SpawnFn = (w, owner, t, cell) => {
   const { x, y } = cellPos(w.grid!, cell);
+  countBuilt(w, owner, t.role); // a trained unit (0x02072228)
   return spawnUnit(w, owner, x, y, t);
 };
 
@@ -176,6 +194,14 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
         u.target = null;
         u.ordered = false;
         u.job = null;
+        // A combat move (mode 2, the computer's advance) fights on the way: a hold with no post, so
+        // it scans as it walks with no leash and stays where its last fight ends. likely
+        u.stance = cmd.mode === 2 ? STANCE_HOLD : STANCE_MOVE;
+        if (cmd.mode === 2) {
+          u.post = -1;
+          u.since = w.tick;
+        }
+        u.back = 0;
       }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
       else
@@ -194,6 +220,9 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
           u.target = t.id;
           u.ordered = true;
           u.job = null;
+          // The attack command replaces any stance; when it ends the unit holds where it stands.
+          u.stance = STANCE_HOLD;
+          u.back = 0;
         }
       }
       break;
@@ -216,6 +245,12 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
     case 'train':
       orderTrain(w, player, cmd.building, cmd.type);
       break;
+    case 'upgrade':
+      orderUpgrade(w, player, cmd.building);
+      break;
+    case 'repair':
+      orderRepair(w, player, cmd.unitIds, cmd.target);
+      break;
     case 'cancel':
       orderCancel(w, player, cmd.building, cmd.index);
       break;
@@ -230,6 +265,18 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
       break;
     case 'unload':
       orderUnload(w, player, cmd.transports);
+      break;
+    case 'stop':
+      orderStop(w, player, cmd.unitIds);
+      break;
+    case 'stand':
+      orderStand(w, player, cmd.unitIds);
+      break;
+    case 'patrol':
+      if (w.grid) orderPatrol(w, player, cmd.unitIds, cellIndex(w.grid, cmd.ax, cmd.ay), cellIndex(w.grid, cmd.bx, cmd.by));
+      break;
+    case 'rally':
+      orderRally(w, player, cmd.unitIds, cmd.cx, cmd.cy);
       break;
   }
 }
@@ -276,6 +323,8 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (c.tick !== w.tick) throw new Error(`command for tick ${c.tick} applied on ${w.tick}`);
     applyCommand(w, c.player, c.cmd);
   }
+  // Computer opponents decide after the people's commands and give theirs through the same path.
+  for (const ai of w.ai) for (const cmd of aiStep(w, ai)) applyCommand(w, ai.player, cmd);
   for (const u of w.units) {
     refreshBoost(u);
     regenCharge(u);
@@ -288,6 +337,7 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (w.grid) moveOnMap(w, u);
     else moveUnit(u);
   }
+  pickupsStep(w);
   if (w.types.length > 0) economyStep(w, spawnInCell, placeBuilding);
   transportStep(w);
   // A bridge going down takes the ground units on it with it, so they die this tick too.
@@ -299,7 +349,11 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (isBuilding(u)) clearFootprint(w, u);
   }
   w.units = w.units.filter((u) => u.hp > 0);
-  for (const u of dead) onUnitLost(w, u.owner);
+  w.lastDead = dead;
+  for (const u of dead) {
+    countDeath(w, u);
+    onUnitLost(w, u.owner);
+  }
   checkBricks(w);
   w.tick++;
 }
@@ -309,7 +363,7 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs], cargo: [...u.cargo], board: u.board && { ...u.board } })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], route: [...u.route], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs], cargo: [...u.cargo], board: u.board && { ...u.board } })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],
@@ -317,6 +371,9 @@ export function cloneWorld(w: World): World {
     projectiles: w.projectiles.map((p) => ({ ...p })),
     spells: w.spells.map((s) => ({ ...s, units: [...s.units] })),
     scanQueue: [...w.scanQueue],
-    players: w.players.map((p) => ({ ...p })),
+    pickups: w.pickups.map((p) => ({ ...p })),
+    players: w.players.map((p) => ({ ...p, ...(p.stats ? { stats: { built: [...p.stats.built], lost: [...p.stats.lost], destroyed: [...p.stats.destroyed], bricks: p.stats.bricks } } : {}) })),
+    // The renderer's copy never steps, so it can share the AI state.
+    ai: w.ai,
   };
 }

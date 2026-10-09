@@ -7,6 +7,7 @@ import { stepBudget, stepToward } from './motion';
 import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { orderMove, stopMove } from './movement';
 import { damageTaken, meleeDamage } from './spells';
+import { RETURN_WAIT, STANCE_MOVE, STANCE_STAND, holdHere, leashCentre, stanceStep } from './orders';
 
 /** A Builder inside a building or a unit in a transport is off the map: it can't fight or be hit (economy.ts `isInside`). */
 const isInside = (u: Unit): boolean => u.job?.kind === 'inside' || u.carrier !== 0;
@@ -83,10 +84,11 @@ export function meleeBonus(t: MeleeBonusTable | null, attackerKind: number, defe
  * Damage is applied in 20.12 fixed point times the target's damage multiplier: 1.0, or 0.5 with the
  * armor buff (spells.ts damageTaken). Upgrades are not ported.
  */
-function applyDamage(w: World, t: Unit, hit: number): void {
+function applyDamage(w: World, t: Unit, hit: number, by: number): void {
   const dmg = damageTaken(t, hit);
   t.hp = t.hp > dmg ? t.hp - dmg : 0;
   t.lastHit = w.tick;
+  t.lastHitBy = by;
 }
 
 /** Game: melee branch of 0x02050A40. One RNG draw when damageRand > 0. */
@@ -94,7 +96,7 @@ function meleeHit(w: World, u: Unit, t: Unit): void {
   const a = u.attack!;
   const roll = a.damageRand > 0 ? nextInt(w.rng, a.damageRand) : 0;
   const base = Math.max(1, meleeDamage(u, a.damage) + meleeBonus(w.bonus, u.kind, t.kind));
-  applyDamage(w, t, roll + base);
+  applyDamage(w, t, roll + base, u.owner);
 }
 
 /** Game: 0x0206E950. One RNG draw when maxDamage > minDamage. */
@@ -116,7 +118,7 @@ function splash(w: World, p: Projectile, cx: number, cy: number): void {
     const ring = chebToFootprint(cx, cy, o); // a building is hit through its nearest footprint cell
     if (ring > 2) continue;
     const f = SPLASH_FACTOR[ring]!;
-    applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12));
+    applyDamage(w, o, rollDamage(w, (p.type.minDamage * f) >> 12, (p.type.maxDamage * f) >> 12), p.owner);
   }
 }
 
@@ -142,7 +144,7 @@ export function stepProjectiles(w: World): void {
       continue;
     }
     if (p.type.splash) splash(w, p, cx, cy);
-    else applyDamage(w, t, rollDamage(w, p.type.minDamage, p.type.maxDamage));
+    else applyDamage(w, t, rollDamage(w, p.type.minDamage, p.type.maxDamage), p.owner);
   }
   w.projectiles = keep;
 }
@@ -194,9 +196,11 @@ const SCAN_PERIOD = 30;
 const SCAN_PHASE = 2;
 
 /**
- * Game: 0x020638A8. Enemies within sight, and between min range and sight + max range, are
- * candidates. One in attack range beats one that isn't; then higher priority (+0x70) wins.
- * The game's tie order is unknown; here nearer, then lower id, wins (guess).
+ * Game: 0x020638A8. The search covers the unit's sight around where it stands; a candidate must also
+ * lie between min range and sight + max range of the cell it guards (hold: its post, CombatHoldPosition
+ * +0x20; confirmed by reading the code, the range check gets the post as its centre). One in attack range
+ * beats one that isn't; then higher priority (+0x70) wins. The game's tie order is unknown; here nearer,
+ * then lower id, wins (guess).
  */
 function pickTarget(w: World, u: Unit): Unit | undefined {
   const a = u.attack!;
@@ -205,14 +209,17 @@ function pickTarget(w: World, u: Unit): Unit | undefined {
   const sight2 = sight * sight;
   const min2 = a.minRange * a.minRange;
   const far = sight + a.maxRange;
+  const centre = leashCentre(w, u);
   let best: Unit | undefined;
   let bestIn = false;
   let bestD = 0;
   for (const o of w.units) {
     if (o.owner === u.owner || o.hp === 0 || isInside(o)) continue;
     const d = cellDist2(u, o);
-    if (d > sight2 || d < min2 || d > far * far) continue;
-    const isIn = d <= a.maxRange * a.maxRange;
+    if (d > sight2) continue;
+    const dc = centre ? cellToFootprint2(centre[0], centre[1], o) : d;
+    if (dc < min2 || dc > far * far) continue;
+    const isIn = d >= min2 && d <= a.maxRange * a.maxRange;
     if (best) {
       if (bestIn !== isIn) {
         if (bestIn) continue;
@@ -228,27 +235,76 @@ function pickTarget(w: World, u: Unit): Unit | undefined {
 }
 
 /**
- * Per-tick combat for one unit, run before it moves: drop dead targets, scan
- * for a better target once a second unless walking or obeying an attack order,
- * chase until in range, then attack whenever the cooldown has run out
- * (game: 0x02050A40, cooldown check against +0x19C).
+ * Stand ground's scan (0x02067258 / 0x020673FC): search max range around the unit; only enemies in attack
+ * range count, and the highest priority wins (ties: nearer, then lower id; guess).
+ */
+function pickInRange(w: World, u: Unit): Unit | undefined {
+  let best: Unit | undefined;
+  let bestD = 0;
+  for (const o of w.units) {
+    if (o.owner === u.owner || o.hp === 0 || isInside(o) || !inRange(u, o)) continue;
+    const d = cellDist2(u, o);
+    if (best && (o.priority < best.priority || (o.priority === best.priority && d >= bestD))) continue;
+    best = o;
+    bestD = d;
+  }
+  return best;
+}
+
+/** Squared cell distance from cell (cx, cy) to the nearest cell of a footprint. */
+function cellToFootprint2(cx: number, cy: number, t: { x: number; y: number; size?: number }): number {
+  const [bx, by] = nearestFootprintCell(cx, cy, t);
+  return (cx - bx) * (cx - bx) + (cy - by) * (cy - by);
+}
+
+const scanTick = (w: World, u: Unit): boolean => (w.tick - u.since) % SCAN_PERIOD === SCAN_PHASE;
+
+/**
+ * Per-tick combat for one unit, run before it moves: drop dead targets, scan for a better target
+ * once a second unless under a move or attack order, chase until in range (not when standing
+ * ground), then attack whenever the cooldown has run out (game: 0x02050A40, cooldown check
+ * against +0x19C). The scan clock starts with the unit's current stance (orders.ts).
  */
 export function combatStep(w: World, u: Unit): void {
+  // Walking to a transport replaces the unit's combat command (GarrisonEntityCommand), and a rider is off the map.
+  if (u.board || u.carrier !== 0) return;
+  stanceStep(w, u);
   if (!u.attack || u.hp === 0 || isInside(u)) return;
   let t = u.target === null ? undefined : findById(w.units, u.target);
   if (u.target !== null && (!t || t.hp === 0 || isInside(t))) {
-    // Target died or vanished: stop where we are.
+    // Target died or vanished: stop where we are. An attack order is over: guard this spot. A unit
+    // that picked the target itself waits, then heads back (orders.ts RETURN_WAIT).
+    const ordered = u.ordered;
     u.target = null;
     u.ordered = false;
     stopMove(w, u);
     t = undefined;
+    if (ordered) holdHere(w, u);
+    else if (u.stance !== STANCE_STAND) u.back = w.tick + RETURN_WAIT;
   }
-  const scanning = t ? !u.ordered : u.tx === null;
-  if (scanning && (w.tick - u.born) % SCAN_PERIOD === SCAN_PHASE) {
+  if (u.stance === STANCE_STAND) {
+    // Out of range: let it go (stand ground state 1 -> 0). Never chase.
+    if (t && !inRange(u, t)) {
+      u.target = null;
+      t = undefined;
+    }
+    if (scanTick(w, u)) {
+      const pick = pickInRange(w, u);
+      if (pick) {
+        t = pick;
+        u.target = t.id;
+      }
+    }
+    if (t) strike(w, u, t);
+    return;
+  }
+  const scanning = u.stance !== STANCE_MOVE && !(t && u.ordered);
+  if (scanning && scanTick(w, u)) {
     const pick = pickTarget(w, u);
     if (pick) {
       t = pick;
       u.target = t.id;
+      u.back = 0;
     }
   }
   if (!t) return;
@@ -256,11 +312,17 @@ export function combatStep(w: World, u: Unit): void {
     if (u.speed > 0) chase(w, u, t); // a tower waits for the target to come to it
     return;
   }
+  strike(w, u, t);
+}
+
+/** In range: stand and attack whenever the cooldown allows. */
+function strike(w: World, u: Unit, t: Unit): void {
+  if (!inRange(u, t)) return;
   stopMove(w, u);
-  if (w.tick < u.lastAttack + u.attack.cooldown) return;
+  if (w.tick < u.lastAttack + u.attack!.cooldown) return;
   u.lastAttack = w.tick;
-  if (u.attack.projectile) {
-    w.projectiles.push({ id: w.nextId++, owner: u.owner, x: u.x, y: u.y, target: t.id, type: u.attack.projectile });
+  if (u.attack!.projectile) {
+    w.projectiles.push({ id: w.nextId++, owner: u.owner, x: u.x, y: u.y, target: t.id, type: u.attack!.projectile });
   } else {
     meleeHit(w, u, t);
   }
