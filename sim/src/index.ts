@@ -16,3 +16,5 @@ export * from './fog';
 export * from './lockstep';
 export * from './spells';
 export * from './spellGeom';
+export * from './pickups';
+export * from './stats';

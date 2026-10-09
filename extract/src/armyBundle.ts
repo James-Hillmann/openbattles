@@ -79,6 +79,22 @@ export const FE_TEXT = {
   victory: 12,
   defeated: 13,
   connectionLost: 14,
+  freePlayScore: 64,
+  multiplayerScore: 65,
+  minifigsBuilt: 323,
+  specialsBuilt: 324,
+  buildingsBuilt: 325,
+  minifigsLost: 326,
+  specialsLost: 327,
+  buildingsLost: 328,
+  minifigsDestroyed: 329,
+  specialsDestroyed: 330,
+  buildingsDestroyed: 331,
+  time: 332,
+  timeFormat: 333,
+  bricksCollected: 334,
+  bricksBalance: 335,
+  stats: 336,
 } as const;
 
 /**

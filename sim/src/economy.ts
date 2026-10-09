@@ -2,6 +2,7 @@ import { MOVES_GROUND, cellCenterX, cellCenterY, isWalkableCode, type TerrainGri
 import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from './state';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
+import { countBricks, countBuilt } from './stats';
 
 /**
  * Bricks, gathering, construction and production, ported from the game's
@@ -97,6 +98,12 @@ export function getPlayer(w: World, id: PlayerId): Player | undefined {
 
 export function addBricks(p: Player, n: number): void {
   p.bricks = Math.min(MAX_BRICKS, p.bricks + n);
+}
+
+/** Income: addBricks plus the score screen's "Bricks Collected" (0x020A6660, called at every income site). */
+export function earnBricks(p: Player, n: number): void {
+  addBricks(p, n);
+  countBricks(p, n);
 }
 
 /** Pay n bricks if the player has them (0x020866F0). */
@@ -395,7 +402,7 @@ function stepJob(w: World, u: Unit): void {
         removeUnit(w, u);
         const p = getPlayer(w, u.owner);
         // The logging buff (spell 19, buff slot 3) doubles the load; it counts only if still on at drop-off (0x0206D1A0).
-        if (p) addBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
+        if (p) earnBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
         u.carrying = false;
       }
       if (--job.timer > 0) return;
@@ -439,6 +446,7 @@ function stepConstruction(w: World, s: Unit): void {
   const after = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
   s.hp = Math.min(s.maxHp, s.hp + after - before);
   if (!isFinished(s)) return;
+  countBuilt(w, s.owner, s.role); // ConstructStructureEntityCommand counts it once it is finished
   if (s.role === ROLE_MINE) s.payout = MINE_TICKS;
   for (const u of w.units) {
     if (u.job?.kind === 'build' && u.job.site === s.id) u.job = null;
@@ -488,7 +496,7 @@ function stepMine(w: World, m: Unit): void {
   const t = w.types[m.kind];
   const p = getPlayer(w, m.owner);
   // The mining buff (spell 17, buff slot 4) doubles the payout, not the interval (0x0206D7D0; likely).
-  if (t && p) addBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
+  if (t && p) earnBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
 }
 
 /** Economy for one tick, after combat and movement. */
@@ -503,7 +511,7 @@ export function economyStep(w: World, spawn: SpawnFn): void {
     }
   }
   // The game bumps its time counter, then pays out when it is a multiple of 60 s.
-  if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) addBricks(p, TRICKLE_BRICKS);
+  if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) earnBricks(p, TRICKLE_BRICKS);
 }
 
 /** Free a destroyed building's footprint. */

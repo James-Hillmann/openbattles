@@ -36,6 +36,8 @@ export interface Unit {
   lastAttack: number;
   /** Tick of the last damage taken (drives the client's white hit flash), or NEVER. */
   lastHit: number;
+  /** Player whose damage landed last, or -1: who gets the "destroyed" stat when it dies (stats.ts). */
+  lastHitBy: PlayerId;
   /** Tick the unit was spawned. Sets the phase of its once-a-second target scan. */
   born: number;
   /** Target priority (+0x70): enemies scanning for a target prefer higher. Static per unit type. */
@@ -235,6 +237,30 @@ export interface World {
   nextSpell: number;
   /** Spells waiting for their area scan, front first; one is scanned per tick (game: 0x02075FBC). */
   scanQueue: number[];
+  /** Pickups lying on the map, sorted by id (pickups.ts). */
+  pickups: Pickup[];
+  /** Next pickup id (pickups count separately from units). */
+  nextPickup: number;
+  /**
+   * Units and buildings that died in the last step, as they were (for death effects). Read-only
+   * output for the renderer: nothing in the sim reads it, so it is not hashed.
+   */
+  lastDead: Unit[];
+}
+
+/** A pickup on the map (game: Sim::CollectableItem); see sim/src/pickups.ts. */
+export interface Pickup {
+  id: number;
+  /** Collectable type (blueprint type byte): PICKUP_HEALTH, PICKUP_MANA, PICKUP_STUD. */
+  type: number;
+  /** Map cell, y * width + x. */
+  cell: number;
+  /** Owner (CollectableItem +0xE4); only matters in mode 1. */
+  owner: PlayerId;
+  /** 1 only the owner's units may take it, 2 anyone's (+0x174). */
+  mode: number;
+  /** Role that may take it, or ANY_ROLE (+0x178). */
+  role: number;
 }
 
 /**
@@ -329,6 +355,19 @@ export interface Player {
    * use the faction of whatever does the building or training (the old sandbox rule).
    */
   army?: PlayerArmy;
+  /** Score screen counters (stats.ts); skirmish players have them from the start. */
+  stats?: PlayerStats;
+}
+
+/**
+ * The game's per-player match stats (0x0215711C + player * 0xA4): counts per class
+ * [minifigures, specials, buildings] (stats.ts statClass), and bricks earned.
+ */
+export interface PlayerStats {
+  built: number[];
+  lost: number[];
+  destroyed: number[];
+  bricks: number;
 }
 
 /** A picked army: the units it trains and the faction whose buildings it builds. */

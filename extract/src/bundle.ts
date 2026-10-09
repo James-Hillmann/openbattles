@@ -23,6 +23,8 @@ export interface MapBundle {
   starts: StartRecord[];
   /** Cells where a Mine may stand (top-left of its footprint). */
   mineSites: { x: number; y: number }[];
+  /** Pickup records from EVNT: cell and the mission blueprint index (8 = Blue Stud on skirmish maps). */
+  pickups: { x: number; y: number; item: number }[];
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
@@ -82,5 +84,5 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const { chars, pal, metatiles } = mapGraphics(rom, name, map.tileset);
   const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
   const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus, starts: map.starts, mineSites: map.mineSites };
+  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus, starts: map.starts, mineSites: map.mineSites, pickups: map.pickups };
 }

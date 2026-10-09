@@ -360,6 +360,7 @@ function damageTick(w: World, s: ActiveSpell, caster: Unit): void {
     const d = s.dmg >> 12;
     u.hp = Math.max(0, u.hp - d);
     u.lastHit = w.tick;
+    u.lastHitBy = s.owner;
   }
   s.chance += s.chanceStep;
   s.dmg += s.dmgStep;
