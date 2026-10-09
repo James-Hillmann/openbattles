@@ -111,7 +111,8 @@ function inAlignWindow(u: Unit): boolean {
  * One tick of the game's seeker (0x0205571C): head for the centre of cell
  * `target`. With `claimCells`, crossing into a new cell needs that cell; if it
  * is taken but the unit is next to its target, it may claim the target
- * instead (this is how a diagonal step past a corner gets through).
+ * instead (this is how a diagonal step past a corner gets through, even a
+ * corner of unwalkable terrain: confirmed in the emulator, see movement.md).
  * `align` is the end-of-move variant: done once inside the align window.
  */
 function seek(w: World, u: Unit, m: Mover, target: number, claimCells: boolean, align: boolean): number {
