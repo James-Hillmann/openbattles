@@ -36,6 +36,9 @@ import {
   START_BRICKS,
   TERRAIN_TREE,
   ROLE_BUILDER,
+  ROLE_TRANSPORT,
+  capacity,
+  cargoClass,
   ROLE_SHIPYARD,
   QUEUE_MAX,
   type EntityType,
@@ -459,6 +462,14 @@ app.canvas.addEventListener('contextmenu', (e) => {
     match.issue({ kind: 'construct', unitIds: builders, site: target.id });
     return;
   }
+  // Units sent to one of our transports walk over and get on (tip 1031: select units, then touch a Transport).
+  if (target && target.owner === localPlayer && target.role === ROLE_TRANSPORT && !isBuilding(target)) {
+    const riders = unitIds.filter((id) => id !== target.id);
+    if (riders.length) {
+      match.issue({ kind: 'load', unitIds: riders, transport: target.id });
+      return;
+    }
+  }
   if (target && target.owner !== localPlayer) {
     match.issue({ kind: 'attack', unitIds, target: target.id });
     return;
@@ -659,6 +670,11 @@ function pickCommand(key: string) {
   const [what, idx] = key.split(':');
   const type = Number(idx);
   if (what === 'spell') return pickSpell(type);
+  if (what === 'unload') {
+    const transports = world.units.filter((u) => u.owner === localPlayer && selection.ids.has(u.id) && u.role === ROLE_TRANSPORT).map((u) => u.id);
+    if (transports.length) match.issue({ kind: 'unload', transports });
+    return;
+  }
   if (what === 'build') placing = { type };
   else if (what === 'train') {
     const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
@@ -773,6 +789,8 @@ function updateStrip() {
       st.role >= 1 && st.role <= 5 ? popUsed(world, localPlayer) < popCap(world, localPlayer) : st.role === 6 ? starsUsed(world, localPlayer) < starCap(world, localPlayer) : true;
     return bar.show('', list.map((st) => ({ ...item(st, 'train'), ...(room(st) ? {} : { enabled: false }) })), queue);
   }
+  const ship = sel.find((u) => u.role === ROLE_TRANSPORT && !isBuilding(u));
+  if (ship) return showCargo(ship);
   const hero = sel.find((u) => u.maxCharge > 0 && u.spells.length > 0);
   if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero);
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
@@ -780,6 +798,31 @@ function updateStrip() {
   const list = BUILD_ORDER.map((r) => (STRIP_STRUCTURES[r] ? unitStats[STRIP_STRUCTURES[r]] : all.find((st) => st.role === r))).filter((st): st is UnitStats => !!st);
   costs(list, 'build');
   bar.show(placing ? placingHint(placing.type) : '', list.map((st) => item(st, 'build')));
+}
+
+/**
+ * A selected transport (docs/re-notes/transports.md): an Unload button, and its riders where the game's
+ * top screen has 4 round slots for minifigures and 2 star slots for specials. Riding units can't be
+ * picked on the map, so this is the only place they show.
+ */
+function showCargo(ship: Unit) {
+  const riders = ship.cargo.map((id) => world.units.find((u) => u.id === id)).filter((u): u is Unit => !!u);
+  const figs = riders.filter((u) => cargoClass(u) <= 3);
+  const specials = riders.filter((u) => cargoClass(u) > 3);
+  const slots = (us: Unit[], n: number, star: boolean) =>
+    Array.from({ length: n }, (_, i) => {
+      const u = us[i];
+      const name = u ? nameByIndex.get(u.kind) ?? '' : '';
+      return { icon: u ? iconFor(name) : null, used: !!u, name: u ? `${u.id}:${displayName(name)}` : '', cancel: false, star };
+    });
+  const queue = [...slots(figs, capacity(ship, 0), false), ...slots(specials, capacity(ship, 4), true)];
+  const text = (id: number, en: string) => armyBundle?.text[id] || en;
+  const unload: CommandItem = { key: 'unload', label: text(FE_TEXT.unload, 'Unload'), cost: -1, icon: null, enabled: riders.length > 0 };
+  // The game's tip says "touch"; on a PC it's a right-click.
+  const hint = riders.length
+    ? text(FE_TEXT.transportRoom, 'Transports can hold 4 Minifigures and 2 Specials.')
+    : text(FE_TEXT.loadTip, 'To load units onto a Transport, select units then touch on a Transport.').replace(/\btouch\b/, 'right-click');
+  bar.show(hint, [unload], queue);
 }
 
 /**
@@ -1094,6 +1137,9 @@ app.ticker.add((t) => {
   }
   drawSpellAreas();
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
+  // A selected unit that just got on a transport hands the selection to the transport. likely (emulator: the
+  // King's boarding left the ship selected), see docs/re-notes/transports.md
+  for (const u of world.units) if (u.carrier !== 0 && selection.ids.has(u.id)) selection.ids.add(u.carrier);
   selection.prune((id) => world.units.some((u) => u.id === id && !isInside(u)));
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));

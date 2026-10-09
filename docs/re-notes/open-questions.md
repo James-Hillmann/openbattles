@@ -40,3 +40,6 @@
 | Fog: main-view texture and edge tiles, minimap fog, which units set the circle widen flags, whether enemies are hidden outside vision | see fog.md | open |
 | Does a Builder auto-engage enemies while chopping or building? | Builders have 5 melee damage and sight 5; the scan runs in AI states 1-4 (combat.md), but which state a harvest/construct action is in isn't traced. The sim lets combat take over the Builder (the job stalls until the fight ends). Check on mp01: a chopping Builder as the Wizard's swordsmen arrive | open |
 | Start records on blocked cells (mp29 slot 0) | the sim moves the unit to the nearest free cell (skirmish.md); the map is locked on a fresh profile | open |
+| Where a unit walks to board a transport | trace `0x0207F99C` (transports.md; the sim uses the nearest free cell) | open |
+| A sinking transport that could put only some riders ashore | the rest seem to stay in the container; the sim kills them | open |
+| The hero-respawn flag at `0x020092A8() + 0xD` for a hero in a dead container | find what sets it | open |

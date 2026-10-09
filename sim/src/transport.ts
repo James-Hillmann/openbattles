@@ -2,6 +2,7 @@ import { findById } from './combat';
 import { ROLE_TRANSPORT, cellPos, isBuilding, rectDist, standCell } from './economy';
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import type { EntityId, PlayerId, Unit, World } from './state';
+import { fpH, fpW } from './footprint';
 import { MOVES_WATER, isWalkable } from './terrain';
 
 /*
@@ -93,7 +94,7 @@ function boardStep(w: World, u: Unit): void {
   }
   const g = w.grid;
   const here = u.cell >= 0 ? u.cell : unitCell(w, u);
-  if (rectDist(g, here, unitCell(w, t), t.size) === 1) {
+  if (rectDist(g, here, unitCell(w, t), fpW(t.size), fpH(t.size)) === 1) {
     if (hasRoom(w, t, u)) embark(w, t, u);
     else u.board = null;
     return;
@@ -105,7 +106,7 @@ function boardStep(w: World, u: Unit): void {
   }
   b.tries++;
   // guess: the game picks its cell with 0x0207F99C (not traced); we take the nearest free one, like builders.
-  const c = standCell(w, u, unitCell(w, t), t.size, t.size);
+  const c = standCell(w, u, unitCell(w, t), fpW(t.size), fpH(t.size));
   if (c >= 0) orderMove(w, u, c);
 }
 
@@ -140,7 +141,7 @@ export function exitCell(w: World, t: Unit, p: Unit): number {
   const g = w.grid!;
   const tc = unitCell(w, t);
   const cx = tc % g.width, cy = Math.floor(tc / g.width);
-  const cw = t.size, ch = t.size, pw = 1, ph = 1;
+  const cw = fpW(t.size), ch = fpH(t.size), pw = fpW(p.size), ph = fpH(p.size);
   const plane = p.layer * g.width * g.height;
   const ok = (x: number, y: number): boolean =>
     x >= 0 && y >= 0 && x + pw < g.width && y + ph < g.height && isWalkable(g, x, y, p.moves) && w.occ![plane + y * g.width + x] === 0;

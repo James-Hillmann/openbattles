@@ -144,7 +144,7 @@ rolls use it up before any damage lands (seen: 10 for Arrow Volley, 15 for Monke
 | 28 | Space Laser | a spot | 55 -> 50 | 11 -> 4 | 80 | 20 |
 | 31 | Cluster Bomb | a spot | 40 -> 40 | 12 -> 6 | 80 | 20 |
 
-18, 20, 21, 22 also skip units inside a transport (no loading in the sim yet). Cluster Bomb draws
+18, 20, 21, 22 also skip units inside a transport (transports.md). Cluster Bomb draws
 `rand(2)` and then two `rand(61)` per bomb when cast, for its picture; the sim draws them too so the
 roll sequence matches. The pictures (EarthQuakeEffect and so on) draw from the same RNG in the game;
 the sim keeps them off it.

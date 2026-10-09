@@ -27,6 +27,10 @@ export interface QueueItem {
   used: boolean;
   /** What's in the slot (for redraws). */
   name: string;
+  /** False for slots that only show something (a transport's riders): no cancel badge. Default true. */
+  cancel?: boolean;
+  /** A specials slot (the game draws a star there instead of a round slot). */
+  star?: boolean;
 }
 
 /** DS layout, in DS pixels: band at y 32, 24 px icons with a 1 px dark rule between them. Shown at 2x. */
@@ -90,6 +94,8 @@ export class CommandBar {
       .cmdbar .queue button { width: ${ICON * SCALE}px; height: ${ICON * SCALE}px; padding: 0; background: #301010;
         border: 2px solid; border-color: #180808 #604040 #604040 #180808; position: relative; }
       .cmdbar .queue button:disabled::after { display: none; }
+      /* A transport's specials slots (ours: the game draws star-shaped slots on the top screen). */
+      .cmdbar .queue button.star { border-color: #806000 #f8d800 #f8d800 #806000; border-radius: 0; }
       .cmdbar .queue canvas { width: 100%; height: 100%; display: block; }
       .cmdbar .queue b { position: absolute; right: 0; bottom: 0; width: ${8 * SCALE}px; height: ${8 * SCALE}px; border-radius: 50%;
         background: #e01010; border: 1px solid #fff; box-sizing: border-box; }
@@ -128,7 +134,7 @@ export class CommandBar {
           const c = copy(it.price);
           c.style.width = `${it.price.width * SCALE}px`;
           price.appendChild(c);
-        } else price.textContent = String(it.cost);
+        } else price.textContent = it.cost < 0 ? '' : String(it.cost);
         b.appendChild(price);
         b.addEventListener('pointerdown', (e) => e.stopPropagation());
         b.addEventListener('click', (e) => {
@@ -147,7 +153,12 @@ export class CommandBar {
       queue.forEach((it, i) => {
         const d = document.createElement('button');
         d.disabled = !it.used;
-        if (it.used) {
+        d.classList.toggle('star', !!it.star);
+        if (it.used && it.cancel === false) {
+          d.title = it.name.replace(/^\d+:/, '');
+          d.disabled = true;
+          if (it.icon) d.appendChild(copy(it.icon));
+        } else if (it.used) {
           d.title = 'Cancel';
           if (it.icon) d.appendChild(copy(it.icon));
           d.appendChild(document.createElement('b'));

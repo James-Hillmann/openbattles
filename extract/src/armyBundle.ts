@@ -60,6 +60,9 @@ export interface ArmyUnitInfo {
 export const FE_TEXT = {
   selectArmy: 0,
   buildCosts: 99,
+  unload: 312,
+  loadTip: 1031,
+  transportRoom: 1028,
   magicCosts: 100,
   continue: 143,
   back: 147,
