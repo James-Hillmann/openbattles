@@ -3,6 +3,7 @@ import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
+import { aiStep } from './ai';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
 import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
@@ -45,7 +46,7 @@ export function createWorld({ seed, grid = null, bonus = null, players = [], rul
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], pickups: [], nextPickup: 1, lastDead: [],
+    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], pickups: [], nextPickup: 1, lastDead: [], ai: [],
   };
 }
 
@@ -187,7 +188,13 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
         u.target = null;
         u.ordered = false;
         u.job = null;
-        u.stance = STANCE_MOVE;
+        // A combat move (mode 2, the computer's advance) fights on the way: a hold with no post, so
+        // it scans as it walks with no leash and stays where its last fight ends. likely
+        u.stance = cmd.mode === 2 ? STANCE_HOLD : STANCE_MOVE;
+        if (cmd.mode === 2) {
+          u.post = -1;
+          u.since = w.tick;
+        }
         u.back = 0;
       }
       if (w.grid) planGroupMove(w, w.grid, units, cmd.x, cmd.y);
@@ -301,6 +308,8 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (c.tick !== w.tick) throw new Error(`command for tick ${c.tick} applied on ${w.tick}`);
     applyCommand(w, c.player, c.cmd);
   }
+  // Computer opponents decide after the people's commands and give theirs through the same path.
+  for (const ai of w.ai) for (const cmd of aiStep(w, ai)) applyCommand(w, ai.player, cmd);
   for (const u of w.units) {
     refreshBoost(u);
     regenCharge(u);
@@ -347,5 +356,7 @@ export function cloneWorld(w: World): World {
     scanQueue: [...w.scanQueue],
     pickups: w.pickups.map((p) => ({ ...p })),
     players: w.players.map((p) => ({ ...p, ...(p.stats ? { stats: { built: [...p.stats.built], lost: [...p.stats.lost], destroyed: [...p.stats.destroyed], bricks: p.stats.bricks } } : {}) })),
+    // The renderer's copy never steps, so it can share the AI state.
+    ai: w.ai,
   };
 }

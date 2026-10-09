@@ -1,5 +1,6 @@
 import type { Fx } from './fixed';
 import type { Rng } from './rng';
+import type { AiPlayer } from './ai/state';
 import type { TerrainGrid, TerrainMask } from './terrain';
 
 export type PlayerId = number;
@@ -275,6 +276,8 @@ export interface World {
   nextSpell: number;
   /** Spells waiting for their area scan, front first; one is scanned per tick (game: 0x02075FBC). */
   scanQueue: number[];
+  /** Computer opponents (sim/src/ai), by player id; empty when every player is a person. */
+  ai: AiPlayer[];
   /** Pickups lying on the map, sorted by id (pickups.ts). */
   pickups: Pickup[];
   /** Next pickup id (pickups count separately from units). */

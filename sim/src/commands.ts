@@ -3,7 +3,12 @@ import type { EntityId, PlayerId } from './state';
 
 /** Everything a player can do. These are what lockstep sends over the wire. */
 export type Command =
-  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx }
+  /**
+   * Walk to (x, y). `mode` is the game's MoveEntities mode (command +0x34): 0 or absent a plain move,
+   * 2 a combat move (CombatMoveEntityCommand: fight whatever comes in sight on the way). The computer
+   * opponent uses both (docs/re-notes/ai.md); 1 is not ported.
+   */
+  | { kind: 'move'; unitIds: EntityId[]; x: Fx; y: Fx; mode?: number }
   | { kind: 'attack'; unitIds: EntityId[]; target: EntityId }
   /** Builders chop the tree in cell (cx, cy) and keep harvesting nearby trees. */
   | { kind: 'harvest'; unitIds: EntityId[]; cx: number; cy: number }

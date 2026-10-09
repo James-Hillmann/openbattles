@@ -28,6 +28,9 @@ export interface MapBundle {
   pickups: { x: number; y: number; item: number }[];
   /** Bridge sites from the MARK section (top-left of the span). */
   bridgeMarks: { x: number; y: number; vertical: boolean }[];
+  /** Forest points for the computer opponent (MARK type 0). */
+  forestMarks: { x: number; y: number }[];
+  towerMarks: { x: number; y: number }[];
   /** Wall and bridge tiles in every team colour; null for game versions we haven't mapped. */
   structures: StructureArt | null;
 }
@@ -93,6 +96,6 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));
   return {
     name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus,
-    starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, structures, pickups: map.pickups,
+    starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, forestMarks: map.forestMarks, towerMarks: map.towerMarks, structures, pickups: map.pickups,
   };
 }

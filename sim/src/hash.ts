@@ -1,4 +1,5 @@
 import type { World } from './state';
+import { hashAi } from './ai/state';
 
 /**
  * FNV-1a over every sim field in a fixed order. Clients compare this every
@@ -138,5 +139,6 @@ export function hashWorld(w: World): number {
     mix(w.pickups.length);
     for (const p of w.pickups) for (const v of [p.id, p.type, p.cell, p.owner, p.mode, p.role]) mix(v);
   }
+  if (w.ai.length > 0) hashAi(w.ai, mix);
   return h >>> 0;
 }

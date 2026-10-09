@@ -119,9 +119,9 @@ export function mountMenus(el: HTMLElement, ctx: MenuContext): Menus {
           </div>
         </div>
         <div class="panel">
-          <h2>Opponent</h2>
+          <h2>CPU</h2>
           <div class="armies" id="spOpp"></div>
-          <p class="muted" style="text-align:center;margin:0">The computer side doesn't play yet: its units hold their ground.</p>
+          <p class="muted" style="text-align:center;margin:0">The computer plays this army the way the game's own CPU does.</p>
         </div>
         <div class="row spread">
           <button class="brick small" id="spBack">&#x2190; Back</button>

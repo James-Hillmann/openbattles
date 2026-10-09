@@ -20,6 +20,7 @@ when they explain something; never paste decompiler output wholesale.
 | [sound.md](sound.md) | The sound archive (effects, banks, samples, music streams), driver numbers, levels vs the emulator |
 | [sound-triggers.md](sound-triggers.md) | When each sound effect and music track plays, the game's sound module |
 | [walls-bridges.md](walls-bridges.md) | Walls (drag line, neighbour tiles) and bridges (map sites, sizing, terrain change) |
+| [ai.md](ai.md) | The skirmish computer opponent: objects, timing, economy, army, what isn't ported |
 | [open-questions.md](open-questions.md) | Things we need to find out, with leads |
 
 ## Confidence levels
