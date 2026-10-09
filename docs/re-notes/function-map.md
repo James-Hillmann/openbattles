@@ -181,3 +181,17 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x0200D8A8` | ARM | `Bridge_draw` | Swaps a finished bridge's cells for bridge metatiles | confirmed | walls-bridges.md |
 | `0x020A30A0` | THUMB | `Map_setTerrain` | Writes one terrain grid cell (+0x2E8) | confirmed | walls-bridges.md |
 | `0x0205878C` | ARM | `Bridge_collapse` | Footprint back to water; kills walkers on it, rescues heroes | likely | walls-bridges.md |
+| `0x02083830` | ARM | `Cmd_dispatchPlayerOrder` | Jump table on order type id; one handler per order | confirmed | orders.md |
+| `0x0208455C` | ARM | `Cmd_standGround` | Gives each unit CombatStandGround | confirmed | orders.md |
+| `0x02084974` | ARM | `Cmd_patrol` | Gives each unit Patrol with the two tapped points | confirmed | orders.md |
+| `0x02084B1C` | ARM | `Cmd_setRally` | Stores the rally cell on each building (+0x1AC/+0x1AD) | confirmed | orders.md |
+| `0x02084D68` | ARM | `Cmd_stop` | Gives each unit StopEntityCommand | confirmed | orders.md |
+| `0x0205A01C` | ARM | `Unit_setCommand` | Installs an entity command (current +0xF4, next +0xF8) | confirmed | orders.md |
+| `0x0206244C` | ARM | `HoldPos_ctor` | CombatHoldPosition (type 2): post at +0x20 | confirmed | orders.md |
+| `0x020629DC` | ARM | `HoldPos_update` | Scan, chase, attack, wait 20, walk back | confirmed | orders.md |
+| `0x02066530` | ARM | `StandGround_ctor` | CombatStandGround (type 4) | confirmed | orders.md |
+| `0x020724F4` | ARM | `Produce_spawn` | New unit; moves it to the rally cell if set | confirmed | orders.md |
+| `0x0205E7D4` | ARM | `Unit_setHp` | Sets HP; reports hits to the battle alert | confirmed | orders.md |
+| `0x020D9D74` | ARM | `Ui_battleAlert` | 2 s throttle, local check, stores time and camera spot | confirmed | orders.md |
+| `0x020E2480` | THUMB | `Sel_box` | Box select by role lists, capped at 9 | confirmed | orders.md |
+| `0x020E339C` | THUMB | `Sel_add` | Adds a unit unless 9 are selected | confirmed | orders.md |

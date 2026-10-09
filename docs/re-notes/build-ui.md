@@ -13,8 +13,8 @@ the strip and placement code in `client/src/main.ts`; building pictures in `extr
 - The **top screen** swaps the minimap panel for a cost list while the strip is open: the title
   says "Build Costs" (Builder, Castle, Barracks) or "Magic Costs" (hero), icons in a 3-column grid with
   the price under each. confirmed (emulator). Layout file is probably `UI/WorldViewTop_Build.NSCR`: likely.
-- A blue tab opens a second strip of order icons (for the Builder: what look like
-  rally/guard/patrol/attack/stop). Not traced yet.
+- A blue tab opens a second strip of order icons (Attack, Stand Ground, Patrol, Move, Stop; Set
+  Rally Point on buildings). See orders.md.
 - Placing a building: pick its icon, a footprint preview follows the stylus, and a check mark at
   the left edge confirms (tools/emu/README.md). confirmed (economy thread)
 

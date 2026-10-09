@@ -325,6 +325,6 @@ describe('economy', () => {
     ]);
     run(w, 900);
     expect(bricks(w)).toBeGreaterThan(450);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"547797cf"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"c0921d28"`);
   });
 });

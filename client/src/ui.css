@@ -148,3 +148,7 @@ label { display: inline-flex; gap: 8px; align-items: center; }
 .help-keys dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
 .help-keys dt { font-weight: bold; color: var(--pick); }
 .help-keys dd { margin: 0; }
+/* The battle alert (blue crossed swords, bottom right of the DS touch screen), at 2x. */
+.battlealert { position: absolute; right: 16px; bottom: 16px; width: 48px; height: 48px; padding: 0; border: 0; background: none; cursor: pointer; }
+.battlealert[hidden] { display: none; }
+.battlealert canvas { width: 48px; height: 48px; image-rendering: pixelated; display: block; }

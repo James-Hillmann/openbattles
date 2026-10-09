@@ -32,3 +32,4 @@ export * from './sdat';
 export * from './sseq';
 export * from './sound';
 export * from './structures';
+export * from './actions';

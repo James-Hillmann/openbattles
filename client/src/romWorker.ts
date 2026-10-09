@@ -145,7 +145,7 @@ self.onmessage = (e: MessageEvent<WorkerRequest>) => {
       });
       const army = buildArmyBundle(rom);
       extraUnits = [...new Set(army.choices.flat())].filter((n) => !/^[KWPIEA]_/.test(n));
-      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons), ...rgbaBuffers(army.spellIcons)]);
+      post({ type: 'army', army }, [...rgbaBuffers(army.cards), ...rgbaBuffers(army.heads), ...rgbaBuffers(army.stripIcons), ...rgbaBuffers(army.spellIcons), ...rgbaBuffers(army.actionIcons)]);
       const u = units(rom, DEFAULT_TEAMS, LOCAL_TEAM);
       portraitIds = [...new Set([...u.sprites, ...u.models, ...u.buildings].map((s) => s.name))];
       post({ type: 'units', units: u }, [...u.sprites.map((s) => s.atlas.data.buffer), ...u.buildings.map((b) => b.image.data.buffer)]);
