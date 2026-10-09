@@ -113,6 +113,7 @@ export function sanitizeCommand(x: unknown): Command | null {
   if (c.kind === 'bridge' && isIds(c.unitIds) && isInt(c.type) && isInt(c.cx) && isInt(c.cy))
     return { kind: 'bridge', unitIds: [...c.unitIds], type: c.type, cx: c.cx, cy: c.cy };
   if (c.kind === 'train' && isInt(c.building) && isInt(c.type)) return { kind: 'train', building: c.building, type: c.type };
+  if (c.kind === 'cancel' && isInt(c.building) && isInt(c.index)) return { kind: 'cancel', building: c.building, index: c.index };
   if (c.kind === 'cast' && isInt(c.caster) && isInt(c.spell) && isInt(c.target) && isInt(c.x) && isInt(c.y))
     return { kind: 'cast', caster: c.caster, spell: c.spell, target: c.target, x: c.x as Fx, y: c.y as Fx };
   return null;

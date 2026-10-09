@@ -11,7 +11,7 @@ import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
-  ROLE_BRIDGE, ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderConstruct, orderHarvest, orderTrain,
+  ROLE_BRIDGE, ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderCancel, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
 } from './economy';
 import { fpH, fpW } from './footprint';
@@ -209,6 +209,9 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
       break;
     case 'train':
       orderTrain(w, player, cmd.building, cmd.type);
+      break;
+    case 'cancel':
+      orderCancel(w, player, cmd.building, cmd.index);
       break;
     case 'cast':
       orderCast(w, player, cmd);

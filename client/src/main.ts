@@ -66,7 +66,7 @@ import {
   type BridgeSite,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
-import { HudView, drawUnitBars, type CostAction } from './hud';
+import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
 import { createRom, savedRom, saveRom, skirmishFirst } from './romPanel';
@@ -593,7 +593,12 @@ function drawBuilding(u: World['units'][number], isSelected: boolean, out: Picka
     } else if (view) view.fx.visible = false;
   }
   // Buildings show bars when selected or at <= 32% HP (emulator); we also show them while being built.
-  if (isSelected || !done || u.hp * 100 <= u.maxHp * 32) drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), top + 4, u.hp, u.maxHp);
+  if (isSelected || !done || u.hp * 100 <= u.maxHp * 32) {
+    const kind = u.queue[0];
+    const bt = kind === undefined ? 0 : world.types[kind]?.buildTime ?? 0;
+    const train = isSelected && bt > 0 ? { value: Math.max(0, u.prod), max: bt, colors: TRAIN_COLORS } : undefined;
+    drawUnitBars(overlay, Math.round(f.left + f.w / 2 - 12), top + 4, u.hp, u.maxHp, train);
+  }
 }
 
 /**
@@ -658,7 +663,10 @@ function pickCommand(key: string) {
     if (b) match.issue({ kind: 'train', building: b.id, type });
   }
 }
-const bar = new CommandBar(stageEl, pickCommand);
+const bar = new CommandBar(stageEl, pickCommand, (index) => {
+  const b = world.units.find((u) => u.owner === localPlayer && selection.ids.has(u.id) && isBuilding(u));
+  if (b) match.issue({ kind: 'cancel', building: b.id, index });
+});
 
 /** Stats of what player p's buildings train: their army's units, in slot order. */
 function armyUnits(p: number): UnitStats[] {
@@ -751,13 +759,17 @@ function updateStrip() {
     // One hero icon (the first), as the Castle strip shows in the emulator.
     const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
     costs(list, 'train');
-    const queue = b.queue.map((k, i) => {
-      const n = nameByIndex.get(k) ?? '';
-      const bt = world.types[k]?.buildTime ?? 1;
-      return { icon: iconFor(n), pct: i === 0 ? Math.floor((100 * b.prod) / Math.max(1, bt)) : -1 };
+    // Three slots, filled front first; clicking one cancels it (the game's top-screen queue panel).
+    const queue = Array.from({ length: QUEUE_MAX }, (_, i) => {
+      const k = b.queue[i];
+      const n = k === undefined ? '' : nameByIndex.get(k) ?? '';
+      return { icon: k === undefined ? null : iconFor(n), used: k !== undefined, name: n };
     });
-    const full = b.queue.length >= QUEUE_MAX;
-    return bar.show('', list.map((st) => ({ ...item(st, 'train'), ...(full ? { enabled: false } : {}) })), queue);
+    // The game checkers an icon you can't afford or have no free pop or star slot for, but not for a full
+    // queue: a 4th pick is just ignored. confirmed (emulator)
+    const room = (st: UnitStats) =>
+      st.role >= 1 && st.role <= 5 ? popUsed(world, localPlayer) < popCap(world, localPlayer) : st.role === 6 ? starsUsed(world, localPlayer) < starCap(world, localPlayer) : true;
+    return bar.show('', list.map((st) => ({ ...item(st, 'train'), ...(room(st) ? {} : { enabled: false }) })), queue);
   }
   const hero = sel.find((u) => u.maxCharge > 0 && u.spells.length > 0);
   if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero);
@@ -1388,7 +1400,7 @@ void menus.boot();
   /** True once the online match's world is built and ticking. */
   online: () => online?.ready === true,
   local: () => localPlayer,
-  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y, role: u.role, kind: u.kind, hp: u.hp, progress: u.progress, queue: [...u.queue], job: u.job?.kind ?? null })),
+  units: () => world.units.map((u) => ({ id: u.id, owner: u.owner, x: u.x, y: u.y, role: u.role, kind: u.kind, hp: u.hp, progress: u.progress, queue: [...u.queue], prod: u.prod, job: u.job?.kind ?? null })),
   player: (id: number) => getPlayer(world, id) ?? null,
   /** Select units as a click would (tests drive the strip and orders through the real input path). */
   select: (ids: number[]) => {

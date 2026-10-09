@@ -17,6 +17,8 @@ export type Command =
   | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
+  /** Cancel entry `index` of a building's queue (0 = the unit in training, refunded), or all of it with -1. */
+  | { kind: 'cancel'; building: EntityId; index: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
   | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 

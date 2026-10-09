@@ -76,6 +76,8 @@ describe('sanitizeCommand', () => {
     expect(sanitizeCommand({ kind: 'bridge', unitIds: [1], type: 123, cx: 45, cy: 29 })).toEqual({ kind: 'bridge', unitIds: [1], type: 123, cx: 45, cy: 29 });
     expect(sanitizeCommand({ kind: 'train', building: 7, type: 2 })).toEqual({ kind: 'train', building: 7, type: 2 });
     expect(sanitizeCommand({ kind: 'train', building: 7, type: 2.5 })).toBeNull();
+    expect(sanitizeCommand({ kind: 'cancel', building: 7, index: -1 })).toEqual({ kind: 'cancel', building: 7, index: -1 });
+    expect(sanitizeCommand({ kind: 'cancel', building: 7, index: '0' })).toBeNull();
   });
   it('drops anything the sim could choke on', () => {
     for (const bad of [null, 3, 'move', {}, { kind: 'move', unitIds: [1], x: 1.5, y: 0 }, { kind: 'move', unitIds: 'all', x: 0, y: 0 },
