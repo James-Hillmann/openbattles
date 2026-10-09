@@ -14,7 +14,11 @@ export type Command =
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
-  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
+  | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx }
+  /** Units walk to transport `transport` and board it (game: GarrisonCommand). */
+  | { kind: 'load'; unitIds: EntityId[]; transport: EntityId }
+  /** Everyone aboard these transports gets off onto nearby land (game: UngarrisonCommand). */
+  | { kind: 'unload'; transports: EntityId[] };
 
 /** A command stamped with who issued it and the tick it executes on. */
 export interface ScheduledCommand {

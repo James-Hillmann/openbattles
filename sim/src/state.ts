@@ -87,6 +87,19 @@ export interface Unit {
   frozen: number;
   /** 1 while marked by a Tracking spell (game: unit +0x155): shown through fog. */
   tracked: number;
+  // Transports (sim/src/transport.ts, docs/re-notes/transports.md).
+  /** The transport this unit rides in (game: unit +0x114), or 0. A carried unit is off the map. */
+  carrier: EntityId;
+  /** Transports: units on board, in boarding order (game: UnitContainer list at +0x100). */
+  cargo: EntityId[];
+  /** Walking to a transport to board it (game: GarrisonEntityCommand), or null. */
+  board: Board | null;
+}
+
+/** A unit's order to board `transport`; `tries` counts its attempts (the game gives up after 5). */
+export interface Board {
+  transport: EntityId;
+  tries: number;
 }
 
 /** What a builder is doing. Cells are y * width + x. */

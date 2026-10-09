@@ -123,5 +123,15 @@ export function hashWorld(w: World): number {
     mix(w.scanQueue.length);
     for (const id of w.scanQueue) mix(id);
   }
+  // Transports: only once someone has boarded or is boarding, so other worlds keep their hashes.
+  if (w.units.some((u) => u.carrier !== 0 || u.cargo.length > 0 || u.board)) {
+    for (const u of w.units) {
+      mix(u.carrier);
+      mix(u.cargo.length);
+      for (const id of u.cargo) mix(id);
+      mix(u.board ? u.board.transport : 0);
+      mix(u.board ? u.board.tries : -1);
+    }
+  }
   return h >>> 0;
 }

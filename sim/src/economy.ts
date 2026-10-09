@@ -87,8 +87,8 @@ export const TRAINS: Readonly<Record<number, readonly number[]>> = {
 };
 
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
-/** A Builder inside a building (dropping off or building): off the map, not drawn, not targetable. */
-export const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
+/** A Builder inside a building (dropping off or building) or a unit in a transport: off the map, not drawn, not targetable. */
+export const isInside = (u: Unit): boolean => u.job?.kind === 'inside' || u.carrier !== 0;
 export const isFinished = (u: Unit): boolean => u.progress >= u.buildTime;
 
 export function getPlayer(w: World, id: PlayerId): Player | undefined {
@@ -136,7 +136,7 @@ const cellY = (g: TerrainGrid, c: number) => Math.floor(c / g.width);
 export const originCell = (w: World, b: Unit): number => unitCell(w, b);
 
 /** Chebyshev distance from cell c to a size x size rectangle at `origin` (0 = inside). */
-function rectDist(g: TerrainGrid, c: number, origin: number, size: number): number {
+export function rectDist(g: TerrainGrid, c: number, origin: number, size: number): number {
   const x = cellX(g, c), y = cellY(g, c);
   const ox = cellX(g, origin), oy = cellY(g, origin);
   const dx = x < ox ? ox - x : x >= ox + size ? x - (ox + size - 1) : 0;
@@ -164,7 +164,7 @@ function ring(g: TerrainGrid, cx: number, cy: number, r: number): number[] {
 }
 
 /** The free cell next to a rectangle closest to unit u (ties: lowest cell index), or -1. */
-function standCell(w: World, u: Unit, origin: number, size: number): number {
+export function standCell(w: World, u: Unit, origin: number, size: number): number {
   const g = w.grid!;
   const here = unitCell(w, u);
   let best = -1;

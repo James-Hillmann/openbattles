@@ -349,6 +349,7 @@ function damageTick(w: World, s: ActiveSpell, caster: Unit): void {
     const roll = nextInt(w.rng, 100) + 1;
     const u = id ? findById(w.units, id) : undefined;
     if (!u || u.hp <= 0 || allied(w, u.owner, s.owner)) continue;
+    if (grows && u.carrier !== 0) continue; // these spells don't reach units in a transport
     const [ux, uy] = cellOfUnit(u);
     if (manhattan(ux, uy, hx, hy) > def.range) continue;
     if (grows && s.mode === MODE_POINT && manhattan(ux, uy, s.cx, s.cy) >= s.ring >> 12) continue;

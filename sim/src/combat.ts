@@ -7,8 +7,8 @@ import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { orderMove, stopMove } from './movement';
 import { damageTaken, meleeDamage } from './spells';
 
-/** A Builder inside a building is off the map: it can't fight or be hit (economy.ts `isInside`). */
-const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
+/** A Builder inside a building or a unit in a transport is off the map: it can't fight or be hit (economy.ts `isInside`). */
+const isInside = (u: Unit): boolean => u.job?.kind === 'inside' || u.carrier !== 0;
 
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
