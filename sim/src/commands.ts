@@ -11,8 +11,18 @@ export type Command =
   | { kind: 'build'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Builders go work on an existing unfinished building. */
   | { kind: 'construct'; unitIds: EntityId[]; site: EntityId }
+  /** Builders build a line of walls (entity kind `type`) from cell (fx, fy) to (tx, ty), paying as each piece starts. */
+  | { kind: 'wall'; unitIds: EntityId[]; type: number; fx: number; fy: number; tx: number; ty: number }
+  /** Builders build the bridge `type` at the map bridge site whose top-left is (cx, cy). */
+  | { kind: 'bridge'; unitIds: EntityId[]; type: number; cx: number; cy: number }
   /** Queue a unit of entity kind `type` at a production building. */
   | { kind: 'train'; building: EntityId; type: number }
+  /** Upgrade a finished Tower (or Tower II) to the next level. */
+  | { kind: 'upgrade'; building: EntityId }
+  /** Builders and heroes repair one of the player's damaged buildings. */
+  | { kind: 'repair'; unitIds: EntityId[]; target: EntityId }
+  /** Cancel entry `index` of a building's queue (0 = the unit in training, refunded), or all of it with -1. */
+  | { kind: 'cancel'; building: EntityId; index: number }
   /** A hero casts spell `spell` at unit `target` (0 for none) or at point (x, y). */
   | { kind: 'cast'; caster: EntityId; spell: number; target: EntityId; x: Fx; y: Fx };
 

@@ -164,3 +164,20 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x02089BD4` / `0x02089C18` | Thumb | `Snd_nextPlaylistTrack` / `Snd_musicBase` | Playlist entry / first STRM per faction and type | confirmed | |
 | `0x02089860` / `0x020898A4` / `0x02089878` | Thumb | `Snd_setMasterVolume` / `Snd_setSfxVolume` / `Snd_setMusicVolume` | Volumes, clamped to 127 | likely | |
 | `0x02087A8C` | ARM | `Event_postHeroUnderAttack` | Posts event 0x36 (called from `Unit_setHp`) | likely | |
+| `0x020859D4` | ARM | `Team_countRole` | Entities of a role on a team; finished only when r2 = 1 | likely | structures.md |
+| `0x02086088` | ARM | `Team_limitLeft` | Room left in a limit group (table `0x02126CA4`) | likely | structures.md |
+| `0x02068B74` | ARM | `ConstructStructureEntityCommand::start` | Bricks, limit and prerequisite checks for a build order | confirmed (effects seen in the emulator) | structures.md |
+| `0x02073080` | ARM | `ResearchUpgradeEntityCommand::start` | Tower upgrade (and spell research): next level, pays its price | confirmed | structures.md |
+| `0x02073620` | ARM | (upgrade done) | Replaces the tower with the next level, damage carried over | confirmed | structures.md |
+| `0x020728CC` | ARM | `RepairStructureEntityCommand::start` | Heroes and Builders only; target a damaged building | confirmed | structures.md |
+| `0x02054B64` | ARM | `RepairStructureAction::update` | Per-tick repair: half price over the build time | confirmed | structures.md |
+| `0x02001170` | ARM | `Footprint_shape` | Size code -> (w, h) table: squares, bridges, gates | confirmed | walls-bridges.md |
+| `0x020679D0` | ARM | `Wall_lineCells` | Cells of a dragged wall line (FX_Div steps) | confirmed | walls-bridges.md |
+| `0x02067C30` | ARM | `ConstructMultipleEntityCommand_update` | Builds wall pieces in order, paying each as it starts | likely | walls-bridges.md |
+| `0x0205DFE0` | ARM | `Wall_neighbourMask` | E/N/W/S same-slot wall mask, kept at unit +0x224 | confirmed | walls-bridges.md |
+| `0x02034B44` | ARM | `Wall_drawCell` | Swaps a cell's BG tiles for wall tiles | confirmed | walls-bridges.md |
+| `0x02034D84` | ARM | `Bg_setTeamRamp` | Writes a slot's 3-colour ramp into BG palette 0x37+3s | confirmed | walls-bridges.md |
+| `0x020A36E4` | THUMB | `Map_buildBridgeSites` | MARK 7/8 points -> sites, picks small/medium/large | confirmed | walls-bridges.md |
+| `0x0200D8A8` | ARM | `Bridge_draw` | Swaps a finished bridge's cells for bridge metatiles | confirmed | walls-bridges.md |
+| `0x020A30A0` | THUMB | `Map_setTerrain` | Writes one terrain grid cell (+0x2E8) | confirmed | walls-bridges.md |
+| `0x0205878C` | ARM | `Bridge_collapse` | Footprint back to water; kills walkers on it, rescues heroes | likely | walls-bridges.md |

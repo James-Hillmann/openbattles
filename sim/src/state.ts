@@ -61,7 +61,7 @@ export interface Unit {
   job: Job | null;
   /** Builder is carrying a load of bricks back. */
   carrying: boolean;
-  /** Production buildings: entity kinds waiting to be trained, front first. */
+  /** Production buildings: entity kinds waiting to be trained, front first. A tower: the level it is upgrading to. */
   queue: number[];
   /** Ticks spent on queue[0]. */
   prod: number;
@@ -101,7 +101,25 @@ export type Job =
    * Inside `building`, off the map: dropping off a load (then back to `tree`) or building a site
    * (`tree` = -1). `timer` counts down to coming out; -1 = until the site is finished.
    */
-  | { kind: 'inside'; building: EntityId; timer: number; tree: number };
+  | { kind: 'inside'; building: EntityId; timer: number; tree: number }
+  /**
+   * Build wall pieces of entity kind `type` in `cells` (never changed once made) from cells[i] on;
+   * `site` is the piece being built now, 0 for none (game: ConstructMultipleEntityCommand).
+   */
+  | { kind: 'wall'; type: number; cells: number[]; i: number; site: EntityId }
+  /** Go build a bridge of kind `type` with its top-left at `cell`. */
+  | { kind: 'bridge'; type: number; cell: number }
+  /**
+   * Repair `building` from next to it (Builders and heroes; structures.ts). `hp` and `bricks` carry the
+   * fractions of the per-tick rates, 20.12 fixed point (RepairStructureAction +0x20 / +0x24).
+   */
+  | { kind: 'repair'; building: EntityId; hp: number; bricks: number };
+
+/** A spot where a bridge can go: its top-left cell and the bridge entity that fits there. */
+export interface BridgeSite {
+  cell: number;
+  type: number;
+}
 
 /**
  * Static per-type data from Entities.ebp, indexed by entity index (+0x04).
@@ -227,6 +245,8 @@ export interface World {
   types: (EntityType | undefined)[];
   /** Map cells (y * width + x) where a Mine may stand: the top-left of its footprint. Static map data. */
   mineSites: number[];
+  /** Where bridges may go: each map bridge mark with the bridge that fits it (walls.ts). Static map data. */
+  bridgeSites: BridgeSite[];
   /** The game's spell table by spell id (ARM9). Static game data, not hashed; empty without a ROM. */
   spellDefs: SpellDef[];
   /** Spells being cast or still running, sorted by id. */

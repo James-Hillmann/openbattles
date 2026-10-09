@@ -1,3 +1,4 @@
+import { fpH, fpW } from './footprint';
 import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { findById } from './combat';
 import { nextInt } from './rng';
@@ -298,8 +299,8 @@ function scan(w: World, s: ActiveSpell): void {
     const c = findById(w.units, s.caster);
     if (c) {
       const [x, y] = cellOfUnit(c);
-      s.cx = x + (c.size >> 1);
-      s.cy = y + (c.size >> 1);
+      s.cx = x + (fpW(c.size) >> 1);
+      s.cy = y + (fpH(c.size) >> 1);
     }
   }
   const inside = (u: Unit) => {
@@ -679,7 +680,7 @@ function projectileTick(w: World, s: ActiveSpell, caster: Unit): boolean {
 /** Whether a unit stands in (or a building covers) cell (x, y). */
 function covers(u: Unit, x: number, y: number): boolean {
   const [ux, uy] = cellOfUnit(u);
-  return x >= ux && y >= uy && x < ux + u.size && y < uy + u.size;
+  return x >= ux && y >= uy && x < ux + fpW(u.size) && y < uy + fpH(u.size);
 }
 
 /**

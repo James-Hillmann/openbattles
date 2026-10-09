@@ -1,3 +1,4 @@
+import { fpH, fpW } from './footprint';
 import { CELL_H, CELL_W } from './config';
 import { FX_SHIFT, type Fx } from './fixed';
 import { nextInt } from './rng';
@@ -32,17 +33,18 @@ const cellX = (x: number) => Math.floor(x / (CELL_W << FX_SHIFT));
 const cellY = (y: number) => Math.floor(y / (CELL_H << FX_SHIFT));
 
 /**
- * A unit's footprint: a building covers `size` x `size` cells from the cell its
- * position is in (its top-left); everything else is one cell.
+ * A unit's footprint: a building covers its shape (fpW x fpH cells) from the cell
+ * its position is in (its top-left); everything else is one cell.
  */
-export function footprint(u: { x: number; y: number; size?: number }): { x0: number; y0: number; size: number } {
-  return { x0: cellX(u.x), y0: cellY(u.y), size: u.size ?? 1 };
+export function footprint(u: { x: number; y: number; size?: number }): { x0: number; y0: number; w: number; h: number } {
+  const size = u.size ?? 1;
+  return { x0: cellX(u.x), y0: cellY(u.y), w: fpW(size), h: fpH(size) };
 }
 
 /** The footprint cell of `t` nearest to cell (cx, cy): the cell itself when inside. */
 export function nearestFootprintCell(cx: number, cy: number, t: { x: number; y: number; size?: number }): [number, number] {
   const f = footprint(t);
-  return [Math.min(Math.max(cx, f.x0), f.x0 + f.size - 1), Math.min(Math.max(cy, f.y0), f.y0 + f.size - 1)];
+  return [Math.min(Math.max(cx, f.x0), f.x0 + f.w - 1), Math.min(Math.max(cy, f.y0), f.y0 + f.h - 1)];
 }
 
 /**

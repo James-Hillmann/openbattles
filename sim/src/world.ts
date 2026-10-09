@@ -5,15 +5,18 @@ import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
-import { OCC_LAYERS, type AttackStats, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
+import { OCC_LAYERS, type AttackStats, type BridgeSite, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
+import { orderRepair, orderUpgrade } from './structures';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
-  ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderConstruct, orderHarvest, orderTrain,
+  ROLE_BRIDGE, ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderCancel, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
 } from './economy';
+import { fpH, fpW } from './footprint';
+import { collapseBridge, orderBridge, orderWall } from './walls';
 
 export interface WorldInit {
   seed: number;
@@ -28,13 +31,15 @@ export interface WorldInit {
   mineSites?: number[];
   /** The ROM's spell table; without it heroes can't cast. */
   spellDefs?: SpellDef[];
+  /** Bridge sites from the map's MARK section, sized with sizeBridge. */
+  bridgeSites?: BridgeSite[];
 }
 
-export function createWorld({ seed, grid = null, bonus = null, players = [], rules = null, types = [], mineSites = [], spellDefs = [] }: WorldInit): World {
+export function createWorld({ seed, grid = null, bonus = null, players = [], rules = null, types = [], mineSites = [], spellDefs = [], bridgeSites = [] }: WorldInit): World {
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites], spellDefs, spells: [], nextSpell: 1, scanQueue: [],
+    mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [],
   };
 }
 
@@ -140,8 +145,10 @@ export function placeBuilding(w: World, owner: PlayerId, t: UnitType, cx: number
   const b = spawnUnit(w, owner, px, py, t);
   if (b.cell >= 0) removeUnit(w, b);
   const size = t.size ?? 1;
-  for (let y = cy; y < Math.min(g.height, cy + size); y++)
-    for (let x = cx; x < Math.min(g.width, cx + size); x++) g.cells[y * g.width + x] = TERRAIN_BUILDING;
+  // Bridges stand on their own layer over water and leave the terrain alone until finished (bridges.ts).
+  if (t.role !== ROLE_BRIDGE)
+    for (let y = cy; y < Math.min(g.height, cy + fpH(size)); y++)
+      for (let x = cx; x < Math.min(g.width, cx + fpW(size)); x++) g.cells[y * g.width + x] = TERRAIN_BUILDING;
   if (!finished) {
     b.progress = 0;
     b.hp = 1;
@@ -195,8 +202,23 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
     case 'construct':
       orderConstruct(w, player, cmd.unitIds, cmd.site);
       break;
+    case 'wall':
+      orderWall(w, player, cmd.unitIds, cmd.type, cmd.fx, cmd.fy, cmd.tx, cmd.ty);
+      break;
+    case 'bridge':
+      orderBridge(w, player, cmd.unitIds, cmd.type, cmd.cx, cmd.cy);
+      break;
     case 'train':
       orderTrain(w, player, cmd.building, cmd.type);
+      break;
+    case 'upgrade':
+      orderUpgrade(w, player, cmd.building);
+      break;
+    case 'repair':
+      orderRepair(w, player, cmd.unitIds, cmd.target);
+      break;
+    case 'cancel':
+      orderCancel(w, player, cmd.building, cmd.index);
       break;
     case 'cast':
       orderCast(w, player, cmd);
@@ -258,7 +280,9 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (w.grid) moveOnMap(w, u);
     else moveUnit(u);
   }
-  if (w.types.length > 0) economyStep(w, spawnInCell);
+  if (w.types.length > 0) economyStep(w, spawnInCell, placeBuilding);
+  // A bridge going down takes the ground units on it with it, so they die this tick too.
+  if (w.grid) for (const b of w.units) if (b.hp === 0 && b.role === ROLE_BRIDGE) collapseBridge(w, b);
   const dead = w.units.filter((u) => u.hp === 0);
   for (const u of dead) {
     removeUnit(w, u);
@@ -279,6 +303,7 @@ export function cloneWorld(w: World): World {
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],
+    bridgeSites: w.bridgeSites,
     projectiles: w.projectiles.map((p) => ({ ...p })),
     spells: w.spells.map((s) => ({ ...s, units: [...s.units] })),
     scanQueue: [...w.scanQueue],

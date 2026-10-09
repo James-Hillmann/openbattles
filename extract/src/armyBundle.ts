@@ -61,6 +61,8 @@ export const FE_TEXT = {
   selectArmy: 0,
   buildCosts: 99,
   magicCosts: 100,
+  upgradeCosts: 101,
+  required: 109,
   continue: 143,
   back: 147,
   army: 149,
