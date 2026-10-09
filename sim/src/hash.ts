@@ -79,7 +79,8 @@ export function hashWorld(w: World): number {
       if (!j) mix(0);
       else if (j.kind === 'chop') (mix(1), mix(j.tree), mix(j.timer));
       else if (j.kind === 'deliver') (mix(2), mix(j.tree), mix(j.drop));
-      else (mix(3), mix(j.site));
+      else if (j.kind === 'build') (mix(3), mix(j.site));
+      else (mix(4), mix(j.building), mix(j.timer), mix(j.tree));
     }
   }
   if (w.grid) {

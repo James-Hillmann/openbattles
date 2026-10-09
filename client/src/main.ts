@@ -6,6 +6,7 @@ import {
   createFog,
   createWorld,
   isVisible,
+  isExplored,
   updateFog,
   visionCell,
   fx,
@@ -22,6 +23,7 @@ import {
   canPlace,
   isBuilding,
   isFinished,
+  isInside,
   getPlayer,
   popUsed,
   popCap,
@@ -34,6 +36,8 @@ import {
   START_BRICKS,
   TERRAIN_TREE,
   ROLE_BUILDER,
+  ROLE_SHIPYARD,
+  QUEUE_MAX,
   type EntityType,
   type StartSpawn,
   type WinMode,
@@ -694,7 +698,8 @@ function updateStrip() {
       const bt = world.types[k]?.buildTime ?? 1;
       return { icon: iconFor(n), pct: i === 0 ? Math.floor((100 * b.prod) / Math.max(1, bt)) : -1 };
     });
-    return bar.show('', list.map((st) => item(st, 'train')), queue);
+    const full = b.queue.length >= QUEUE_MAX;
+    return bar.show('', list.map((st) => ({ ...item(st, 'train'), ...(full ? { enabled: false } : {}) })), queue);
   }
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.hide();
   const all = armyBuildings(localPlayer);
@@ -719,7 +724,7 @@ function drawPlacement() {
   const t = world.types[placing.type];
   if (!t) return;
   const { cx, cy } = placeCell(t.size);
-  const ok = canPlace(world, t, cx, cy);
+  const ok = placeable(t, cx, cy);
   const [l, tp, w, h] = [cx * CELL_W, cy * CELL_H, t.size * CELL_W, t.size * CELL_H];
   overlay.rect(l, tp, w, h).fill({ color: ok ? 0x30ff30 : 0xff3030, alpha: 0.35 });
   const tex = buildingTex.get(`${nameByIndex.get(placing.type)}@${bankOf(localPlayer)}`);
@@ -735,6 +740,22 @@ ghost.anchor.set(0.5, 1);
 ghost.alpha = 0.6;
 camera.addChild(ghost);
 
+/**
+ * The sim's rule plus fog: nothing goes where the player hasn't seen (a playtester of the DS game; ours
+ * checks explored cells). A Shipyard also needs its shore in view, so its ring counts too.
+ */
+function placeable(t: EntityType, cx: number, cy: number): boolean {
+  if (!canPlace(world, t, cx, cy)) return false;
+  if (!fog) return true;
+  const r = t.role === ROLE_SHIPYARD ? 1 : 0;
+  for (let y = cy - r; y < cy + t.size + r; y++) {
+    for (let x = cx - r; x < cx + t.size + r; x++) {
+      if (x >= 0 && y >= 0 && x < fog.width && y < fog.height && !isExplored(fog, x, y)) return false;
+    }
+  }
+  return true;
+}
+
 /** Place the picked building at the pointer with the selected Builders. */
 function tryPlace(): boolean {
   if (!placing) return false;
@@ -742,7 +763,7 @@ function tryPlace(): boolean {
   const unitIds = world.units.filter((u) => u.owner === localPlayer && u.role === ROLE_BUILDER && selection.ids.has(u.id)).map((u) => u.id);
   if (t && unitIds.length) {
     const { cx, cy } = placeCell(t.size);
-    if (!canPlace(world, t, cx, cy)) return true; // keep the preview up; the spot is taken
+    if (!placeable(t, cx, cy)) return true; // keep the preview up; the spot is taken
     match.issue({ kind: 'build', unitIds, type: placing.type, cx, cy });
   }
   placing = null;
@@ -826,13 +847,14 @@ app.ticker.add((t) => {
     unitAnim.delete(id);
   }
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
-  selection.prune((id) => world.units.some((u) => u.id === id));
+  selection.prune((id) => world.units.some((u) => u.id === id && !isInside(u)));
   pruneSites();
-  workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'build' && workSpot(u) ? [u.job.site] : [])));
+  workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
   drawFog();
   const nextDrawn: Pickable[] = [];
   for (const u of world.units) {
-    if (hiddenByFog(u)) {
+    // Builders inside a building (dropping off, or building a site) aren't drawn or pickable, as in the game.
+    if (hiddenByFog(u) || isInside(u)) {
       const hidden = unitSprites.get(u.id);
       if (hidden) hidden.visible = false;
       const site = siteViews.get(u.id);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CHOP_TICKS, MOVES_FLYING, TERRAIN_BUILDING, isWalkable, TERRAIN_TREE, cellCenterX, cellCenterY, createWorld, getPlayer, hashWorld, placeBuilding,
+  CHOP_TICKS, DROP_TICKS, SITE_EXIT_TICKS, MOVES_FLYING, canPlace, TERRAIN_BUILDING, isWalkable, TERRAIN_TREE, cellCenterX, cellCenterY, createWorld, getPlayer, hashWorld, placeBuilding,
   popCap, popUsed, spawnUnit, starCap, step, type Command, type EntityType, type ScheduledCommand, type TerrainGrid,
   type World,
 } from '@lbw/sim';
@@ -99,7 +99,36 @@ describe('economy', () => {
     expect(farm.hp).toBe(350);
     expect(popCap(w, 0)).toBe(8);
     expect(starCap(w, 0)).toBe(1);
+    // The builder works from inside the site and comes out 18 ticks after it's done, below its right column.
+    expect(b.job?.kind).toBe('inside');
+    expect(b.cell).toBe(-1);
+    run(w, SITE_EXIT_TICKS - 1);
+    expect(b.job?.kind).toBe('inside');
+    run(w, 1);
     expect(b.job).toBeNull();
+    expect([Math.floor(b.x / 65536 / 24), Math.floor(b.y / 65536 / 16)]).toEqual([5, 8]);
+  });
+
+  it('a builder drops off inside the castle: paid on entering, out 23 ticks later below the middle column', () => {
+    const w = world();
+    const castle = placeBuilding(w, 0, CASTLE, 4, 4);
+    const b = at(w, 3, 7); // diagonal to the castle's corner
+    b.carrying = true;
+    run(w, 1, [{ kind: 'harvest', unitIds: [b.id], cx: 1, cy: 7 }]);
+    expect(b.job?.kind).toBe('inside'); // arrived this tick
+    expect(bricks(w)).toBe(500);
+    run(w, 1);
+    expect(bricks(w)).toBe(575);
+    expect(b.cell).toBe(-1);
+    // Inside: no orders, no targeting.
+    run(w, 1, [{ kind: 'move', unitIds: [b.id], x: cellCenterX(10), y: cellCenterY(10) }]);
+    expect(b.job?.kind).toBe('inside');
+    run(w, DROP_TICKS - 3);
+    expect(b.job?.kind).toBe('inside');
+    run(w, 1);
+    expect(b.job?.kind).toBe('chop');
+    expect([Math.floor(b.x / 65536 / 24), Math.floor(b.y / 65536 / 16)]).toEqual([5, 7]);
+    expect(castle.hp).toBe(castle.maxHp);
   });
 
   it('refuses a building the player cannot afford or that does not fit', () => {
@@ -217,6 +246,41 @@ describe('economy', () => {
     expect(bricks(w)).toBe(5000);
   });
 
+  it('caps pop at 20 and stars at 4 however many Farms there are', () => {
+    const w = world(5000);
+    for (let i = 0; i < 6; i++) placeBuilding(w, 0, FARM, 4 + 3 * i, 2);
+    expect(popCap(w, 0)).toBe(20);
+    expect(starCap(w, 0)).toBe(4);
+  });
+
+  it('a building queues at most 3 units', () => {
+    const w = world(5000);
+    placeBuilding(w, 0, FARM, 4, 2);
+    const castle = placeBuilding(w, 0, CASTLE, 10, 10);
+    run(w, 1, Array.from({ length: 5 }, () => ({ kind: 'train' as const, building: castle.id, type: BUILDER.kind })));
+    expect(castle.queue).toHaveLength(3);
+    expect(bricks(w)).toBe(5000 - 3 * 50);
+  });
+
+  it('places buildings only on the terrain their flags allow; a Shipyard sits in water touching land', () => {
+    const OPEN = 0b0001;
+    const WATER = 0b1000;
+    const farm = { ...FARM, moves: OPEN };
+    const yard = t(14, 16, 750, 350, 600, 2, { moves: WATER });
+    const w = world(5000);
+    w.types[yard.kind] = yard;
+    w.types[farm.kind] = farm;
+    const g = w.grid!;
+    for (let y = 10; y < 24; y++) for (let x = 14; x < 24; x++) g.cells[y * W + x] = 3; // a lake in the corner
+    for (const c of [6 * W + 6, 6 * W + 7]) g.cells[c] = 2; // rough
+    expect(canPlace(w, farm, 6, 6)).toBe(false); // rough under it
+    expect(canPlace(w, farm, 8, 6)).toBe(true);
+    expect(canPlace(w, farm, 14, 10)).toBe(false); // water
+    expect(canPlace(w, yard, 8, 6)).toBe(false); // land
+    expect(canPlace(w, yard, 18, 16)).toBe(false); // open water, no land next to it
+    expect(canPlace(w, yard, 14, 10)).toBe(true); // in the water at the shore
+  });
+
   it('is deterministic: an economy replay hash is pinned', () => {
     const w = world();
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);
@@ -227,6 +291,6 @@ describe('economy', () => {
     ]);
     run(w, 900);
     expect(bricks(w)).toBeGreaterThan(450);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"26ff7130"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"7b2e8574"`);
   });
 });

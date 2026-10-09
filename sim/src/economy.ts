@@ -1,6 +1,6 @@
-import { cellCenterX, cellCenterY, isWalkableCode, type TerrainGrid } from './terrain';
-import type { EntityId, EntityType, Player, PlayerId, Unit, World } from './state';
-import { orderMove, stopMove, unitCell } from './movement';
+import { MOVES_GROUND, cellCenterX, cellCenterY, isWalkableCode, type TerrainGrid } from './terrain';
+import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from './state';
+import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
 
 /**
@@ -26,14 +26,33 @@ export const MINE_TICKS = 75;
 /** Population cap = 4 + 4 per finished Farm; star cap = finished Farms (0x02085D90). confirmed */
 export const BASE_POP = 4;
 export const POP_PER_FARM = 4;
-/** Production queue length. guess */
-export const QUEUE_MAX = 5;
+/**
+ * Hard ceilings on those caps, from the per-player limit table at 0x02126CA4 (hero 1, pop 20, stars 4),
+ * applied by 0x020863B8 and the HUD (0x020E018C). confirmed (code; matches a playtester's report)
+ */
+export const MAX_HEROES = 1;
+export const MAX_POP = 20;
+export const MAX_STARS = 4;
+/** Production queue length per building. likely (a playtester of the DS game; not watched yet) */
+export const QUEUE_MAX = 3;
+/**
+ * A Builder dropping off a load goes inside the building: in the tick after it arrives (bricks paid then),
+ * out DROP_TICKS ticks after it arrived, at the building's exit cell. confirmed (emulator, 10 drop-offs;
+ * HarvestEngineerEntityCommand 0x0206C780: enter, a 20-tick DelayAction, come out)
+ */
+export const DROP_TICKS = 24;
+/**
+ * A Builder builds from inside the site and comes out this many ticks after it is finished (the building's
+ * 20-tick bounce, 0x02051C40, then the exit). confirmed (emulator, one Farm: 17-18 ticks)
+ */
+export const SITE_EXIT_TICKS = 18;
 /** How far a builder looks for the next tree after a delivery. guess */
 export const TREE_SEARCH_RADIUS = 10;
 
 /** Terrain codes the economy writes into the grid. */
 export const TERRAIN_OPEN = 0;
 export const TERRAIN_TREE = 1;
+export const TERRAIN_WATER = 3;
 /**
  * Our code for cells under a building. 4 is unused in the skirmish maps and the
  * game's terrain check (0x02001510) refuses it for every unit, so it blocks
@@ -68,6 +87,8 @@ export const TRAINS: Readonly<Record<number, readonly number[]>> = {
 };
 
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
+/** A Builder inside a building (dropping off or building): off the map, not drawn, not targetable. */
+export const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
 export const isFinished = (u: Unit): boolean => u.progress >= u.buildTime;
 
 export function getPlayer(w: World, id: PlayerId): Player | undefined {
@@ -88,8 +109,8 @@ export function spendBricks(p: Player, n: number): boolean {
 const finishedOfRole = (w: World, owner: PlayerId, role: number): number =>
   w.units.filter((u) => u.owner === owner && u.hp > 0 && u.role === role && isFinished(u)).length;
 
-export const popCap = (w: World, owner: PlayerId): number => BASE_POP + POP_PER_FARM * finishedOfRole(w, owner, ROLE_FARM);
-export const starCap = (w: World, owner: PlayerId): number => finishedOfRole(w, owner, ROLE_FARM);
+export const popCap = (w: World, owner: PlayerId): number => Math.min(MAX_POP, BASE_POP + POP_PER_FARM * finishedOfRole(w, owner, ROLE_FARM));
+export const starCap = (w: World, owner: PlayerId): number => Math.min(MAX_STARS, finishedOfRole(w, owner, ROLE_FARM));
 
 /** Pop counts roles 1-5; the hero and siege units don't (0x02086524). */
 const takesPop = (role: number) => role >= ROLE_BUILDER && role <= ROLE_TRANSPORT;
@@ -228,14 +249,32 @@ export function orderHarvest(w: World, player: PlayerId, ids: readonly EntityId[
   }
 }
 
-/** Can a building of type t stand with its top-left at (cx, cy)? */
+/**
+ * Can a building of type t stand with its top-left at (cx, cy)? Every footprint cell must be free and
+ * of a terrain the building's own flags allow (entity +0x16 open, +0x17 rough, +0x18 water, +0x19 tree,
+ * the same per-code test units move by, 0x02001510): Castles, Farms, Barracks... open ground only,
+ * Mines rough only (and on one of the map's mine sites), Shipyards water only. likely (entity data)
+ * A Shipyard must also touch land: some cell around it that isn't water. likely (a playtester of the
+ * DS game; the code isn't traced).
+ */
 export function canPlace(w: World, t: EntityType, cx: number, cy: number): boolean {
   const g = w.grid;
   if (!g || cx < 0 || cy < 0 || cx + t.size > g.width || cy + t.size > g.height) return false;
   if (t.role === ROLE_MINE && !w.mineSites.includes(cy * g.width + cx)) return false;
-  for (let y = cy; y < cy + t.size; y++)
-    for (let x = cx; x < cx + t.size; x++) if (!freeFor(w, y * g.width + x, null)) return false;
-  return true;
+  const moves = t.moves ?? MOVES_GROUND;
+  for (let y = cy; y < cy + t.size; y++) {
+    for (let x = cx; x < cx + t.size; x++) {
+      const c = y * g.width + x;
+      if (!isWalkableCode(g.cells[c]!, moves) || w.occ![c] !== 0) return false;
+    }
+  }
+  if (t.role !== ROLE_SHIPYARD) return true;
+  for (let y = Math.max(0, cy - 1); y <= Math.min(g.height - 1, cy + t.size); y++) {
+    for (let x = Math.max(0, cx - 1); x <= Math.min(g.width - 1, cx + t.size); x++) {
+      if (g.cells[y * g.width + x] !== TERRAIN_WATER) return true; // footprint cells are water, so this is the edge
+    }
+  }
+  return false;
 }
 
 export type SpawnFn = (w: World, owner: PlayerId, t: EntityType, cell: number) => Unit;
@@ -281,7 +320,7 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
   if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
-  // One hero at a time: the Castle only offers it while the hero is down. guess
+  // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code)
   if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
   if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;
   if (takesStar(t.role) && starsUsed(w, player) + 1 > starCap(w, player)) return;
@@ -321,11 +360,7 @@ function stepJob(w: World, u: Unit): void {
         job.drop = d.id;
       }
       if (approach(w, u, originCell(w, d), d.size) !== 'there') return;
-      const p = getPlayer(w, u.owner);
-      if (p) addBricks(p, loadValue(w, u.owner));
-      u.carrying = false;
-      const next = g.cells[job.tree] === TERRAIN_TREE ? job.tree : nearestTree(g, job.tree);
-      u.job = next < 0 ? null : { kind: 'chop', tree: next, timer: CHOP_TICKS };
+      u.job = { kind: 'inside', building: d.id, timer: DROP_TICKS, tree: job.tree };
       return;
     }
     case 'build': {
@@ -334,19 +369,62 @@ function stepJob(w: World, u: Unit): void {
         u.job = null;
         return;
       }
-      if (approach(w, u, originCell(w, s), s.size) === 'stuck') u.job = null;
+      const a = approach(w, u, originCell(w, s), s.size);
+      if (a === 'stuck') u.job = null;
+      if (a !== 'there') return;
+      // In through the site's wall; the work starts this tick (emulator: progress starts on entry).
+      removeUnit(w, u);
+      u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
+      return;
+    }
+    case 'inside': {
+      const b = findById(w.units, job.building);
+      if (!b || b.hp <= 0) {
+        // The building is gone: out where we stand (our rule; the game's is not traced).
+        comeOut(w, u, freeCellNear(w, cellX(g, unitCell(w, u)), cellY(g, unitCell(w, u)), 7), null);
+        return;
+      }
+      if (job.tree < 0) {
+        // Building a site: wait for it to finish, then for the exit (stepConstruction sets the timer).
+        if (job.timer < 0 || --job.timer > 0) return;
+        comeOut(w, u, exitCell(w, b), null);
+        return;
+      }
+      if (job.timer === DROP_TICKS) {
+        // The tick after arriving: in, and the load is paid.
+        removeUnit(w, u);
+        const p = getPlayer(w, u.owner);
+        if (p) addBricks(p, loadValue(w, u.owner));
+        u.carrying = false;
+      }
+      if (--job.timer > 0) return;
+      const next = g.cells[job.tree] === TERRAIN_TREE ? job.tree : nearestTree(g, job.tree);
+      comeOut(w, u, exitCell(w, b), next < 0 ? null : { kind: 'chop', tree: next, timer: CHOP_TICKS });
       return;
     }
   }
 }
 
-/** A builder standing next to the site, not walking, with a build job on it. */
-function isBuildingOn(w: World, u: Unit, s: Unit): boolean {
-  return (
-    u.hp > 0 && u.owner === s.owner && u.job?.kind === 'build' && u.job.site === s.id && !u.mv &&
-    rectDist(w.grid!, unitCell(w, u), originCell(w, s), s.size) === 1
-  );
+/**
+ * Put a Builder back on the map at cell c (the first free cell below the building's middle column,
+ * as for trained units: emulator, Castle and Farm). No room: stay in and try again next tick.
+ */
+function comeOut(w: World, u: Unit, c: number, next: Job | null): void {
+  if (c < 0) {
+    if (u.job?.kind === 'inside') u.job.timer = 1;
+    return;
+  }
+  const g = w.grid!;
+  u.x = cellCenterX(cellX(g, c));
+  u.y = cellCenterY(cellY(g, c));
+  u.tx = u.ty = null;
+  placeUnit(w, u);
+  u.job = next;
 }
+
+/** A builder inside the site, working on it. */
+const isBuildingOn = (u: Unit, s: Unit): boolean =>
+  u.hp > 0 && u.owner === s.owner && u.job?.kind === 'inside' && u.job.building === s.id && u.job.tree < 0;
 
 /**
  * One tick of construction: a site with at least one builder at work gains a
@@ -354,14 +432,17 @@ function isBuildingOn(w: World, u: Unit, s: Unit): boolean {
  * 360 ticks, HP rising ~1 a tick). Whether more builders build faster: open.
  */
 function stepConstruction(w: World, s: Unit): void {
-  if (!w.units.some((u) => isBuildingOn(w, u, s))) return;
+  if (!w.units.some((u) => isBuildingOn(u, s))) return;
   const before = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
   s.progress++;
   const after = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
   s.hp = Math.min(s.maxHp, s.hp + after - before);
   if (!isFinished(s)) return;
   if (s.role === ROLE_MINE) s.payout = MINE_TICKS;
-  for (const u of w.units) if (u.job?.kind === 'build' && u.job.site === s.id) u.job = null;
+  for (const u of w.units) {
+    if (u.job?.kind === 'build' && u.job.site === s.id) u.job = null;
+    if (isBuildingOn(u, s) && u.job?.kind === 'inside') u.job.timer = SITE_EXIT_TICKS;
+  }
 }
 
 /** First free walkable cell around the spot below a building's bottom row, by Chebyshev rings. */
