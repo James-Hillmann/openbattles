@@ -63,7 +63,8 @@ construction: see "Construction effect" below.
   read, so ours shows each building's own selection portrait (`UI/GamePlayerCards/<name>`, the 96x96
   picture the top screen shows when it is selected) box-filtered down to 24x24, on the strip, its
   queue and the Build Costs panel (`shrink` in `extract/src/armyBundle.ts`).
-- Placement: click a spot (green = `canPlace`), right-click or Escape cancels. No check mark.
+- Placement: click a spot (green = `canPlace` and every footprint cell explored; a Shipyard's shore too),
+  right-click or Escape cancels. No check mark. Terrain per building comes from its entity flags (economy.md).
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.
 - Chopped trees: the client asks the ROM worker to re-bake the ground with the live terrain
   (`rebakeGround`), so felled trees disappear and their neighbours re-pick edge tiles.
@@ -82,8 +83,10 @@ construction: see "Construction effect" below.
 - **Carrying** a load back: the ordinary walk; no load is drawn on the unit. likely (no carry sheet exists:
   the King Builder has only `_eng_0/1/2`).
 - **Building**: the site is a cloud of dust with LEGO bricks flying out, under a progress bar, not the
-  building itself. The Builder's pose inside the cloud couldn't be seen; ours plays the same swing as
-  chopping (guess). The cloud is below.
+  building itself. The Builder isn't drawn while it works a site: it vanishes into the cloud and shows
+  again when the building is done. likely (emulator: no Builder anywhere near the Farm through the whole
+  build, one standing at its corner right after; a playtester of the DS game says the same). Ours hides it
+  while it stands working the site. The cloud is below.
 
 ## Construction effect (dust cloud + flying studs), traced 2026-10-08
 

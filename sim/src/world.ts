@@ -11,7 +11,7 @@ import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
-  ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
+  ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
 } from './economy';
 
@@ -149,7 +149,14 @@ export function placeBuilding(w: World, owner: PlayerId, t: UnitType, cx: number
   return b;
 }
 
-function applyCommand(w: World, player: PlayerId, cmd: Command): void {
+const isInsideId = (w: World, id: number): boolean => {
+  const u = findById(w.units, id);
+  return u !== undefined && isInside(u);
+};
+
+function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
+  // Builders inside a building can't be given orders (they're off the map until they come out).
+  const cmd = 'unitIds' in cmd0 ? { ...cmd0, unitIds: cmd0.unitIds.filter((id) => !isInsideId(w, id)) } : cmd0;
   switch (cmd.kind) {
     case 'move': {
       const units = w.units.filter((u) => u.owner === player && u.speed > 0 && cmd.unitIds.includes(u.id));
@@ -169,7 +176,7 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
     }
     case 'attack': {
       const t = findById(w.units, cmd.target);
-      if (!t || t.owner === player) break;
+      if (!t || t.owner === player || isInside(t)) break;
       for (const u of w.units) {
         if (u.owner === player && u.attack && cmd.unitIds.includes(u.id)) {
           u.target = t.id;

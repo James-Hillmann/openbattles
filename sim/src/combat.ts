@@ -7,6 +7,9 @@ import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { orderMove, stopMove } from './movement';
 import { damageTaken, meleeDamage } from './spells';
 
+/** A Builder inside a building is off the map: it can't fight or be hit (economy.ts `isInside`). */
+const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
+
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
 
@@ -107,7 +110,7 @@ const SPLASH_FACTOR = [4096, 4096 - 0x333, 4096 - 2 * 0x333];
  */
 function splash(w: World, p: Projectile, cx: number, cy: number): void {
   for (const o of w.units) {
-    if (o.owner === p.owner || o.hp === 0) continue;
+    if (o.owner === p.owner || o.hp === 0 || isInside(o)) continue;
     const ring = chebToFootprint(cx, cy, o); // a building is hit through its nearest footprint cell
     if (ring > 2) continue;
     const f = SPLASH_FACTOR[ring]!;
@@ -204,7 +207,7 @@ function pickTarget(w: World, u: Unit): Unit | undefined {
   let bestIn = false;
   let bestD = 0;
   for (const o of w.units) {
-    if (o.owner === u.owner || o.hp === 0) continue;
+    if (o.owner === u.owner || o.hp === 0 || isInside(o)) continue;
     const d = cellDist2(u, o);
     if (d > sight2 || d < min2 || d > far * far) continue;
     const isIn = d <= a.maxRange * a.maxRange;
@@ -229,9 +232,9 @@ function pickTarget(w: World, u: Unit): Unit | undefined {
  * (game: 0x02050A40, cooldown check against +0x19C).
  */
 export function combatStep(w: World, u: Unit): void {
-  if (!u.attack || u.hp === 0) return;
+  if (!u.attack || u.hp === 0 || isInside(u)) return;
   let t = u.target === null ? undefined : findById(w.units, u.target);
-  if (u.target !== null && (!t || t.hp === 0)) {
+  if (u.target !== null && (!t || t.hp === 0 || isInside(t))) {
     // Target died or vanished: stop where we are.
     u.target = null;
     u.ordered = false;

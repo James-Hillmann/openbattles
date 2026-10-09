@@ -96,7 +96,12 @@ export type Job =
   /** Carry a load to the nearest finished building; `tree` is where to go back to. */
   | { kind: 'deliver'; tree: number; drop: EntityId }
   /** Work on the construction site `site`. */
-  | { kind: 'build'; site: EntityId };
+  | { kind: 'build'; site: EntityId }
+  /**
+   * Inside `building`, off the map: dropping off a load (then back to `tree`) or building a site
+   * (`tree` = -1). `timer` counts down to coming out; -1 = until the site is finished.
+   */
+  | { kind: 'inside'; building: EntityId; timer: number; tree: number };
 
 /**
  * Static per-type data from Entities.ebp, indexed by entity index (+0x04).
