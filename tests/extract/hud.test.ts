@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeCells, decodeScreen, entityLabels, parseFont, parseLang, renderCell, renderText, type CharData } from '@lbw/extract';
+import { ICON_ANIMS, decodeCells, decodeScreen, entityLabels, iconFrame, miniCell, parseFont, parseLang, renderCell, renderText, type CharData } from '@lbw/extract';
 
 const bytes = (s: string) => [...s].map((c) => c.charCodeAt(0));
 const u16le = (v: number) => [v & 0xff, (v >> 8) & 0xff];
@@ -88,5 +88,18 @@ describe('NFTR fonts', () => {
     expect(img.width).toBe(3 + 1 + 2);
     const lit = (x: number, y: number) => img.data[(y * img.width + x) * 4 + 3] === 255;
     expect([lit(0, 0), lit(2, 0), lit(3, 0), lit(4, 1)]).toEqual([true, true, false, true]);
+  });
+});
+
+describe('minimap and icon timing', () => {
+  it('maps minimap pixels to map cells at 1.5 px per cell', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map(miniCell)).toEqual([0, 0, 1, 1, 2, 3, 3]);
+  });
+
+  it('steps the status icons through their measured frame tables', () => {
+    expect([0, 124, 125, 499, 500].map((t) => iconFrame('bricks', t))).toEqual([0, 0, 1, 3, 0]);
+    expect(iconFrame('star', 999)).toBe(11);
+    expect(iconFrame('minifigs', 800 + 400)).toBe(6);
+    expect(ICON_ANIMS.minifigs.frames[6]).toBe(4);
   });
 });

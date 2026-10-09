@@ -1,5 +1,5 @@
 import type { Graphics } from 'pixi.js';
-import { COST_PANEL, TOP_H, TOP_W, composeTopScreen, type HudBundle, type TopScreenState } from '@lbw/extract';
+import { COST_PANEL, TOP_H, TOP_W, composeTopScreen, iconFrame, type HudBundle, type TopScreenState } from '@lbw/extract';
 import { HP_BANDS, POWER_COLORS, barCells, hpBand, litCells } from './bars';
 
 /**
@@ -77,7 +77,12 @@ export class HudView {
   update(state: TopScreenState): void {
     if (!this.hud) return;
     // The minimap image only changes with the map, and setBundle() resets `shown` then.
-    const key = JSON.stringify({ ...state, minimap: state.minimap && { ...state.minimap, image: undefined } });
+    const key = JSON.stringify({
+      ...state,
+      // Repaint when an icon frame changes, not on every tick of the clock.
+      timeMs: (['bricks', 'minifigs', 'star'] as const).map((n) => iconFrame(n, state.timeMs)),
+      minimap: state.minimap && { ...state.minimap, image: undefined },
+    });
     if (key === this.shown) return;
     this.shown = key;
     const img = composeTopScreen(this.hud, state);

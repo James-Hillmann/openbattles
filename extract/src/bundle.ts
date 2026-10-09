@@ -85,7 +85,7 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const trees = romTreeTable(rom);
   const map = trees ? { ...parsed, ...bakeTrees(parsed, trees) } : parsed;
   const { chars, pal, metatiles } = mapGraphics(rom, name, map.tileset);
-  const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
+  const minimap = renderMinimap(rom, name, map);
   const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
   // Bridges come from the tileset's own metatiles, not the map's detail table.
   const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));

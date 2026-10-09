@@ -323,8 +323,9 @@ let minimap: Rgba | undefined;
 let fog: Fog | null = null;
 /** Most common colour of the game's fog texture (FoWTileset), measured from a screenshot. The texture itself isn't drawn yet. */
 const FOG_COLOR = 0x98a8b0;
-/** Minimap dot colors per player: red is BGR555 0x015F (measured); blue is a guess until seen in game. */
-const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
+/** Minimap dot palette index per team color: 4 red (measured), 5 blue (likely); other teams open. */
+const MINIMAP_DOT_INDEX = [4, 5];
+let minimapDots: [number, number, number][] = [];
 
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
@@ -333,6 +334,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   priceCanvases.clear();
   siteFx = hud.particles ? new SiteFx(hud.particles) : null;
   minimap = b.minimap;
+  minimapDots = hud.minimapDots ?? [];
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
   mapGrid = { width: b.width, height: b.height, cells: b.terrain };
@@ -1212,6 +1214,7 @@ app.ticker.add((t) => {
     minifigCap: me ? popCap(world, localPlayer) : Math.max(4, mine.length),
     star: me ? [starsUsed(world, localPlayer), starCap(world, localPlayer)] : [0, 0],
     selected: selectedEntity >= 0 && firstSelected ? { entity: selectedEntity, hp: firstSelected.hp } : undefined,
+    timeMs: animTime,
     minimap: minimap && {
       image: minimap,
       // World px -> minimap px: 1.5 px per 24x16 cell, i.e. x / 16 and y * 3 / 32.
@@ -1221,7 +1224,7 @@ app.ticker.add((t) => {
         w: Math.round(app.screen.width / camera.scale.x / 16),
         h: Math.round((app.screen.height / camera.scale.y) * 3 / 32),
       },
-      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: d.building ? 2 : 1, rgb: MINIMAP_DOT[teamColor[d.owner] ?? d.owner] ?? [255, 255, 255] })),
+      dots: drawn.map((d) => ({ x: Math.floor(d.x / 16), y: Math.floor((d.y * 3) / 32), size: d.building ? 2 : 1, rgb: minimapDots[MINIMAP_DOT_INDEX[teamColor[d.owner] ?? d.owner] ?? -1] ?? [255, 255, 255] })),
     },
   });
 });
