@@ -1,6 +1,9 @@
 import type { ArmyBundle, HudBundle, MapBundle, Rgba, UnitBundle } from '@lbw/extract';
 import type { RomSummary, WorkerRequest, WorkerResponse } from './romWorker';
 
+/** Stereo PCM at the DS mixer rate; `player` is the sound player it plays on (-1 for music). */
+export type SoundPcm = { left: Float32Array; right: Float32Array; player: number };
+
 /** What the rest of the client can ask of the loaded ROM. */
 export interface RomControl {
   /** Null until a ROM is loaded. */
@@ -13,6 +16,8 @@ export interface RomControl {
   loadUnits(teams: number[], localTeam: number): Promise<void>;
   /** Ask for the ground redrawn with this terrain; `onGround` gets it. */
   rebake(name: string, terrain: Uint8Array): void;
+  /** Render an effect or decode a music stream (stereo PCM at the DS mixer rate); null if there is none. */
+  sound(req: { effect: { arc: number; index: number } } | { music: number }): Promise<SoundPcm | null>;
   onGround: ((name: string, ground: Rgba) => void) | null;
 }
 
@@ -31,6 +36,8 @@ export function createRom(h: RomHandlers): RomControl {
   // The worker answers in request order, so FIFO queues match replies to requests.
   const mapWaiters: (() => void)[] = [];
   const unitWaiters: (() => void)[] = [];
+  const soundWaiters = new Map<number, (pcm: SoundPcm | null) => void>();
+  let soundId = 0;
   let loading: { resolve: (s: RomSummary) => void; reject: (e: Error) => void; summary?: RomSummary } | null = null;
 
   const ctl: RomControl = {
@@ -51,12 +58,21 @@ export function createRom(h: RomHandlers): RomControl {
         send({ type: 'units', teams, localTeam });
       }),
     rebake: (name, terrain) => send({ type: 'ground', name, terrain: terrain.slice() }),
+    sound: (req) =>
+      new Promise((resolve) => {
+        const id = ++soundId;
+        soundWaiters.set(id, resolve);
+        send({ type: 'sound', id, ...req });
+      }),
     onGround: null,
   };
 
   worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
     const msg = e.data;
-    if (msg.type === 'error') {
+    if (msg.type === 'sound') {
+      soundWaiters.get(msg.id)?.(msg.pcm);
+      soundWaiters.delete(msg.id);
+    } else if (msg.type === 'error') {
       if (loading) {
         loading.reject(new Error(msg.error));
         loading = null;

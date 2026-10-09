@@ -1,3 +1,4 @@
+import { fpH, fpW } from './footprint';
 import type { PlayerId, Unit, World } from './state';
 import { cellOf } from './terrain';
 
@@ -92,8 +93,7 @@ export function updateFog(f: Fog, w: World, player: PlayerId): void {
  */
 export const visionCell = (u: Unit): [number, number] => {
   const [cx, cy] = cellOf(u.x, u.y);
-  const mid = u.size >> 1;
-  return [cx + mid, cy + mid];
+  return [cx + (fpW(u.size) >> 1), cy + (fpH(u.size) >> 1)];
 };
 
 export const isVisible = (f: Fog, cx: number, cy: number): boolean =>

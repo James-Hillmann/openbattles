@@ -80,7 +80,7 @@ export type ServerMsg =
  * Bump whenever the protocol or the sim rules change: clients on different builds would
  * desync, so the lobby only pairs equal versions (sent as part of the `rom` fingerprint).
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 8;
 
 /** Unit slots in an army (the army screen's nine). */
 export const ARMY_SLOTS = 9;

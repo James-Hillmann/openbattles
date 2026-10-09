@@ -40,6 +40,8 @@ export function hashWorld(w: World): number {
     mix(u.role);
     mix(u.path.length);
     for (const c of u.path) mix(c);
+    for (const v of [u.stance, u.post, u.leg, u.since, u.back, u.rally, u.route.length]) mix(v);
+    for (const c of u.route) mix(c);
     if (!w.grid) continue; // bare test worlds have no occupancy or plotters
     mix(u.cell);
     const m = u.mv;
@@ -80,7 +82,12 @@ export function hashWorld(w: World): number {
       else if (j.kind === 'chop') (mix(1), mix(j.tree), mix(j.timer));
       else if (j.kind === 'deliver') (mix(2), mix(j.tree), mix(j.drop));
       else if (j.kind === 'build') (mix(3), mix(j.site));
-      else (mix(4), mix(j.building), mix(j.timer), mix(j.tree));
+      else if (j.kind === 'inside') (mix(4), mix(j.building), mix(j.timer), mix(j.tree));
+      else if (j.kind === 'wall') {
+        mix(5), mix(j.type), mix(j.i), mix(j.site), mix(j.cells.length);
+        for (const c of j.cells) mix(c);
+      } else if (j.kind === 'bridge') (mix(6), mix(j.type), mix(j.cell));
+      else (mix(7), mix(j.building), mix(j.hp), mix(j.bricks));
     }
   }
   if (w.grid) {
@@ -103,6 +110,8 @@ export function hashWorld(w: World): number {
     }
   }
   mix(w.rules ? w.rules.mode : -1);
+  // Bridge sites only on maps that have them, so other worlds keep their hashes.
+  for (const b of w.bridgeSites) (mix(b.cell), mix(b.type));
   // Spells: only when a hero is on the field or a spell is running, so other worlds keep their hashes.
   if (w.spells.length > 0 || w.units.some((u) => u.maxCharge > 0)) {
     for (const u of w.units) {

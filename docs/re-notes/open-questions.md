@@ -30,7 +30,7 @@
 | Where a Builder goes after delivering a load | trace `HarvestEngineerEntityCommand` (vtable `0x02149C2C`) | open (sim guesses) |
 | Building placement rules | which terrain codes allow a footprint; units in the way | open |
 | Which buildings train which units, queue length | castle trains hero + builder (HUD); others not checked | open |
-| Minimap: other teams' dot colors, maps wider than 64 cells (minimap file is 128 px) | see hud.md | open |
+| Minimap: dot colors for teams 3+, maps wider than 64 cells (minimap file is 128 px), the last few tree-border pixels | see hud.md | open |
 | What the HUD's red-star counter ("0/0") counts | transports + siege units, capped by finished Farms (economy.md) | **answered** (likely) |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
 | Fog of war: visibility grid, reveal radius, does it re-fog | `User::FogCircle`; BG2 + `FoWTileset.NCGR`; see skirmish.md | open |

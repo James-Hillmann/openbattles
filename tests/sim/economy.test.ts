@@ -168,14 +168,16 @@ describe('economy', () => {
     expect(bricks(w)).toBe(4450);
   });
 
-  it('training pays and takes the pop slot at once, and the unit walks out after its build time', () => {
+  it('training pays and takes the pop slot when it starts, and the unit walks out after its build time', () => {
     const w = world();
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);
-    run(w, 1, [{ kind: 'train', building: castle.id, type: BUILDER.kind }]);
+    run(w, 1, [{ kind: 'train', building: castle.id, type: BUILDER.kind }]); // tick 0: the 10-tick check starts it
     expect(bricks(w)).toBe(450);
     expect(popUsed(w, 0)).toBe(1);
     expect(w.units).toHaveLength(1);
     run(w, 149);
+    expect(w.units).toHaveLength(1);
+    run(w, 1);
     expect(w.units).toHaveLength(2);
     expect(popUsed(w, 0)).toBe(1);
     const u = w.units[1]!;
@@ -237,13 +239,19 @@ describe('economy', () => {
     expect(w.units.some((u) => u.kind === K_FARM.kind)).toBe(true);
   });
 
-  it('cannot train past the population cap', () => {
+  it('at the population cap the front unit waits unpaid and holds up the queue', () => {
     const w = world(5000);
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);
-    for (let i = 0; i < 4; i++) at(w, 2 + i, 20);
+    const full = Array.from({ length: 4 }, (_, i) => at(w, 2 + i, 20));
     run(w, 1, [{ kind: 'train', building: castle.id, type: BUILDER.kind }]);
-    expect(castle.queue).toHaveLength(0);
+    run(w, 200);
+    expect(castle.queue).toHaveLength(1);
+    expect(castle.prod).toBeLessThan(0);
     expect(bricks(w)).toBe(5000);
+    full[0]!.hp = 0; // a slot frees: it starts on the next tick
+    run(w, 1);
+    expect(castle.prod).toBe(0);
+    expect(bricks(w)).toBe(4950);
   });
 
   it('caps pop at 20 and stars at 4 however many Farms there are', () => {
@@ -253,13 +261,39 @@ describe('economy', () => {
     expect(starCap(w, 0)).toBe(4);
   });
 
-  it('a building queues at most 3 units', () => {
+  it('a building queues at most 3 units, the one in training included, and pays for each as it starts', () => {
     const w = world(5000);
     placeBuilding(w, 0, FARM, 4, 2);
     const castle = placeBuilding(w, 0, CASTLE, 10, 10);
     run(w, 1, Array.from({ length: 5 }, () => ({ kind: 'train' as const, building: castle.id, type: BUILDER.kind })));
     expect(castle.queue).toHaveLength(3);
-    expect(bricks(w)).toBe(5000 - 3 * 50);
+    expect(bricks(w)).toBe(5000 - 50); // only the first has started
+    expect(popUsed(w, 0)).toBe(1);
+    run(w, 150); // the first comes out on tick 150, the next starts on tick 151
+    expect(w.units.filter((u) => u.kind === BUILDER.kind)).toHaveLength(1);
+    expect(castle.queue).toHaveLength(2);
+    run(w, 1);
+    expect(bricks(w)).toBe(5000 - 100);
+  });
+
+  it('cancelling refunds the unit in training in full; a waiting one just leaves the queue', () => {
+    const w = world(5000);
+    placeBuilding(w, 0, FARM, 4, 2);
+    const castle = placeBuilding(w, 0, CASTLE, 10, 10);
+    run(w, 1, Array.from({ length: 3 }, () => ({ kind: 'train' as const, building: castle.id, type: BUILDER.kind })));
+    run(w, 100);
+    run(w, 1, [{ kind: 'cancel', building: castle.id, index: 2 }]);
+    expect(castle.queue).toHaveLength(2);
+    expect(bricks(w)).toBe(4950);
+    run(w, 1, [{ kind: 'cancel', building: castle.id, index: 0 }]);
+    expect(castle.queue).toHaveLength(1);
+    expect(bricks(w)).toBe(5000);
+    expect(popUsed(w, 0)).toBe(0);
+    run(w, 10); // the next starts at the following 10-tick check
+    expect(bricks(w)).toBe(4950);
+    run(w, 1, [{ kind: 'cancel', building: castle.id, index: -1 }]);
+    expect(castle.queue).toHaveLength(0);
+    expect(bricks(w)).toBe(5000);
   });
 
   it('places buildings only on the terrain their flags allow; a Shipyard sits in water touching land', () => {
@@ -291,6 +325,6 @@ describe('economy', () => {
     ]);
     run(w, 900);
     expect(bricks(w)).toBeGreaterThan(450);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"7b2e8574"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"c0921d28"`);
   });
 });

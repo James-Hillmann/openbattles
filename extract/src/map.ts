@@ -21,6 +21,8 @@ export interface GameMap {
   ground: Uint16Array;
   /** Cells where a Mine can be built (top-left of the site). The site marking itself is part of the ground tiles. */
   mineSites: { x: number; y: number }[];
+  /** Bridge sites (MARK lists 7 and 8): the top-left cell of the span and its direction. */
+  bridgeMarks: { x: number; y: number; vertical: boolean }[];
   /** Starting units and buildings per start slot, in file order (EVNT section). */
   starts: StartRecord[];
   /** Pickups placed at map start (EVNT section): cell and collectable blueprint index. */
@@ -62,7 +64,7 @@ export function parseMap(d: Uint8Array): GameMap {
   if (groundStart < 0x2b + n) throw new Error('TERR section too short');
   const ground = new Uint16Array(n);
   for (let i = 0; i < n; i++) ground[i] = u16(d, groundStart + i * 2);
-  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), ...readEvents(d) };
+  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), bridgeMarks: readBridgeMarks(d), ...readEvents(d) };
 }
 
 /** MINE section: four lists of `L`, u8 count, count x (u8 x, u8 y). Only the second is ever non-empty. */
@@ -78,6 +80,26 @@ function readMineSites(d: Uint8Array): { x: number; y: number }[] {
     p += 2 + count * 2;
   }
   return lists[1]!;
+}
+
+/**
+ * MARK section: lists of 'L', u8 type, u8 count, count x (u8 x, u8 y, u8 ?). Types 7 and 8 are
+ * horizontal and vertical bridge sites (site builder 0x020A36E4). confirmed (mp04 in the emulator)
+ */
+function readBridgeMarks(d: Uint8Array): { x: number; y: number; vertical: boolean }[] {
+  const out: { x: number; y: number; vertical: boolean }[] = [];
+  let p: number;
+  try {
+    p = indexOfTag(d, 'MARK') + 4;
+  } catch {
+    return out;
+  }
+  while (d[p] === 0x4c) {
+    const type = d[p + 1]!, n = d[p + 2]!;
+    if (type === 7 || type === 8) for (let i = 0; i < n; i++) out.push({ x: d[p + 3 + i * 3]!, y: d[p + 4 + i * 3]!, vertical: type === 8 });
+    p += 3 + n * 3;
+  }
+  return out;
 }
 
 /**

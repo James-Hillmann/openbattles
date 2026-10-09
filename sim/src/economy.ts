@@ -3,6 +3,10 @@ import type { EntityId, EntityType, Job, Player, PlayerId, Unit, World } from '.
 import { orderMove, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import { findById } from './combat';
 import { countBricks, countBuilt } from './stats';
+import { sendToRally } from './orders';
+import { finishUpgrade, isTower, mayBuild, stepRepair, stepUpgrade } from './structures';
+import { fpH, fpW } from './footprint';
+import { BRIDGE_EXIT_TICKS, bridgeExit, finishBridge, isWallingOn, stepBridgeJob, stepWallJob } from './walls';
 
 /**
  * Bricks, gathering, construction and production, ported from the game's
@@ -34,8 +38,16 @@ export const POP_PER_FARM = 4;
 export const MAX_HEROES = 1;
 export const MAX_POP = 20;
 export const MAX_STARS = 4;
-/** Production queue length per building. likely (a playtester of the DS game; not watched yet) */
+/**
+ * Production queue per building: 3 entries, the one in training included (0x02084A08 drops a 4th order).
+ * confirmed (code and emulator; docs/re-notes/economy.md "Training queue")
+ */
 export const QUEUE_MAX = 3;
+/** An idle building looks at its queue every 10 ticks (0x0206DA60). confirmed (code); phase guess */
+export const PROD_IDLE_CHECK = 10;
+/** `prod` while the front unit hasn't started: wait for the next 10-tick check, or try every tick. */
+export const PROD_IDLE = -2;
+export const PROD_READY = -1;
 /**
  * A Builder dropping off a load goes inside the building: in the tick after it arrives (bricks paid then),
  * out DROP_TICKS ticks after it arrived, at the building's exit cell. confirmed (emulator, 10 drop-offs;
@@ -74,6 +86,12 @@ export const ROLE_FARM = 10;
 export const ROLE_BARRACKS = 11;
 export const ROLE_STABLES = 12;
 export const ROLE_SHIPYARD = 16;
+/** Bridges, gates and walls (walls.ts, bridges.ts). Every army shares them (Factions.fbp slots 19-25). */
+export const ROLE_BRIDGE = 17;
+export const ROLE_GATE = 18;
+export const ROLE_WALL = 19;
+/** Walls, gates and bridges: buildings that take no drop-offs and train nothing. */
+export const isStructure = (role: number): boolean => role >= ROLE_BRIDGE && role <= ROLE_WALL;
 
 /**
  * Unit roles each production building trains, by building role. Castle (hero, builder) and
@@ -142,12 +160,12 @@ const cellY = (g: TerrainGrid, c: number) => Math.floor(c / g.width);
 /** Top-left footprint cell of a building (its position is that cell's centre). */
 export const originCell = (w: World, b: Unit): number => unitCell(w, b);
 
-/** Chebyshev distance from cell c to a size x size rectangle at `origin` (0 = inside). */
-function rectDist(g: TerrainGrid, c: number, origin: number, size: number): number {
+/** Chebyshev distance from cell c to a fw x fh rectangle at `origin` (0 = inside). */
+export function rectDist(g: TerrainGrid, c: number, origin: number, fw: number, fh = fw): number {
   const x = cellX(g, c), y = cellY(g, c);
   const ox = cellX(g, origin), oy = cellY(g, origin);
-  const dx = x < ox ? ox - x : x >= ox + size ? x - (ox + size - 1) : 0;
-  const dy = y < oy ? oy - y : y >= oy + size ? y - (oy + size - 1) : 0;
+  const dx = x < ox ? ox - x : x >= ox + fw ? x - (ox + fw - 1) : 0;
+  const dy = y < oy ? oy - y : y >= oy + fh ? y - (oy + fh - 1) : 0;
   return Math.max(dx, dy);
 }
 
@@ -171,17 +189,17 @@ function ring(g: TerrainGrid, cx: number, cy: number, r: number): number[] {
 }
 
 /** The free cell next to a rectangle closest to unit u (ties: lowest cell index), or -1. */
-function standCell(w: World, u: Unit, origin: number, size: number): number {
+function standCell(w: World, u: Unit, origin: number, fw: number, fh: number): number {
   const g = w.grid!;
   const here = unitCell(w, u);
   let best = -1;
   let bestD = Infinity;
   const ox = cellX(g, origin), oy = cellY(g, origin);
-  for (let y = oy - 1; y <= oy + size; y++) {
-    for (let x = ox - 1; x <= ox + size; x++) {
+  for (let y = oy - 1; y <= oy + fh; y++) {
+    for (let x = ox - 1; x <= ox + fw; x++) {
       if (x < 0 || y < 0 || x >= g.width || y >= g.height) continue;
       const c = y * g.width + x;
-      if (rectDist(g, c, origin, size) !== 1 || !freeFor(w, c, u)) continue;
+      if (rectDist(g, c, origin, fw, fh) !== 1 || !freeFor(w, c, u)) continue;
       const d = Math.max(Math.abs(x - cellX(g, here)), Math.abs(y - cellY(g, here)));
       if (d < bestD) {
         bestD = d;
@@ -196,11 +214,11 @@ function standCell(w: World, u: Unit, origin: number, size: number): number {
  * Walk next to a rectangle, or report that u is standing next to it.
  * Returns false when there is nowhere to stand.
  */
-function approach(w: World, u: Unit, origin: number, size: number): 'there' | 'walking' | 'stuck' {
+export function approach(w: World, u: Unit, origin: number, fw: number, fh = fw): 'there' | 'walking' | 'stuck' {
   const g = w.grid!;
-  if (rectDist(g, unitCell(w, u), origin, size) === 1) return u.mv ? 'walking' : 'there';
+  if (rectDist(g, unitCell(w, u), origin, fw, fh) === 1) return u.mv ? 'walking' : 'there';
   if (u.mv) return 'walking';
-  const c = standCell(w, u, origin, size);
+  const c = standCell(w, u, origin, fw, fh);
   if (c < 0) return 'stuck';
   orderMove(w, u, c);
   return 'walking';
@@ -224,7 +242,7 @@ function nearestDrop(w: World, u: Unit): Unit | undefined {
   let best: Unit | undefined;
   let bestD = Infinity;
   for (const b of w.units) {
-    if (b.owner !== u.owner || b.hp <= 0 || !isBuilding(b) || !isFinished(b)) continue;
+    if (b.owner !== u.owner || b.hp <= 0 || !isBuilding(b) || isStructure(b.role) || !isFinished(b)) continue;
     const o = originCell(w, b);
     const d = Math.abs(cellX(g, o) - cellX(g, here)) + Math.abs(cellY(g, o) - cellY(g, here));
     if (d < bestD) {
@@ -241,7 +259,7 @@ const loadValue = (w: World, owner: PlayerId): number =>
 
 // ---- commands ----
 
-const ownBuilders = (w: World, player: PlayerId, ids: readonly EntityId[]) =>
+export const ownBuilders = (w: World, player: PlayerId, ids: readonly EntityId[]) =>
   w.units.filter((u) => u.owner === player && u.role === ROLE_BUILDER && ids.includes(u.id));
 
 export function orderHarvest(w: World, player: PlayerId, ids: readonly EntityId[], cx: number, cy: number): void {
@@ -266,18 +284,19 @@ export function orderHarvest(w: World, player: PlayerId, ids: readonly EntityId[
  */
 export function canPlace(w: World, t: EntityType, cx: number, cy: number): boolean {
   const g = w.grid;
-  if (!g || cx < 0 || cy < 0 || cx + t.size > g.width || cy + t.size > g.height) return false;
+  const fw = fpW(t.size), fh = fpH(t.size);
+  if (!g || cx < 0 || cy < 0 || cx + fw > g.width || cy + fh > g.height) return false;
   if (t.role === ROLE_MINE && !w.mineSites.includes(cy * g.width + cx)) return false;
   const moves = t.moves ?? MOVES_GROUND;
-  for (let y = cy; y < cy + t.size; y++) {
-    for (let x = cx; x < cx + t.size; x++) {
+  for (let y = cy; y < cy + fh; y++) {
+    for (let x = cx; x < cx + fw; x++) {
       const c = y * g.width + x;
       if (!isWalkableCode(g.cells[c]!, moves) || w.occ![c] !== 0) return false;
     }
   }
   if (t.role !== ROLE_SHIPYARD) return true;
-  for (let y = Math.max(0, cy - 1); y <= Math.min(g.height - 1, cy + t.size); y++) {
-    for (let x = Math.max(0, cx - 1); x <= Math.min(g.width - 1, cx + t.size); x++) {
+  for (let y = Math.max(0, cy - 1); y <= Math.min(g.height - 1, cy + fh); y++) {
+    for (let x = Math.max(0, cx - 1); x <= Math.min(g.width - 1, cx + fw); x++) {
       if (g.cells[y * g.width + x] !== TERRAIN_WATER) return true; // footprint cells are water, so this is the edge
     }
   }
@@ -292,7 +311,8 @@ export type PlaceFn = (w: World, owner: PlayerId, t: EntityType, cx: number, cy:
  * units must be in it and buildings of its base faction. Without one, a faction's strip only
  * lists its own entities (build-ui.md); types without a faction are unrestricted.
  */
-const allowed = (w: World, player: PlayerId, by: Unit, t: EntityType): boolean => {
+export const allowed = (w: World, player: PlayerId, by: Unit, t: EntityType): boolean => {
+  if (isStructure(t.role)) return true; // walls and bridges have no faction: every army builds them
   const army = getPlayer(w, player)?.army;
   if (army) return t.role >= ROLE_BASE ? t.faction === army.base : army.units.includes(t.kind);
   const f = w.types[by.kind]?.faction;
@@ -303,13 +323,14 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const t = w.types[type];
   const p = getPlayer(w, player);
   const builders = ownBuilders(w, player, ids);
-  if (!t || !p || t.role < ROLE_BASE || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
+  if (!t || !p || t.role < ROLE_BASE || isStructure(t.role) || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
+  if (!mayBuild(w, player, t)) return; // prerequisites and building limits (structures.ts)
   if (!spendBricks(p, t.cost)) return;
   const site = place(w, player, t, cx, cy, false);
   for (const u of builders) setBuildJob(w, u, site);
 }
 
-function setBuildJob(w: World, u: Unit, site: Unit): void {
+export function setBuildJob(w: World, u: Unit, site: Unit): void {
   u.target = null;
   stopMove(w, u); // a new order replaces the walk in progress (our rule)
   u.job = { kind: 'build', site: site.id };
@@ -318,7 +339,11 @@ function setBuildJob(w: World, u: Unit, site: Unit): void {
 export function orderConstruct(w: World, player: PlayerId, ids: readonly EntityId[], site: EntityId): void {
   const s = findById(w.units, site);
   if (!s || s.owner !== player || !isBuilding(s) || isFinished(s)) return;
-  for (const u of ownBuilders(w, player, ids)) setBuildJob(w, u, s);
+  for (const u of ownBuilders(w, player, ids)) {
+    setBuildJob(w, u, s);
+    // A wall is built from outside: a one-piece wall job that finds the piece already started.
+    if (s.role === ROLE_WALL) u.job = { kind: 'wall', type: s.kind, cells: [originCell(w, s)], i: 0, site: 0 };
+  }
 }
 
 export function orderTrain(w: World, player: PlayerId, building: EntityId, type: number): void {
@@ -327,22 +352,66 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
   if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
-  // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code)
-  if (t.role === ROLE_HERO && (w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
-  if (takesPop(t.role) && popUsed(w, player) + 1 > popCap(w, player)) return;
-  if (takesStar(t.role) && starsUsed(w, player) + 1 > starCap(w, player)) return;
-  if (!spendBricks(p, t.cost)) return;
+  // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code). The game's strip greys the
+  // icon instead; refusing the order here keeps a second hero out of the queue the same way.
+  if (t.role === ROLE_HERO && (heroAlive(w, player) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
+  // Nothing is paid or reserved yet: that happens when the unit starts training (0x02071E94). confirmed
+  if (b.queue.length === 0) b.prod = PROD_IDLE;
+  b.queue.push(type);
+}
+
+const heroAlive = (w: World, player: PlayerId): boolean => w.units.some((u) => u.owner === player && u.hp > 0 && u.role === ROLE_HERO);
+
+/**
+ * Cancel queue entry `index` (0 = the front) of a building, or the whole queue with -1
+ * (CancelProduceQueueItemCommand, 0x02084A60). A waiting unit just goes; the one in training is refunded in
+ * full and frees its pop or star slot. confirmed (emulator). The game refunds the front unit even when it
+ * was never paid (stuck at the pop cap: a free 50 bricks); we refund only what was paid.
+ */
+export function orderCancel(w: World, player: PlayerId, building: EntityId, index: number): void {
+  const b = findById(w.units, building);
+  if (!b || b.owner !== player || !isBuilding(b) || index < -1 || index >= b.queue.length) return;
+  const all = index === -1;
+  if ((all || index === 0) && b.prod >= 0 && b.queue.length) {
+    const t = w.types[b.queue[0]!];
+    const p = getPlayer(w, player);
+    if (t && p) {
+      addBricks(p, t.cost);
+      if (takesPop(t.role)) p.reservedPop--;
+      if (takesStar(t.role)) p.reservedStars--;
+    }
+  }
+  if (all) b.queue.length = 0;
+  else b.queue.splice(index, 1);
+  // A new front waits for the building's next 10-tick look at its queue. confirmed (emulator)
+  if (all || index === 0) b.prod = PROD_IDLE;
+}
+
+/** Start the front unit if the player can take it now: pay, and reserve its pop or star slot. */
+function startTraining(w: World, b: Unit, t: EntityType): boolean {
+  const p = getPlayer(w, b.owner);
+  if (!p) return false;
+  if (t.role === ROLE_HERO && heroAlive(w, b.owner)) return false;
+  if (takesPop(t.role) && popUsed(w, b.owner) + 1 > popCap(w, b.owner)) return false;
+  if (takesStar(t.role) && starsUsed(w, b.owner) + 1 > starCap(w, b.owner)) return false;
+  if (!spendBricks(p, t.cost)) return false;
   if (takesPop(t.role)) p.reservedPop++;
   if (takesStar(t.role)) p.reservedStars++;
-  b.queue.push(type);
+  return true;
 }
 
 // ---- per tick ----
 
-function stepJob(w: World, u: Unit): void {
+function stepJob(w: World, u: Unit, place: PlaceFn): void {
   const g = w.grid!;
   const job = u.job!;
   switch (job.kind) {
+    case 'wall':
+      stepWallJob(w, u, place);
+      return;
+    case 'bridge':
+      stepBridgeJob(w, u, place);
+      return;
     case 'chop': {
       if (g.cells[job.tree] !== TERRAIN_TREE) {
         const next = nearestTree(g, job.tree);
@@ -361,12 +430,12 @@ function stepJob(w: World, u: Unit): void {
     }
     case 'deliver': {
       let d = findById(w.units, job.drop);
-      if (!d || d.hp <= 0 || d.owner !== u.owner || !isFinished(d)) {
+      if (!d || d.hp <= 0 || d.owner !== u.owner || !isFinished(d) || isStructure(d.role)) {
         d = nearestDrop(w, u);
         if (!d) return; // nowhere to take it: hold the load
         job.drop = d.id;
       }
-      if (approach(w, u, originCell(w, d), d.size) !== 'there') return;
+      if (approach(w, u, originCell(w, d), fpW(d.size), fpH(d.size)) !== 'there') return;
       u.job = { kind: 'inside', building: d.id, timer: DROP_TICKS, tree: job.tree };
       return;
     }
@@ -376,7 +445,7 @@ function stepJob(w: World, u: Unit): void {
         u.job = null;
         return;
       }
-      const a = approach(w, u, originCell(w, s), s.size);
+      const a = approach(w, u, originCell(w, s), fpW(s.size), fpH(s.size));
       if (a === 'stuck') u.job = null;
       if (a !== 'there') return;
       // In through the site's wall; the work starts this tick (emulator: progress starts on entry).
@@ -384,6 +453,9 @@ function stepJob(w: World, u: Unit): void {
       u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
       return;
     }
+    case 'repair':
+      stepRepair(w, u);
+      return;
     case 'inside': {
       const b = findById(w.units, job.building);
       if (!b || b.hp <= 0) {
@@ -394,7 +466,7 @@ function stepJob(w: World, u: Unit): void {
       if (job.tree < 0) {
         // Building a site: wait for it to finish, then for the exit (stepConstruction sets the timer).
         if (job.timer < 0 || --job.timer > 0) return;
-        comeOut(w, u, exitCell(w, b), null);
+        comeOut(w, u, b.role === ROLE_BRIDGE ? bridgeExit(w, b) : exitCell(w, b), null);
         return;
       }
       if (job.timer === DROP_TICKS) {
@@ -440,7 +512,7 @@ const isBuildingOn = (u: Unit, s: Unit): boolean =>
  * 360 ticks, HP rising ~1 a tick). Whether more builders build faster: open.
  */
 function stepConstruction(w: World, s: Unit): void {
-  if (!w.units.some((u) => isBuildingOn(u, s))) return;
+  if (!w.units.some((u) => isBuildingOn(u, s) || (s.role === ROLE_WALL && isWallingOn(w, u, s)))) return;
   const before = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
   s.progress++;
   const after = Math.max(1, Math.floor((s.maxHp * s.progress) / s.buildTime));
@@ -448,9 +520,10 @@ function stepConstruction(w: World, s: Unit): void {
   if (!isFinished(s)) return;
   countBuilt(w, s.owner, s.role); // ConstructStructureEntityCommand counts it once it is finished
   if (s.role === ROLE_MINE) s.payout = MINE_TICKS;
+  if (s.role === ROLE_BRIDGE) finishBridge(w, s);
   for (const u of w.units) {
     if (u.job?.kind === 'build' && u.job.site === s.id) u.job = null;
-    if (isBuildingOn(u, s) && u.job?.kind === 'inside') u.job.timer = SITE_EXIT_TICKS;
+    if (isBuildingOn(u, s) && u.job?.kind === 'inside') u.job.timer = s.role === ROLE_BRIDGE ? BRIDGE_EXIT_TICKS : SITE_EXIT_TICKS;
   }
 }
 
@@ -465,8 +538,8 @@ export function freeCellNear(w: World, cx: number, cy: number, radius: number): 
 function exitCell(w: World, b: Unit): number {
   const g = w.grid!;
   const o = originCell(w, b);
-  const cx = cellX(g, o) + (b.size >> 1);
-  const cy = cellY(g, o) + b.size;
+  const cx = cellX(g, o) + (fpW(b.size) >> 1);
+  const cy = cellY(g, o) + fpH(b.size);
   return freeCellNear(w, cx, cy, 7);
 }
 
@@ -478,6 +551,17 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
     b.queue.shift();
     return;
   }
+  if (b.prod < 0) {
+    // Not started: an idle building checks every 10 ticks; right after a unit comes out, or while the front
+    // waits for a free slot (pop cap: it blocks the rest of the queue), every tick. confirmed (emulator)
+    if (b.prod === PROD_IDLE && w.tick % PROD_IDLE_CHECK !== 0) return;
+    if (!startTraining(w, b, t)) {
+      b.prod = PROD_READY;
+      return;
+    }
+    b.prod = 0;
+    return;
+  }
   if (b.prod < t.buildTime) b.prod++;
   if (b.prod < t.buildTime) return;
   const c = exitCell(w, b);
@@ -486,8 +570,8 @@ function stepProduction(w: World, b: Unit, spawn: SpawnFn): void {
   if (p && takesPop(t.role)) p.reservedPop--;
   if (p && takesStar(t.role)) p.reservedStars--;
   b.queue.shift();
-  b.prod = 0;
-  spawn(w, b.owner, t, c);
+  b.prod = PROD_READY;
+  sendToRally(w, b, spawn(w, b.owner, t, c));
 }
 
 function stepMine(w: World, m: Unit): void {
@@ -500,15 +584,19 @@ function stepMine(w: World, m: Unit): void {
 }
 
 /** Economy for one tick, after combat and movement. */
-export function economyStep(w: World, spawn: SpawnFn): void {
+export function economyStep(w: World, spawn: SpawnFn, place: PlaceFn): void {
   if (w.grid && w.occ) {
-    for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u); // frozen builders wait (spells.ts)
+    for (const u of w.units) if (u.hp > 0 && u.job && u.frozen <= w.tick) stepJob(w, u, place); // frozen builders wait (spells.ts)
+    const upgraded: Unit[] = [];
     for (const b of w.units) {
       if (b.hp <= 0 || !isBuilding(b)) continue;
       if (!isFinished(b)) stepConstruction(w, b);
       else if (b.role === ROLE_MINE) stepMine(w, b);
-      else stepProduction(w, b, spawn);
+      else if (isTower(b.role)) {
+        if (stepUpgrade(w, b)) upgraded.push(b);
+      } else stepProduction(w, b, spawn);
     }
+    for (const b of upgraded) finishUpgrade(w, b, place); // after the loop: it swaps the tower for a new entity
   }
   // The game bumps its time counter, then pays out when it is a multiple of 60 s.
   if ((w.tick + 1) % TRICKLE_TICKS === 0) for (const p of w.players) earnBricks(p, TRICKLE_BRICKS);
@@ -519,8 +607,8 @@ export function clearFootprint(w: World, b: Unit): void {
   const g = w.grid;
   if (!g || !isBuilding(b)) return;
   const o = originCell(w, b);
-  for (let y = cellY(g, o); y < Math.min(g.height, cellY(g, o) + b.size); y++)
-    for (let x = cellX(g, o); x < Math.min(g.width, cellX(g, o) + b.size); x++)
+  for (let y = cellY(g, o); y < Math.min(g.height, cellY(g, o) + fpH(b.size)); y++)
+    for (let x = cellX(g, o); x < Math.min(g.width, cellX(g, o) + fpW(b.size)); x++)
       if (g.cells[y * g.width + x] === TERRAIN_BUILDING) g.cells[y * g.width + x] = TERRAIN_OPEN;
 }
 

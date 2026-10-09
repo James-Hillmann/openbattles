@@ -6,6 +6,7 @@ import type { UnpackedRom } from './rom';
 import { renderMinimap } from './minimap';
 import { TERRAIN_TREE, bakeTrees, readTreeTable, type TreeTable } from './trees';
 import { readCombatBonus, type CombatBonus } from './entities';
+import { buildStructureArt, type StructureArt } from './structures';
 
 /** Everything the M1 client needs to show one map with units. Built in the worker. */
 export interface MapBundle {
@@ -25,6 +26,10 @@ export interface MapBundle {
   mineSites: { x: number; y: number }[];
   /** Pickup records from EVNT: cell and the mission blueprint index (8 = Blue Stud on skirmish maps). */
   pickups: { x: number; y: number; item: number }[];
+  /** Bridge sites from the MARK section (top-left of the span). */
+  bridgeMarks: { x: number; y: number; vertical: boolean }[];
+  /** Wall and bridge tiles in every team colour; null for game versions we haven't mapped. */
+  structures: StructureArt | null;
 }
 
 export function romFile(rom: UnpackedRom, path: string): Uint8Array {
@@ -82,7 +87,12 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const trees = romTreeTable(rom);
   const map = trees ? { ...parsed, ...bakeTrees(parsed, trees) } : parsed;
   const { chars, pal, metatiles } = mapGraphics(rom, name, map.tileset);
-  const minimap = renderMinimap(rom, name, map.width, map.height, map.terrain);
+  const minimap = renderMinimap(rom, name, map);
   const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
-  return { name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus, starts: map.starts, mineSites: map.mineSites, pickups: map.pickups };
+  // Bridges come from the tileset's own metatiles, not the map's detail table.
+  const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));
+  return {
+    name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus,
+    starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, structures, pickups: map.pickups,
+  };
 }

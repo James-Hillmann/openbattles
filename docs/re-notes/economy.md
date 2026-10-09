@@ -45,6 +45,7 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 ## Construction
 
 - Placing a building pays its cost (+0x5E) at once (Farm: 500 -> 425). confirmed
+  Walls and bridges are the exception: each is paid when the work on it starts ([walls-bridges.md](walls-bridges.md)).
 - The site appears with 1 HP. Progress ticks up once per tick of work; **build time is +0x60 in
   ticks** (Farm 360: started tick 386, finished tick 746). HP rises with it to the full value.
   Unit +0x22E holds percent done (100 = finished). confirmed (one Builder on a Farm)
@@ -64,12 +65,13 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 
 ## Production
 
-- Queuing a unit pays its cost at once and reserves its pop slot. confirmed (500 -> 450, HUD 2/4).
+- A unit pays its cost and reserves its pop slot when it **starts training**, not when queued (see "Training
+  queue" below; the 500 -> 450 seen first was a unit going into an empty queue). confirmed
 - Train time = the unit's +0x60 in ticks (Builder 150: queued tick 333, out at tick 483). Unit +0x22F
   of the building counts percent. confirmed
 - The new unit stands on the first free cell below the building's middle column: Castle at (10,10)
   put the Builder at (11,13). confirmed for one case; the search order beyond that is a guess.
-- Queue length 3 per building. likely (a playtester of the DS game; not watched or traced)
+- Queue length 3 per building, the unit in training included. confirmed (code and emulator, "Training queue")
 - A building only trains, and a Builder only builds, its own faction's entities: the strips list one
   faction (build-ui.md, confirmed). The sim enforces it from the entity name prefix (`EntityType.faction`)
   so a doctored client cannot queue another faction's units over the wire.
@@ -85,7 +87,8 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 - **Ceilings**: the per-player limit table at `0x02126CA4` (`1, 20, 4, 7, 14, 29, 20, 8, 0, 5`, read by
   `0x020863B8`) gives 1 hero, 20 pop and 4 stars. `0x02086440` stores min(20, 4 + 4 x Farms) and the HUD
   (`0x020E018C`) shows min(Farms, 4) stars. confirmed (code; matches a playtester: "20 regular, 4 special").
-  Entries 3-9 are open (3, 4 and 6 double in some game mode).
+  Entries 3-9 (towers 7, other buildings 14, walls, bridges, gates) are in structures.md "Building limits"
+  (3, 4 and 6 double in some game mode).
 
 ## Functions
 
@@ -153,3 +156,66 @@ command +0x34, jump table `0x0206C824`) runs these states once the Builder reach
 - Where: Farm at (12,17), 2x2; the Builder went in from (11,16) and came out at **(13,19)**, the cell under
   the footprint at column x + w/2. Same rule as the Castle drop-off: (x + floor(w/2), y + h), when free. confirmed
   for these two buildings; likely in general.
+
+## Training queue (2026-10-09)
+
+Traced in ARM9 and watched in DeSmuME on `castle.dst` (local Castle at (10,10), 2500 bricks, pop 2/8),
+queueing Builders, with exec hooks on the functions below and the building's queue read every step.
+Barracks not checked; nothing in the code is per-building, so it should behave the same (likely).
+**This corrects "Production" above:** the cost is paid when a unit *starts* training, not when it is
+queued. The 500 -> 450 seen there was a unit queued into an empty queue, which starts almost at once.
+
+**Where it lives.** Each production building keeps a vector of entity-type pointers at building
++0x1FC (data pointer +0x200, count +0x204). Index 0 is the unit in training; it stays in the vector
+until it comes out. Producers are building roles 8, 12, 13 and 16 (`0x0205E4B4`). Two lockstep
+commands drive it: `ProduceEntityCommand` (id 0x19: building handle + entity type) and
+`CancelProduceQueueItemCommand` (id 0x1A: building handle + s32 index).
+
+| question | answer | confidence |
+|---|---|---|
+| Max per building | **3, counting the one in training** (1 training + 2 waiting). The command handler (`0x02084A08`) drops the order when count >= 3. | confirmed: 5 taps, count stopped at 3, 4th and 5th orders reached the handler and were dropped |
+| Tap with the queue full | Silently ignored. The icon is **not** greyed for a full queue (pixel-identical strip). | confirmed |
+| When is the icon greyed | Checkered (same look as the hero icon while the King lives) when the player can't afford it or has no free pop/star slot; a tap on it sends nothing. This is a UI check only; the queue handler checks neither cost nor pop. | confirmed (10 bricks; free pop 0 via +0xEE) |
+| Cost | Paid when training **starts**, full price (+0x5E), together with the pop or star reservation (+0xEE / +0xEF) and the per-category limit slot (limit table, entity +4 -> +9). Waiting units cost nothing and reserve nothing. | confirmed: 3 Builders queued, bricks 2500 -> 2450 only; HUD pop counts only the one in training |
+| Order | FIFO: always index 0. | confirmed |
+| Gap between units | After a unit comes out the same command pops index 0 and checks the next one at once: next training starts 1-2 ticks later (out at 592, next out at 745 = 150 + 3). An *idle* building only looks at its queue every 10 ticks (`IdleProductionStructureEntityCommand`, `0x0206DA60`), so the first unit into an empty queue starts 0-10 ticks after the order (queued 432/433, paid 441). | confirmed |
+| Can't start (no bricks, pop or star) | The front unit waits at 0 % without paying and **blocks everything behind it**; it is re-checked every tick and starts as soon as it can. Pop is checked again when the unit comes out. | confirmed for pop (2 free slots, 3 queued: two came out, the third sat at 0 %, unpaid, for 400+ ticks) |
+| Cancel a waiting unit | Tap its slot: removed, no money moves (nothing was paid). | confirmed (slot 3) |
+| Cancel the unit in training | Tap slot 1: the building gets a new command that interrupts training; the old one refunds the **full** cost, frees its reservations, drops index 0 and resets the percent. The next unit starts at the idle building's next 10-tick check. | confirmed (cancelled at 82 %: 2450 -> 2500, next paid 12 ticks later) |
+| Refund bug | The refund runs whether or not the cost was paid: cancelling a front unit that is stuck waiting for pop **gives** its price (2400 -> 2450 with nothing paid). | confirmed. Ours should not copy this (only refund what was paid) |
+| Cancel all | Index -1 clears the vector and interrupts the one in training (handler `0x02084A60`; one UI path sends it, `0x020DC742`). | likely (code); no button found that sends it (A, B, Y, R, Select, Start, stop sign tried) |
+| Several quick taps | One order per icon tap. The strip **closes after every pick**, so each extra unit is "red tab, icon" again; a second tap on the same spot hits the map. The order reaches the sim ~2 ticks after the tap. | confirmed |
+
+**Where it is shown.**
+- Top screen, under the portrait (the "InfoTab" panel): **three 24x24 slots** in a row. Layout file
+  `UI/Game/InfoTab.bin` (also `BuildTab.bin`) has them as ids 0x2DA-0x2DC with top 148, bottom 172,
+  x 32-56, 64-88, 96-120, and a small 8x8 cancel badge for each (ids 0x2E0-0x2E2, y 164-172, x 48-56 /
+  80-88 / 112-120): a red no-entry sign at the head's lower right. Empty slots are dark recessed boxes.
+  Each queued unit is drawn as its round head icon (the same heads as the "Builds" list; from the
+  `UI/MiniHeadsGame` icon sheet: likely). Slot order = queue order. No progress or numbers in the slots.
+  confirmed (screenshots; rectangles likely: the drawn head sits at x 31-55, y 145-167)
+- The top screen can't be touched: **X swaps the screens**, putting this panel on the touch screen,
+  where tapping a slot cancels it (UI handler `0x020D0994`: index = widget id - 0x2DA, ignored if
+  >= count). confirmed
+- Training progress is a **red row above the building's health bar** on the map while it is selected:
+  lit cells = floor(percent * cells / 100) (17-cell Castle bar: 15 % -> 2, 64 % -> 10), lit 0x001F, unlit
+  dark red. `Unit_drawBars` reads building +0x22F. confirmed (screenshots), formula likely.
+
+| address | what |
+|---|---|
+| `0x02084A08` | `ProduceEntityCommand` handler: producer check, count < 3, push |
+| `0x02084A60` | `CancelProduceQueueItemCommand` handler: index > 0 erase; 0 interrupt (or erase if the building is unfinished); < 0 clear + interrupt |
+| `0x0205E5A0` / `0x0205E594` / `0x0205E5E4` | queue push / get(i) / clear |
+| `0x02071D44` | `ProduceUnitEntityCommand` begin: front of queue or done |
+| `0x02071DA4` / `0x02071E94` | can start (finished, pop/star, limit, bricks) / reserve and pay |
+| `0x02072228` | unit comes out (spawn cell as in "Builder inside buildings") |
+| `0x02072128` | pop index 0, begin next |
+| `0x02072154` -> `0x0207258C` | interrupt -> refund, release, erase front, percent = 0 |
+| `0x02005914` / `0x02005958` | UI: send produce / cancel order |
+
+**Ours** (`orderTrain`, `orderCancel`, `stepProduction` in `sim/src/economy.ts`): as above. A building's `prod` is
+-2 while its front unit waits for the 10-tick check, -1 while it retries every tick (just after a unit came out, or
+stuck on pop/stars/bricks), and 0..buildTime while training. The 10-tick check runs on ticks divisible by 10 (the
+phase is a guess). Cancel refunds only what was paid (the DS bug is not copied). The queue's three slots sit under
+the strip (the DS has them on the top screen), each with a red cancel badge; the red training row shows over the
+selected building's health bar. Slot icons are the strip icons, not the round heads (guess at which sheet).
