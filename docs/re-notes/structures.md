@@ -62,7 +62,7 @@ also researches spells (its +0x1C = 0); +0x1C = 1 is the tower upgrade.
 | Progress | a `ConstructProgressAction` in mode 3 on the tower; percent in tower +0x22F, drawn as a bar over it | confirmed (RAM: 6, 12, 18 ... % every ~50 ticks) |
 | When done | the old tower is removed without dying (`0x0205DF74` with the quiet flag) and a new entity of the next level is made in the same cell; it stays selected | confirmed |
 | HP | new HP = new max - (old max - old HP): the damage carries over | confirmed (Tower at 300/400 became Tower II at 400/500) |
-| Cancel | refunds the full price (`0x020733DC`, if it was paid) | likely (code); we have no cancel order yet |
+| Cancel | refunds the full price (`0x020733DC`, if it was paid) | likely (code); ours goes through the `cancel` order on the tower's queue slot |
 | Cheat flags | settings +0x13 makes it cost 1 brick; +0x14 (Fast Production) halves the time | likely (code); not ported |
 
 The CPU upgrades its towers too (a CPU Tower II appeared during the watch). Whether a tower keeps shooting
@@ -100,7 +100,7 @@ while it upgrades is not checked; ours does (it's the same entity until the swap
 
 ## Ours
 
-- Commands `upgrade` (a tower) and `repair` (Builders and heroes, a target building). PROTOCOL_VERSION 5.
+- Commands `upgrade` (a tower) and `repair` (Builders and heroes, a target building). PROTOCOL_VERSION 6.
 - The upgrade uses the tower's production slot (`queue` = the next level, `prod` = ticks done), so the strip
   shows it like a unit in training, and worlds without towers keep their hashes.
 - Right-click one of your damaged buildings with Builders or the hero selected to repair it (the game's tap).

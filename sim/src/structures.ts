@@ -1,8 +1,9 @@
 import type { EntityId, EntityType, PlayerId, Unit, World } from './state';
 import { findById } from './combat';
 import { stopMove } from './movement';
+import { fpH, fpW } from './footprint';
 import {
-  ROLE_BASE, ROLE_BUILDER, ROLE_HERO, ROLE_SHIPYARD, ROLE_STABLES, approach, getPlayer, isBuilding,
+  ROLE_BASE, ROLE_BUILDER, ROLE_GATE, ROLE_HERO, ROLE_SHIPYARD, ROLE_STABLES, approach, getPlayer, isBuilding,
   isFinished, originCell, spendBricks, type PlaceFn,
 } from './economy';
 
@@ -15,9 +16,6 @@ import {
 export const ROLE_TOWER = 13;
 export const ROLE_TOWER2 = 14;
 export const ROLE_TOWER3 = 15;
-export const ROLE_BRIDGE = 17;
-export const ROLE_GATE = 18;
-export const ROLE_WALL = 19;
 
 export const isTower = (role: number): boolean => role >= ROLE_TOWER && role <= ROLE_TOWER3;
 
@@ -163,7 +161,7 @@ export function stepRepair(w: World, u: Unit): void {
     u.job = null;
     return;
   }
-  const a = approach(w, u, originCell(w, b), b.size);
+  const a = approach(w, u, originCell(w, b), fpW(b.size), fpH(b.size));
   if (a === 'stuck') u.job = null;
   if (a !== 'there') return;
   const missing = b.maxHp - b.hp;

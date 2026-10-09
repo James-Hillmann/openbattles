@@ -121,6 +121,18 @@ describe('tower upgrades', () => {
     expect(tower.queue).toEqual([TOWER2.kind]);
     expect(bricks(w)).toBe(1500);
   });
+
+  it('cancelling the upgrade refunds its full price (0x020733DC)', () => {
+    const w = world();
+    const tower = placeBuilding(w, 0, TOWER, 10, 10);
+    run(w, 100, [{ kind: 'upgrade', building: tower.id }]);
+    expect(bricks(w)).toBe(4500);
+    run(w, 1, [{ kind: 'cancel', building: tower.id, index: 0 }]);
+    expect(bricks(w)).toBe(5000);
+    expect(tower.queue).toEqual([]);
+    run(w, TOWER2.buildTime);
+    expect(ofRole(w, 14)).toHaveLength(0);
+  });
 });
 
 describe('repair', () => {

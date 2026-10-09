@@ -1,5 +1,5 @@
 import type { Graphics } from 'pixi.js';
-import { COST_PANEL, TOP_H, TOP_W, composeTopScreen, type HudBundle, type TopScreenState } from '@lbw/extract';
+import { COST_PANEL, TOP_H, TOP_W, composeTopScreen, iconFrame, type HudBundle, type TopScreenState } from '@lbw/extract';
 import { HP_BANDS, POWER_COLORS, barCells, hpBand, litCells } from './bars';
 
 /**
@@ -77,13 +77,24 @@ export class HudView {
   update(state: TopScreenState): void {
     if (!this.hud) return;
     // The minimap image only changes with the map, and setBundle() resets `shown` then.
-    const key = JSON.stringify({ ...state, minimap: state.minimap && { ...state.minimap, image: undefined } });
+    const key = JSON.stringify({
+      ...state,
+      // Repaint when an icon frame changes, not on every tick of the clock.
+      timeMs: (['bricks', 'minifigs', 'star'] as const).map((n) => iconFrame(n, state.timeMs)),
+      minimap: state.minimap && { ...state.minimap, image: undefined },
+    });
     if (key === this.shown) return;
     this.shown = key;
     const img = composeTopScreen(this.hud, state);
     this.canvas.getContext('2d')!.putImageData(new ImageData(img.data, img.width, img.height), 0, 0);
   }
 }
+
+/**
+ * A building's training progress: a red row above its health bar while selected, lit cells =
+ * floor(percent x cells / 100); lit is BGR555 0x001F (emulator). The unlit shade is our guess.
+ */
+export const TRAIN_COLORS = { lit: 0xff0000, unlit: 0x500000 };
 
 function drawRow(g: Graphics, left: number, top: number, cells: number, lit: number, colors: { lit: number; unlit: number }): void {
   g.rect(left, top, 3 * cells + 1, 4).fill(0x000000);
@@ -95,8 +106,8 @@ function drawRow(g: Graphics, left: number, top: number, cells: number, lit: num
  * `frameLeft`/`frameTop`: the unit's 24x24 sprite frame. The health row sits at
  * frameTop - 6 (a 2 px gap), the hero row 4 px above it.
  */
-export function drawUnitBars(g: Graphics, frameLeft: number, frameTop: number, hp: number, maxHp: number, power?: { value: number; max: number }): void {
+export function drawUnitBars(g: Graphics, frameLeft: number, frameTop: number, hp: number, maxHp: number, power?: { value: number; max: number; colors?: { lit: number; unlit: number } }): void {
   const cells = barCells(24);
   drawRow(g, frameLeft, frameTop - 6, cells, litCells(hp, maxHp, cells), HP_BANDS[hpBand(hp, maxHp)]!);
-  if (power) drawRow(g, frameLeft, frameTop - 10, cells, litCells(power.value, power.max, cells), POWER_COLORS);
+  if (power) drawRow(g, frameLeft, frameTop - 10, cells, litCells(power.value, power.max, cells), power.colors ?? POWER_COLORS);
 }
