@@ -36,6 +36,12 @@ export interface AiPlayer {
   asmPhase: number;
   /** Map MARK type-0 points (static map data, not hashed): where the AI looks for forests. */
   marks: number[];
+  /** Map MARK type-3 points (static map data, not hashed): the tower spots it proposes towers at. */
+  towerMarks: number[];
+  /** Entities there at the start (ids up to this) never count as "created". */
+  seen: number;
+  /** Sites the "entity created" handler has run for, until they finish. */
+  fired: number[];
   /** Cells (y * width + x) of the own and enemy start points. */
   home: number;
   enemyHome: number;
@@ -85,6 +91,11 @@ export interface AiResources {
   mines: number;
   /** Builders on repair duty (JobRepair squads), by unit id. */
   repairers: number[];
+  /** Tower upgrade interval (+0x14, starts at 40) and the passes counted toward it (+0x18). */
+  upInterval: number;
+  upCount: number;
+  /** Tower markers given up on (AITeamStats +0x74), cells. */
+  towersClaimed: number[];
 }
 
 export interface AiRequest {
@@ -133,7 +144,7 @@ export interface AiSquad {
 export const AI_CYCLE = 13;
 
 /** A new computer opponent for `player` against `enemy`. */
-export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[]): AiPlayer {
+export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = []): AiPlayer {
   return {
     player,
     enemy,
@@ -145,7 +156,7 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     events: 0,
     stats: { lastBricks: 0, incomeAvg: 0, ring: new Array<number>(10).fill(0), ringPos: 0, income: 0, builderShare: 50, military: 0, buildings: 0, away: 100 },
     brain: { count: 0, sinceAttack: 0, scoutCount: 900, bonus: 0 },
-    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [] },
+    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [] },
     armyQ: [],
     builderQ: [],
     squads: [{ id: 0, state: 12, prev: 12, timer: 0, units: [], job: -1, jobState: 0, target: 0, goal: -1, last: -1, need: 0, strength: 0 }],
@@ -154,6 +165,9 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     nextTarget: 1,
     asmPhase: 0,
     marks: [...marks],
+    towerMarks: [...towerMarks],
+    seen: 0,
+    fired: [],
     home,
     enemyHome,
   };
@@ -178,13 +192,13 @@ export function aiRand(ai: AiPlayer, n: number): number {
 /** Mix every AI field into the world hash, in a fixed order. */
 export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void {
   for (const a of ais) {
-    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome]) mix(v);
+    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired]) mix(v);
     const s = a.stats;
     for (const v of [s.lastBricks, s.incomeAvg, s.ringPos, s.income, s.builderShare, s.military, s.buildings, s.away, ...s.ring]) mix(v);
     const b = a.brain;
     for (const v of [b.count, b.sinceAttack, b.scoutCount, b.bonus]) mix(v);
     const r = a.res;
-    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers]) mix(v);
+    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers, r.upInterval, r.upCount, r.towersClaimed.length, ...r.towersClaimed]) mix(v);
     for (const q of [a.armyQ, a.builderQ]) {
       mix(q.length);
       for (const it of q) (mix(it.kind), mix(it.prio), mix(it.cell));

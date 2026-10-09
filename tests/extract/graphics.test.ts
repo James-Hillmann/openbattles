@@ -102,7 +102,7 @@ describe('trees', () => {
   const map: GameMap = {
     width: 3, height: 3, tileset: 'KingTileset',
     terrain: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), edges: new Uint8Array(9), regions: new Uint8Array(9),
-    trees: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), ground: new Uint16Array(9).fill(116), mineSites: [], bridgeMarks: [], forestMarks: [], starts: [], pickups: [],
+    trees: new Uint8Array([0, 1, 1, 1, 1, 1, 1, 1, 1]), ground: new Uint16Array(9).fill(116), mineSites: [], bridgeMarks: [], forestMarks: [], towerMarks: [], starts: [], pickups: [],
   };
 
   it('keys a cell by its 3x3 neighbourhood, 2 bits per cell, off-map counts as tree', () => {

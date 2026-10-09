@@ -4,6 +4,7 @@ import { addBricks, getPlayer, isBuilding, ROLE_BASE, ROLE_BUILDER } from '../ec
 import { AI_CYCLE, newAi, type AiPlayer } from './state';
 import { at, centre, type Ctx } from './ctx';
 import { brainEconomy, producerUpdate, resourcesUpdate } from './economy';
+import { onCreated } from './buildings';
 import { addTarget, armyUpdate, attackPlanning, awayPercent, CAT_ATTACK, CAT_HOME } from './army';
 
 export * from './state';
@@ -31,9 +32,9 @@ const TARGET_LIFE = 7500;
 
 /**
  * Make `player` a computer opponent against `enemy`. `marks` are the map's MARK type-0 points
- * (cells), where it looks for forests. Call once, right after the world is created.
+ * (cells), where it looks for forests, and `towerMarks` its MARK type-3 points, where it puts towers. Call once, right after the world is created.
  */
-export function addAi(w: World, player: PlayerId, enemy: PlayerId, marks: readonly number[] = []): AiPlayer {
+export function addAi(w: World, player: PlayerId, enemy: PlayerId, marks: readonly number[] = [], towerMarks: readonly number[] = []): AiPlayer {
   const p = getPlayer(w, player);
   const g = w.grid;
   if (!p || !g) throw new Error('addAi needs a skirmish world');
@@ -43,7 +44,8 @@ export function addAi(w: World, player: PlayerId, enemy: PlayerId, marks: readon
     const b = w.units.find((u) => u.owner === id && u.role === ROLE_BASE);
     return b ? centre({ w } as Ctx, b) : 0;
   };
-  const ai = newAi(player, enemy, w.rng.s ^ Math.imul(player + 1, 0x9e3779b9), base(player), base(enemy), marks);
+  const ai = newAi(player, enemy, w.rng.s ^ Math.imul(player + 1, 0x9e3779b9), base(player), base(enemy), marks, towerMarks);
+  ai.seen = w.units.reduce((m, u) => Math.max(m, u.id), 0); // the starting buildings aren't "created"
   addBricks(p, AI_BONUS_BRICKS);
   ai.stats.lastBricks = p.bricks;
   w.ai.push(ai);
@@ -57,6 +59,7 @@ export function aiStep(w: World, ai: AiPlayer): Command[] {
   if (!me || !w.grid || me.status !== 0) return [];
   const c: Ctx = { w, ai, me, out: [], own: w.units.filter((u) => u.owner === ai.player && u.hp > 0) };
   missionEvents(c);
+  onCreated(c);
   // AIPlayer_updateDispatch (0x0208AC08): a 1..13 counter picks what runs this tick.
   const k = ai.cycle;
   let flags = 0;

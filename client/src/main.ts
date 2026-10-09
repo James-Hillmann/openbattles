@@ -295,7 +295,7 @@ function startSkirmish() {
     },
   });
   // Offline, the second army is the computer opponent (sim/src/ai). Online matches are people only.
-  if (!online) addAi(world, 1, 0, mapForest);
+  if (!online) addAi(world, 1, 0, mapForest, mapTowers);
   mapGrid = grid;
   groundTrees = treeCount(grid.cells);
   adopt(world);
@@ -323,6 +323,7 @@ let mapStarts: StartSpawn[] = [];
 let mapMines: number[] = [];
 /** Forest points the computer opponent picks trees from (map MARK type 0). */
 let mapForest: number[] = [];
+let mapTowers: number[] = [];
 /** The map's bridge sites, each with the bridge that fits it. */
 let mapBridges: BridgeSite[] = [];
 let mapName = '';
@@ -358,6 +359,7 @@ function onMap(b: MapBundle, hud: HudBundle) {
   mapStarts = b.starts;
   mapMines = b.mineSites.map((m) => m.y * b.width + m.x);
   mapForest = b.forestMarks.map((m) => m.y * b.width + m.x);
+  mapTowers = b.towerMarks.map((m) => m.y * b.width + m.x);
   mapBridges = bridgeSitesOf(b.bridgeMarks, (x, y, v) => sizeBridge({ width: b.width, height: b.height, cells: b.terrain }, x, y, v), b.width);
   structures.setArt(b.structures);
   mapName = b.name;

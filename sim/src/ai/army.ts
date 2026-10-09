@@ -32,6 +32,48 @@ const squadUnits = (c: Ctx, s: AiSquad): Unit[] => s.units.map((id) => findById(
 const targetOf = (c: Ctx, s: AiSquad): AiTarget | undefined => c.ai.targets.find((t) => t.id === s.target);
 const hasHero = (c: Ctx, s: AiSquad) => squadUnits(c, s).some((u) => u.role === ROLE_HERO);
 
+/**
+ * Where an advancing squad heads next: WAYPOINT_STEPS cells along the shortest walkable route from
+ * `from` to `to`, or `to` itself when there is no route. Our addition (guess): units walk in straight
+ * segments (docs/re-notes/movement.md), so a squad sent straight across a lake stops at the shore,
+ * and the game's CPU gets around that in a way we haven't traced.
+ */
+const WAYPOINT_STEPS = 12;
+function waypoint(c: Ctx, from: number, to: number, moves: number): number {
+  const g = c.w.grid!;
+  const dist = new Int32Array(g.width * g.height).fill(-1);
+  dist[to] = 0;
+  const queue = [to];
+  for (let i = 0; i < queue.length && dist[from]! < 0; i++) {
+    const cell = queue[i]!;
+    const x = cell % g.width, y = (cell - x) / g.width;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = (y + dy) * g.width + x + dx;
+        if ((dx || dy) && isWalkable(g, x + dx, y + dy, moves) && dist[n]! < 0) {
+          dist[n] = dist[cell]! + 1;
+          queue.push(n);
+        }
+      }
+    }
+  }
+  if (dist[from]! < 0) return to;
+  let cell = from;
+  for (let k = 0; k < WAYPOINT_STEPS && dist[cell]! > 0; k++) {
+    const x = cell % g.width, y = (cell - x) / g.width;
+    let next = cell;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!(dx || dy) || x + dx < 0 || y + dy < 0 || x + dx >= g.width || y + dy >= g.height) continue;
+        const n = (y + dy) * g.width + x + dx;
+        if (dist[n]! >= 0 && dist[n]! < dist[next]!) next = n;
+      }
+    }
+    cell = next;
+  }
+  return cell;
+}
+
 function centroid(c: Ctx, us: readonly Unit[]): number {
   if (!us.length) return c.ai.home;
   let sx = 0, sy = 0;
@@ -201,7 +243,7 @@ function stepSquad(c: Ctx, s: AiSquad): void {
       if (cheb(c, mid, t.cell) <= t.radius) setState(s, 11);
       else {
         const idle = us.filter((u) => u.tx === null && u.target === null).map((u) => u.id);
-        issueMove(c, idle, t.cell, 2);
+        if (idle.length) issueMove(c, idle, waypoint(c, mid, t.cell, us[0]!.moves), 2);
       }
       if (s.timer % 4 === 0) heroAbility(c, us);
       break;
@@ -210,7 +252,7 @@ function stepSquad(c: Ctx, s: AiSquad): void {
       const mid = centroid(c, us);
       const far = us.filter((u) => cheb(c, at(c, u), mid) > GROUP_RADIUS);
       if (!far.length || s.timer > 36) setState(s, s.prev === 10 ? 7 : s.prev);
-      else issueMove(c, far.map((u) => u.id), mid, 0);
+      else issueMove(c, far.filter((u) => u.tx === null).map((u) => u.id), waypoint(c, centroid(c, far), mid, far[0]!.moves), 0);
       break;
     }
     case 11: // hold at the goal
@@ -228,7 +270,11 @@ function stepSquad(c: Ctx, s: AiSquad): void {
       const foes = enemies(c).filter((e) => cheb(c, at(c, e), s.goal) <= 6);
       if (foes.length) {
         s.timer = 0;
-        const idle = us.filter((u) => u.target === null && u.attack);
+        // Units too far off to reach the fight straight (a chase across water stalls) walk there by
+        // waypoints first (our addition, see waypoint()).
+        const off = us.filter((u) => u.attack && cheb(c, at(c, u), s.goal) > 2 * GROUP_RADIUS && (u.tx === null || u.target !== null));
+        if (off.length) issueMove(c, off.map((u) => u.id), waypoint(c, centroid(c, off), s.goal, off[0]!.moves), 2);
+        const idle = us.filter((u) => u.target === null && u.attack && !off.includes(u));
         if (idle.length) {
           if (s.state === 8) c.out.push({ kind: 'attack', unitIds: idle.map((u) => u.id), target: nearestOf(c, foes, s.goal).id });
           else issueMove(c, idle.map((u) => u.id), s.goal, 2);

@@ -20,8 +20,10 @@ const MILL = t(11, 8, 750, 400, 540, 2);
 const MINE = t(12, 9, 1250, 600, 690, 2, { yield: 25 });
 const FARM = t(13, 10, 350, 75, 360, 2);
 const BARRACKS = t(14, 11, 750, 300, 600, 2);
+const TOWER = t(15, 13, 400, 300, 420, 1, { attack: hit(15), priority: 40 });
+const TOWER2 = t(16, 14, 500, 500, 840, 1, { attack: hit(25), priority: 40 });
 const TYPES: EntityType[] = [];
-for (const x of [HERO, BUILDER, SWORD, CASTLE, MILL, MINE, FARM, BARRACKS]) TYPES[x.kind] = x;
+for (const x of [HERO, BUILDER, SWORD, CASTLE, MILL, MINE, FARM, BARRACKS, TOWER, TOWER2]) TYPES[x.kind] = x;
 
 const N = 48;
 /** Open 48x48 map, a forest strip near each corner base. */
@@ -36,6 +38,8 @@ const STARTS: StartSpawn[] = [
   [36, 36, 1, 7], [37, 40, 1, 1], [38, 41, 1, 0],
 ].map(([x, y, slot, role]) => ({ x: x!, y: y!, slot: slot!, role: role!, index: 0 }));
 const MARKS = [5 * N + 3, 40 * N + 44];
+/** Tower spots (MARK type 3) around player 1's base. */
+const TOWER_MARKS = [33 * N + 33, 30 * N + 38];
 
 function world(seed = 5): World {
   const byRole = (role: number) => TYPES.find((x) => x?.role === role) ?? null;
@@ -66,6 +70,18 @@ describe('computer opponent', () => {
     expect(w.units.some((u) => u.owner === 1 && u.role === 2)).toBe(true);
     // Player 0 did nothing and is untouched by the AI's economy.
     expect(owned(w, 0, 1).length).toBe(1);
+  });
+
+  it('builds towers at the map tower spots and upgrades one', () => {
+    const w = world();
+    addAi(w, 1, 0, MARKS, TOWER_MARKS);
+    let upgraded = false;
+    for (let i = 0; i < 9000 && !upgraded; i++) {
+      step(w, []);
+      upgraded = owned(w, 1, 14).length > 0;
+    }
+    expect(owned(w, 1, 13).length + owned(w, 1, 14).length).toBeGreaterThanOrEqual(2);
+    expect(upgraded).toBe(true);
   });
 
   it('two computers play the same game twice from the same seed', () => {

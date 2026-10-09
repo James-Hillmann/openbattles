@@ -54,8 +54,10 @@ is not reproduced; guess that it matters only for exact replays against the cart
 - Harvest: the nearest tree within 4 cells of the builder, else the map's forest markers (MARK
   records of type 0) with a rotating ±3 offset, searched within 7. confirmed
 - Lumber mill priority 81; mine priority 99 (76 when bricks > 1920 or more than 10 soldiers); farm
-  priority 80 when free population runs low (wants 2 if bricks > 2575); tower priority 50 when no
-  tower is within 12 of the spot and the CPU has more than 4 buildings. confirmed (code), likely (values in play)
+  priority 80 when free population runs low (wants 2 if bricks > 2575). confirmed (code), likely (values in play)
+- Every 12th tick the economy pass does only its "pool chores" (towers where squad-less builders
+  stand); that pool was empty at all 175 calls we watched, and our builders have no such state, so
+  it does nothing here. likely
 - Placement: anchor next to the base, farms on the side away from the enemy, barracks, factories and
   towers toward it; spacing roll `rand(10)`; ring search up to 16 cells (28 for the second pass, +8
   for farms). confirmed
@@ -66,6 +68,42 @@ is not reproduced; guess that it matters only for exact replays against the cart
   is free, fewer than 10 free unit slots, and a special factory exists. Water-only specials are
   skipped on land maps. Army queue holds 4, builder queue 10. confirmed (code), likely (thresholds in play)
 - The producer trains at the nearest idle finished factory, one unit per factory at a time. confirmed
+
+## Buildings and towers (AIResources "try other" 0x0209524C)
+
+When no plan went to a builder on an odd pass, the CPU rolls `AI_rand(4)` and does one chore
+(observed 75/61/82/62 over 280 calls; confirmed):
+
+1. **Towers.** At most 7. With more than 4 Tower Is it may upgrade one. Otherwise, once it has a
+   barracks and soldiers, it proposes a tower at priority 50 at the nearest tower spot (the map's
+   MARK records of type 3; mp01 has 22) to its start. A spot takes a tower while none stands within 8,
+   or 1-2 do and a "spot check" passes: an own building within 6, and the strength of everything
+   within 6 plus `rand(60)` under 225. Then the spot is given up. confirmed (proposals at (49,45), then
+   (57,47) on mp01)
+2. **Walls.** It would plan wall rings past tick 7000 with 8 soldiers and 2 towers, but never built
+   one in 13,700 ticks of emulator play. Not ported.
+3. **Production buildings**, when it has no barracks, or 6 soldiers and 355 bricks, or 1500 bricks:
+   - Barracks: the first at priority 99 at the base; a second at 50 when bricks exceed the reserve
+     by 1500 (seen at tick 2619); a third when it has 2, a special factory and 2575 bricks, at
+     `(base + enemy start) / 3` per axis. That is the sum over 3, not a third of the way: (20,22) on
+     mp01, next to the human base, rebuilt every time it falls. confirmed
+   - Special factory (stables role): the first above 355 bricks, a second above 2575; priority 50. confirmed
+   - Shipyard: needs the island test (0x02093A50), not traced; it never fired on mp01. Not ported.
+4. **Upgrade timer.** Counts passes; past the interval (40 at start, 1 after any tower appears,
+   reset to 60 or 20 by case 1) it upgrades the Tower I nearest the base that is at least 100 ticks
+   old (a Tower II once there are enough). confirmed
+   - Quirk: the game re-issues the upgrade every ~150 ticks, and each re-issue restarts the research,
+     so later upgrades never finish there. Our upgrade command ignores a tower that is already
+     upgrading (towers thread, `sim/src/structures.ts`), so ours finish. Known difference.
+
+**Tower next to a new building** (handler 0x0208A85C, TowerNextTo 0x020961A0): when a lumber mill,
+mine, barracks or special factory's foundation goes down and bricks exceed the reserve by 340, the
+CPU orders a tower right there, outside the plan, if the spot check passes. This is where most of its
+towers come from. confirmed. The game hands it to the builder that placed the site; our builder is
+inside the site by then, so the nearest idle builder (else harvester) takes it. guess
+
+Bricks held back (reserve, 0x02093F7C): 420 while a special factory is planned, 420 before tick 7000
+with more than 4 soldiers and no lumber mill, 600 for a late mine. likely
 
 ## Army (ArmySquadManager 0x0209878C, attack planning 0x0208B440)
 
@@ -84,18 +122,37 @@ is not reproduced; guess that it matters only for exact replays against the cart
 - Hero spells: the real choice list is built around 0x02097780 and not traced. Our version casts a
   random castable spell at the nearest enemy within 5 cells once the charge is almost full. **guess**
 
+Our addition (guess): units walk in straight segments with a short A* (movement.md), so a squad
+sent straight across a lake stops at the shore. Advancing, regrouping and far-off fights steer by
+waypoints 12 cells along a walkable route. How the game's CPU gets around water is not traced.
+
 ## Checking against the game
 
 Run in DeSmuME (py-desmume, tools/emu) with the human idle, King vs Wizard CPU on mp01, logging every
 entity the CPU creates. The CPU's first barracks came at ~190 ticks, builders at 175-1833, its
 first soldier at 1895, a lumber mill at 2234, towers from 1572, a mine at 3250, and it killed the
-idle King's base around tick 5100. `npx tsx tools/ai/run.ts game.nds mp01 6000 King Wizard` gives our
-port's timeline on the same setup (first soldiers ~1970, win ~4600).
+idle King's base around tick 5100. `npx tsx tools/ai/run.ts game.nds mp01 9000 King Wizard` gives our
+port's timeline on the same setup:
+
+| | game | port |
+|---|---|---|
+| first barracks | ~190 | 12 |
+| first tower | 1572 | 1676 |
+| first soldier | 1895 | 2083 |
+| special factory | 2798 | 3808 |
+| lumber mill | 2234 | 6818 |
+| second barracks | 2769 | 8274 |
+| first tower upgrade done | 4684 | 4771 |
+| idle King beaten | ~5100 | 8277 |
+
+The first barracks comes early because the game's priority-99 barracks plan waited until ~175 for a
+builder, for a reason we haven't found. The late second barracks and lumber mill and the slow win are
+open: the port spends more on towers early and its first attack is smaller.
 
 ## Not ported yet
 
 - `JobAttackTaskForce` (siege groups), transports and naval landings (AIPlayer+0x58), retiring
   units when at the population cap, late-game cleanup (0x02094738).
-- Bridges and walls built by the AI (0x02094504, 0x0208C6B8).
+- Bridges and walls built by the AI (0x02094504, 0x0208C6B8), the shipyard proposer, pool chores.
 - Hero spell choice (guess above).
 - The game's exact AI seed.

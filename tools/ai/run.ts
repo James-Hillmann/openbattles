@@ -53,8 +53,9 @@ const w: World = createSkirmish(
   },
 );
 const marks = map.forestMarks.map((m) => m.y * map.width + m.x);
-addAi(w, 1, 0, marks);
-if (both) addAi(w, 0, 1, marks);
+const towers = map.towerMarks.map((m) => m.y * map.width + m.x);
+addAi(w, 1, 0, marks, towers);
+if (both) addAi(w, 0, 1, marks, towers);
 
 const seen = new Set<number>();
 const ticks = Number(ticksArg);
@@ -77,3 +78,8 @@ for (let t = 0; t < ticks; t++) {
   }
 }
 console.log(getPlayer(w, 1));
+// Where each squad's units are at the end, and what they're doing.
+for (const q of w.ai.find((a) => a.player === 1)!.squads) {
+  const us = q.units.map((id) => w.units.find((u) => u.id === id)).filter((u) => u !== undefined);
+  console.log(`squad ${q.id} job ${q.job} state ${q.state} goal ${q.goal}: ${us.map((u) => `${byIndex.get(u.kind)?.name}${cellOf(u)}${u.tx === null ? '' : '>'}${u.target === null ? '' : '!'}`).join(' ')}`);
+}

@@ -4,6 +4,7 @@ import { MOVES_GROUND, isWalkableCode } from '../terrain';
 import { fpH, fpW } from '../footprint';
 import type { Unit } from '../state';
 import { aiRand, type AiRequest } from './state';
+import { finishSites, mainCell, tryOther } from './buildings';
 import {
   at, builders, cellOfXY, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
   nearestTree, ofRole, pushRequest, queuedOfRole, typeOf, W, type Ctx,
@@ -29,8 +30,9 @@ const NONE: AiRequest = { kind: -1, prio: 0, cell: -1 };
 export function resourcesUpdate(c: Ctx): void {
   if (c.w.tick % 2 === 0) economy(c);
   else if (!assignBuild(c)) {
-    proposeBuildings(c);
+    tryOther(c);
     repair(c);
+    finishSites(c);
   }
 }
 
@@ -39,12 +41,13 @@ function economy(c: Ctx): void {
   const bs = builders(c);
   regulateBuilders(c, bs.length);
   if (bs.length === 0) return;
-  if (c.w.tick % 12 === 0) idleChores(c);
-  else if (!minesAndHarvest(c)) {
+  // Every 12th tick: the pool chores, and nothing else (not even the hero rebuy).
+  if (c.w.tick % 12 === 0) return poolChores(c);
+  if (!minesAndHarvest(c)) {
     if (ofRole(c, ROLE_BASE).length === 0) propose(c, ROLE_BASE, c.ai.home, 75);
-    if (bs.some(isIdleBuilder)) towerPlanner(c);
-    farmPlanner(c);
+    if (c.own.some((u) => isBuilding(u) && !isFinished(u))) towerPlanner(c);
   }
+  farmPlanner(c);
   if (c.w.tick % 4 === 0) rebuyHero(c);
 }
 
@@ -143,15 +146,24 @@ function farmPlanner(c: Ctx): void {
   if (want > building) propose(c, ROLE_FARM, main ? centre(c, main) : c.ai.home, 80);
 }
 
-/** TowerPlanner (0x02094B44): a tower when the base has none near and more than 4 buildings. */
+/**
+ * Base tower planner (0x02094B44), while some builder is constructing: a tower at the main building
+ * when no tower is within 12 (Manhattan) of the base and more than 4 buildings are. likely (never
+ * fired in the emulator: the marker towers come first)
+ */
 function towerPlanner(c: Ctx): void {
-  const near = (u: Unit) => cheb(c, at(c, u), c.ai.home) <= 12;
+  const near = (u: Unit) => isBuilding(u) && manhattan(c, at(c, u), c.ai.home) <= 12;
+  if (c.own.some((u) => u.role === ROLE_TOWER && !isFinished(u))) return;
   if (c.own.some((u) => u.role >= ROLE_TOWER && u.role <= 15 && near(u))) return;
-  if (c.own.filter((u) => isBuilding(u) && near(u)).length > 4) propose(c, ROLE_TOWER, c.ai.home, 50);
+  if (c.own.filter(near).length > 4) propose(c, ROLE_TOWER, mainCell(c), 50);
 }
 
-/** Squad chores every 12th tick (0x02097054). Not traced; see proposeBuildings. */
-function idleChores(_c: Ctx): void {}
+/**
+ * PoolChores (0x02097054): towers at priority 76 where builders without a squad stand, and walking
+ * them home. The pool was empty at all 175 calls in the emulator, and our builders have no
+ * squad-less state, so this does nothing here.
+ */
+function poolChores(_c: Ctx): void {}
 
 /** RebuyHero (0x02094A7C): a dead hero is bought back first, at priority 100. */
 function rebuyHero(c: Ctx): void {
@@ -160,13 +172,6 @@ function rebuyHero(c: Ctx): void {
   if (kind === undefined) return;
   c.ai.builderQ.length = 0;
   c.ai.builderQ.push({ kind, prio: 100, cell: c.ai.home });
-}
-
-/** Building proposals besides farms, mines, mills and the base tower (0x0209524C); see docs/re-notes/ai.md. */
-function proposeBuildings(c: Ctx): void {
-  const has = (role: number) => ofRole(c, role).length > 0;
-  if (!has(ROLE_BARRACKS)) propose(c, ROLE_BARRACKS, c.ai.home, 50);
-  else if (!has(ROLE_STABLES) && finishedOfRole(c, ROLE_BARRACKS).length && finishedOfRole(c, ROLE_FARM).length) propose(c, ROLE_STABLES, c.ai.home, 50);
 }
 
 /** Propose a building (0x02097354): kept only if the plan is empty or of lower priority. */
@@ -198,19 +203,23 @@ function assignBuild(c: Ctx): boolean {
     const b = c.me.bricks;
     if (harv.length >= 8 || (harv.length >= 2 && res.wait > 55) || b > 1500 || plan.prio > 75 || (harv.length > 2 && b > 750)) u = nearest(c, harv, plan.cell);
   }
-  if (u && t.cost <= c.me.bricks) return issueBuild(c, u, t.kind, role);
+  if (u && t.cost <= c.me.bricks) {
+    const cell = plan.cell;
+    res.plan = NONE;
+    return issueBuild(c, u, t.kind, role, cell);
+  }
   if (t.cost > c.me.bricks) plan.prio = Math.max(10, plan.prio - 1);
   return false;
 }
 
-/** IssueBuild (0x02096988): find a spot around the anchor and send the builder. */
-function issueBuild(c: Ctx, u: Unit, kind: number, role: number): boolean {
+/** IssueBuild (0x02096988): find a spot around the anchor at `cell` and send the builder. */
+export function issueBuild(c: Ctx, u: Unit, kind: number, role: number, cell: number): boolean {
   const res = c.ai.res;
   const t = typeOf(c, kind)!;
   let spot = -1;
-  if (role === ROLE_MINE) spot = mineSite(c, res.plan.cell, 10);
+  if (role === ROLE_MINE) spot = mineSite(c, cell, 10);
   else {
-    const anchor = placementAnchor(c, role, res.plan.cell >= 0 ? res.plan.cell : at(c, u), t.size);
+    const anchor = placementAnchor(c, role, cell >= 0 ? cell : at(c, u), t.size);
     let spacing = 0;
     if (role === ROLE_BARRACKS || role === ROLE_STABLES || role === ROLE_FARM) {
       const r = aiRand(c.ai, 10);
@@ -220,7 +229,6 @@ function issueBuild(c: Ctx, u: Unit, kind: number, role: number): boolean {
     if (role === ROLE_FARM) radius += 8;
     spot = placementSearch(c, t.kind, anchor, radius, spacing);
   }
-  res.plan = NONE;
   if (spot < 0) {
     res.fails++;
     return false;
