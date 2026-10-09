@@ -64,6 +64,7 @@ export function mountArmySelect(el: HTMLElement, b: ArmyBundle, start: ArmyPick,
   let slot = 0;
   /** Character shown on the card: the one hovered, else the slot's. */
   let shown = pick.units[0]!;
+  let shownRole = 0;
   const t = (id: number) => b.text[id] ?? '';
 
   el.innerHTML = `
@@ -84,24 +85,26 @@ export function mountArmySelect(el: HTMLElement, b: ArmyBundle, start: ArmyPick,
   $('[data-act=back]').onclick = () => opts.back();
   $('[data-act=ok]').onclick = () => opts.done(pick);
 
-  const coin = (name: string, cls: string, onClick: () => void, label?: string) => {
+  /** `role`: the slot whose label the card shows for this character (the hero for the army coins). */
+  const coin = (name: string, role: number, cls: string, onClick: () => void, label?: string) => {
     const btn = document.createElement('button');
     btn.className = `coin ${cls}`;
     btn.title = b.units[name]?.name ?? name;
     btn.appendChild(canvasOf(b.heads[name]));
     if (label) btn.appendChild(Object.assign(document.createElement('small'), { textContent: label }));
     btn.onclick = onClick;
-    btn.onpointerenter = () => showCard(name);
-    btn.onpointerleave = () => showCard(pick.units[slot]!);
+    btn.onpointerenter = () => showCard(name, role);
+    btn.onpointerleave = () => showCard(pick.units[slot]!, slot);
     return btn;
   };
 
-  function showCard(name: string) {
+  function showCard(name: string, role: number) {
     shown = name;
+    shownRole = role;
     const u = b.units[name];
     $('.card').replaceChildren(canvasOf(b.cards[name]));
     $('.stats').innerHTML = u
-      ? `<div class="name">${esc(u.name)}</div><div class="slot">${esc(b.slotLabels[slot] ?? '')}</div>
+      ? `<div class="name">${esc(u.name)}</div><div class="slot">${esc(b.slotLabels[role] ?? '')}</div>
          ${ICON.attack}${pips(u.attackPips)}${ICON.hp}<span>${u.hp}</span>${ICON.cost}<span>${u.cost}</span>${ICON.speed}${pips(u.speedPips)}`
       : '';
   }
@@ -110,7 +113,7 @@ export function mountArmySelect(el: HTMLElement, b: ArmyBundle, start: ArmyPick,
     const armies = $('.armies');
     armies.replaceChildren(
       ...Object.keys(b.armies).map((name) => {
-        const c = coin(b.armies[name]!.units[0]!, pick.army === name ? 'cur' : '', () => {
+        const c = coin(b.armies[name]!.units[0]!, 0, pick.army === name ? 'cur' : '', () => {
           pick = { army: name, units: [...b.armies[name]!.units] };
           render();
         }, name);
@@ -121,7 +124,7 @@ export function mountArmySelect(el: HTMLElement, b: ArmyBundle, start: ArmyPick,
     const slots = $('.slots');
     slots.replaceChildren(
       ...pick.units.map((name, i) => {
-        const c = coin(name, i === slot ? 'sel' : '', () => {
+        const c = coin(name, i, i === slot ? 'sel' : '', () => {
           slot = i;
           render();
         });
@@ -132,13 +135,14 @@ export function mountArmySelect(el: HTMLElement, b: ArmyBundle, start: ArmyPick,
     $('.slotname').textContent = b.slotLabels[slot] ?? '';
     $('.choices').replaceChildren(
       ...(b.choices[slot] ?? []).map((name) =>
-        coin(name, name === pick.units[slot] ? 'cur' : '', () => {
+        coin(name, slot, name === pick.units[slot] ? 'cur' : '', () => {
           pick.units[slot] = name;
           render();
         }),
       ),
     );
-    showCard(shown && el.querySelector('.choices .coin:hover') ? shown : pick.units[slot]!);
+    if (el.querySelector('.coin:hover')) showCard(shown, shownRole);
+    else showCard(pick.units[slot]!, slot);
   }
   render();
 }
