@@ -50,6 +50,7 @@ import {
   isFrozen,
   canTarget,
   TAP_POINT,
+  projectileAt,
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars, type CostAction } from './hud';
@@ -278,7 +279,8 @@ function startSkirmish() {
 }
 
 const cellCenterPx = (c: number, axis: 'x' | 'y') => (axis === 'x' ? c * CELL_W + CELL_W / 2 : c * CELL_H + CELL_H / 2);
-const treeCount = (cells: Uint8Array) => cells.reduce((n, c) => n + (c === TERRAIN_TREE ? 1 : 0), 0);
+/** A fingerprint of where the trees stand (chopped, burnt and planted trees all change it). */
+const treeCount = (cells: Uint8Array) => cells.reduce((n, c, i) => (c === TERRAIN_TREE ? (Math.imul(n, 31) + i + 1) | 0 : n), 0);
 
 let mapSize = { w: 600, h: 440 };
 let mapGrid: TerrainGrid | null = null;
@@ -765,6 +767,11 @@ function drawSpellAreas() {
       : [cx, cy - (r + 0.5) * CELL_H, cx + (r + 0.5) * CELL_W, cy, cx, cy + (r + 0.5) * CELL_H, cx - (r + 0.5) * CELL_W, cy];
     overlay.poly(pts).fill({ color: freeze ? 0x60b0ff : 0xff8020, alpha: 0.18 }).stroke({ color: freeze ? 0x60b0ff : 0xff8020, width: 1 / camera.scale.x, alpha: 0.6 });
   }
+  // Fireball / Thunder Hammer in flight (ours: the game draws FireBallEffect / ThunderHammerEffect).
+  for (const s of world.spells) {
+    const p = projectileAt(s);
+    if (p) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 4).fill({ color: s.spell === 14 ? 0xff6000 : 0x80c0ff });
+  }
 }
 
 /** Spell name for the tooltip (the game shows none on the strip; extract's SPELL_NAME_TEXT). */
@@ -870,7 +877,7 @@ function tryPlace(): boolean {
   return true;
 }
 
-/** Redraw the ground when trees have been chopped (at most twice a second). */
+/** Redraw the ground when trees have been chopped or planted (at most twice a second). */
 function checkGround() {
   if (!world.grid || !mapName || !rom.summary()) return;
   const now = performance.now();

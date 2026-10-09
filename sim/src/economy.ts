@@ -322,7 +322,8 @@ function stepJob(w: World, u: Unit): void {
       }
       if (approach(w, u, originCell(w, d), d.size) !== 'there') return;
       const p = getPlayer(w, u.owner);
-      if (p) addBricks(p, loadValue(w, u.owner));
+      // The logging buff (spell 19, buff slot 3) doubles the load; it counts only if still on at drop-off (0x0206D1A0).
+      if (p) addBricks(p, loadValue(w, u.owner) * (u.boost & (1 << 3) ? 2 : 1));
       u.carrying = false;
       const next = g.cells[job.tree] === TERRAIN_TREE ? job.tree : nearestTree(g, job.tree);
       u.job = next < 0 ? null : { kind: 'chop', tree: next, timer: CHOP_TICKS };
@@ -405,7 +406,8 @@ function stepMine(w: World, m: Unit): void {
   m.payout = MINE_TICKS;
   const t = w.types[m.kind];
   const p = getPlayer(w, m.owner);
-  if (t && p) addBricks(p, t.yield);
+  // The mining buff (spell 17, buff slot 4) doubles the payout, not the interval (0x0206D7D0; likely).
+  if (t && p) addBricks(p, t.yield * (m.boost & (1 << 4) ? 2 : 1));
 }
 
 /** Economy for one tick, after combat and movement. */

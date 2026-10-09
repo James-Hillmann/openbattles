@@ -51,6 +51,11 @@ DEFS[26] = big(26, [0, 0, 0, 0], 0x40, 300);
 DEFS[30] = { ...big(30, [0, 0, 0, 0], 4, 300), b7: 6, time: 240 };
 DEFS[32] = big(32, [0, 0, 0, 0], 0x20, 300);
 DEFS[33] = { ...big(33, [5, 50, 9, 65], 4, 500), time: 30 };
+DEFS[10] = { ...big(10, [0, 0, 0, 0], 1, 400), b7: 2 };
+DEFS[14] = { ...big(14, [0, 0, 0, 0], 5, 400), b7: 0 };
+DEFS[16] = big(16, [6, 50, 8, 70], 5, 600);
+DEFS[34] = { ...big(34, [3, 50, 6, 60], 4, 500), time: 30 };
+DEFS[19] = { ...big(19, [0, 0, 0, 0], 8, 300), b7: 0, time: 240 };
 for (let i = 0; i < 35; i++) DEFS[i] ??= def(i, 10, 5, 1, 300);
 
 const melee = (damage: number, damageRand: number, cooldown: number) => ({
@@ -392,5 +397,72 @@ describe('utility spells', () => {
     run(w, 100);
     expect(boat.owner).toBe(0);
     expect(w.spells.some((s) => s.spell === 32)).toBe(false);
+  });
+});
+
+/** An open 24x24 map with players 0 and 1 on different teams. */
+function mapWorld(): World {
+  const cells = new Uint8Array(24 * 24).fill(TERRAIN_OPEN);
+  const players = [0, 1].map((id) => ({ id, team: id, bricks: 0, status: 0, start: -1, reservedPop: 0, reservedStars: 0 }));
+  return createWorld({ seed: 1, grid: { width: 24, height: 24, cells }, spellDefs: DEFS, players });
+}
+const onCell = (cx: number, cy: number) => [cellCenterX(cx), cellCenterY(cy)] as const;
+const castAt = (w: World, caster: number, spell: number, cx: number, cy: number, target = 0) =>
+  step(w, [{ tick: w.tick, player: 0, cmd: { kind: 'cast', caster, spell, target, x: cellCenterX(cx), y: cellCenterY(cy) } }]);
+
+describe('forest and projectile spells', () => {
+  it('Forest Spawn plants the 2x2 blocks along its line, one candidate a tick from T + 2', () => {
+    const w = mapWorld();
+    const hero = spawnUnit(w, 0, ...onCell(2, 2), { ...HERO, spells: [10] });
+    const T = w.tick;
+    castAt(w, hero.id, 10, 5, 5); // the end is 10 cells out on the diagonal, (9,9); the line is (3,3)..(8,8), one cell thick
+    const trees = () => [...w.grid!.cells].flatMap((c, i) => (c === 1 ? [[i % 24, Math.floor(i / 24)]] : []));
+    run(w, 1);
+    expect(trees()).toEqual([]);
+    run(w, 1); // T + 2: (3,3)
+    expect(trees()).toEqual([[3, 3]]);
+    while (w.spells.some((s) => s.spell === 10)) step(w, []);
+    expect(w.tick - 1).toBe(T + 2 + 5 * 6);
+    expect(trees()).toHaveLength(7 + 6 + 6); // the 2x2 blocks of (3,3)..(8,8): the diagonal (3..9) and its two neighbours
+  });
+
+  it('Fireball hits the enemy it was cast at; one of your units in the way makes it fizzle', () => {
+    const w = mapWorld();
+    const hero = spawnUnit(w, 0, ...onCell(2, 5), { ...HERO, spells: [14] });
+    const foe = spawnUnit(w, 1, ...onCell(8, 5), GUARD);
+    castAt(w, hero.id, 14, 8, 5, foe.id);
+    for (let i = 0; i < 20 && !w.spells.some((s) => s.spell === 34); i++) step(w, []);
+    const area = w.spells.find((s) => s.spell === 34)!;
+    expect([area.cx, area.cy]).toEqual([8, 5]);
+
+    const w2 = mapWorld();
+    const h2 = spawnUnit(w2, 0, ...onCell(2, 5), { ...HERO, spells: [14] });
+    spawnUnit(w2, 0, ...onCell(5, 5), GUARD);
+    const f2 = spawnUnit(w2, 1, ...onCell(8, 5), GUARD);
+    castAt(w2, h2.id, 14, 8, 5, f2.id);
+    run(w2, 30);
+    expect(w2.spells.some((s) => s.spell === 34)).toBe(false);
+  });
+
+  it('Thunder Hammer fizzles on any unit and only hurts when it lands on open ground', () => {
+    const w = mapWorld();
+    const hero = spawnUnit(w, 0, ...onCell(2, 5), { ...HERO, spells: [16] });
+    const foe = spawnUnit(w, 1, ...onCell(8, 5), GUARD);
+    castAt(w, hero.id, 16, 8, 5, foe.id);
+    run(w, 30);
+    expect(w.spells.some((s) => s.spell === 16 && s.cls !== undefined && s.cx === 8 && s.radius === 5)).toBe(false);
+    hero.charge = 1000;
+    castAt(w, hero.id, 16, 8, 9);
+    run(w, 30);
+    expect(w.spells.some((s) => s.radius === 5 && s.dmg > 0)).toBe(true);
+  });
+
+  it('the logging buff doubles a Builder\'s load', () => {
+    const w = mapWorld();
+    const hero = spawnUnit(w, 0, ...onCell(2, 5), { ...HERO, spells: [19] });
+    const b = spawnUnit(w, 0, ...onCell(3, 5), { ...GUARD, role: 1 });
+    castAt(w, hero.id, 19, 3, 5, b.id);
+    run(w, 1);
+    expect(b.boost & (1 << 3)).toBeTruthy();
   });
 });

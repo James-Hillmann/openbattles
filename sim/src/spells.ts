@@ -1,6 +1,7 @@
 import { cellCenterX, cellCenterY, cellOf } from './terrain';
 import { findById } from './combat';
 import { nextInt } from './rng';
+import { cellXOf, cellYOf, forestEnd, fx12Mul, normalize, packCell, thickLine } from './spellGeom';
 import { isBuilding, isFinished, ROLE_BASE, ROLE_HERO, ROLE_SIEGE, ROLE_TRANSPORT, starCap } from './economy';
 import { freeCellAround, placeUnit, removeUnit, stopMove, unitCell } from './movement';
 import type { Fx } from './fixed';
@@ -151,6 +152,9 @@ const C_LIGHTNING = 5;
 const C_TELEPORT = 6;
 const C_TRACKING = 7;
 const C_HOTWIRE = 8;
+const C_FOREST = 9;
+const C_FIREBALL = 10;
+const C_HAMMER = 11;
 
 /** The class the factory (0x0207BBEC) makes for a spell id; C_NONE for the ones not ported yet. */
 function classOf(id: number): number {
@@ -162,6 +166,9 @@ function classOf(id: number): number {
   if (id === 26) return C_TELEPORT;
   if (id === 30) return C_TRACKING;
   if (id === 32) return C_HOTWIRE;
+  if (id >= 10 && id <= 12) return C_FOREST;
+  if (id === 14) return C_FIREBALL;
+  if (id === 16) return C_HAMMER;
   return C_NONE;
 }
 
@@ -201,7 +208,7 @@ function startSpell(
     left: cls === C_BUFF ? BUFF_TICKS : def.id === 3 ? 1 : cls === C_DAMAGE ? D : cls === C_TRACKING ? def.time : -1,
     cx, cy, radius: mode === 'unit' || !area ? -1 : def.b7, units: [], phase: 0,
     timer: cls === C_FREEZE ? def.time : cls === C_LIGHTNING ? LIGHTNING_DELAY : cls === C_TELEPORT ? TELEPORT_DELAY : cls === C_HOTWIRE ? def.time : 1,
-    dmg: 0, dmgStep: 0, chance: 0, chanceStep: 0, ring: 0, ringStep: 0,
+    dmg: 0, dmgStep: 0, chance: 0, chanceStep: 0, ring: 0, ringStep: 0, idx: 0, px: 0, py: 0, vx: 0, vy: 0,
   };
   if (cls === C_DAMAGE) {
     // Damage and hit chance move in a straight line from the record's start to end values over D ticks.
@@ -440,6 +447,13 @@ function stepSpell(w: World, s: ActiveSpell): boolean {
     case C_HOTWIRE:
       if (alive && classTick(w, s, caster)) return true;
       break;
+    case C_FOREST:
+      if (alive && forestTick(w, s, caster)) return true;
+      break;
+    case C_FIREBALL:
+    case C_HAMMER:
+      if (alive && projectileTick(w, s, caster)) return true;
+      break;
   }
   if (!alive) s.left = 0;
   if (s.left === 0) return true;
@@ -515,6 +529,224 @@ function teleportHome(w: World, u: Unit): void {
   u.target = null;
   u.ordered = false;
   placeUnit(w, u);
+}
+
+// ---- Forest spells (ForrestSpell 0x0207784C, update 0x020779CC) ----
+
+/** Each list cell tries this 2x2 block, one candidate a tick (table 0x0214A780). confirmed */
+const PLANT_OFFSETS = [[0, 0], [0, 1], [1, 0], [1, 1]] as const;
+/** 11 and 12 wait for their picture (ForrestSpawnEffect counts 10 updates): first plant on T + 12. confirmed */
+const FOREST_WAIT = 10;
+const TERRAIN_OPEN = 0;
+const TERRAIN_TREE = 1;
+const TERRAIN_CLIFF = 5;
+
+/**
+ * Forest spells plant trees toward the tapped spot: 10 along a thick line from the hero to `range`
+ * cells away, 11 and 12 on 80% of the open cells in the 5x5 square there, in an order shuffled with
+ * one rand(100) per cell. Each list cell costs 5 ticks: 4 candidates (its 2x2 block) and one to drop
+ * it; a candidate becomes a tree only on open ground inside the map with nobody standing on it.
+ * confirmed (docs/re-notes/spells.md "Forest spells").
+ */
+function forestTick(w: World, s: ActiveSpell, caster: Unit): boolean {
+  const g = w.grid;
+  if (!g) return true;
+  const def = w.spellDefs[s.spell]!;
+  if (s.phase === 0) {
+    const [hx, hy] = cellOfUnit(caster);
+    const [ex, ey] = forestEnd(hx, hy, s.cx, s.cy, def.range, g.width, g.height);
+    if (s.spell === 10) {
+      s.units = thickLine(hx, hy, ex, ey, g.width, g.height);
+      s.phase = 1;
+      s.timer = 1;
+      return false;
+    }
+    // Area query 0x0207ED4C: the square of radius b7 around the end, rows first, open cells only.
+    const area: number[] = [];
+    for (let y = Math.max(ey - def.b7, 0); y <= Math.min(ey + def.b7, g.height - 1); y++)
+      for (let x = Math.max(ex - def.b7, 0); x <= Math.min(ex + def.b7, g.width - 1); x++)
+        if (g.cells[y * g.width + x] === TERRAIN_OPEN) area.push(packCell(x, y));
+    // Shuffle 0x020781D0: a roll <= 50 sends a cell to the front group, else the back; keep 80%.
+    const front: number[] = [];
+    const back: number[] = [];
+    for (const c of area) (nextInt(w.rng, 100) <= 50 ? front : back).push(c);
+    s.units = [...front, ...back].slice(0, Math.floor((area.length * 80) / 100));
+    s.phase = 2;
+    s.timer = FOREST_WAIT;
+    return false;
+  }
+  if (s.phase === 2) {
+    if (--s.timer === 0) {
+      s.phase = 1;
+      s.timer = 1;
+    }
+    return false;
+  }
+  if (s.units.length === 0) return true;
+  if (--s.timer !== 0) return false;
+  s.timer = 1;
+  if (s.idx < PLANT_OFFSETS.length) {
+    const [ox, oy] = PLANT_OFFSETS[s.idx++]!;
+    const x = cellXOf(s.units[0]!) + ox;
+    const y = cellYOf(s.units[0]!) + oy;
+    if (canPlant(w, x, y)) g.cells[y * g.width + x] = TERRAIN_TREE;
+  } else {
+    s.idx = 0;
+    s.units.shift();
+  }
+  return false;
+}
+
+/** Inside the map (the playable rectangle is the whole map in skirmish), open ground, nobody there (0x02077DC8). */
+function canPlant(w: World, x: number, y: number): boolean {
+  const g = w.grid!;
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return false;
+  const c = y * g.width + x;
+  if (g.cells[c] !== TERRAIN_OPEN) return false;
+  if (w.occ) for (let l = 0; l * g.width * g.height < w.occ.length; l++) if (w.occ[l * g.width * g.height + c]) return false;
+  return !w.units.some((u) => u.hp > 0 && cellOfUnit(u)[0] === x && cellOfUnit(u)[1] === y);
+}
+
+// ---- Fireball and Thunder Hammer (ProjectileSpell 0x02079000 / 0x02079F7C) ----
+
+/** Projectile speed: entity 202's 2048, half a cell a tick. confirmed */
+const PROJECTILE_SPEED = 2048;
+/** Fireball's and Thunder Hammer's damage records. confirmed */
+const FIREBALL_DAMAGE = 34;
+const HAMMER_DAMAGE = 16;
+/** Ticks the spell stays after its impact (picture, then the projectile is destroyed): FireBall 3 + 30 + 2, ThunderHammer 5 + 30 + 2. */
+const FIREBALL_AFTER = 35;
+const HAMMER_AFTER = 37;
+/** Pixels per cell in the game's 20.12 pixel space. */
+const PX_W = 24 * 4096;
+const PX_H = 16 * 4096;
+const projCell = (s: ActiveSpell): [number, number] => [Math.floor(s.px / PX_W), Math.floor(s.py / PX_H)];
+
+/**
+ * Fireball and Thunder Hammer: on the first update a projectile leaves the hero toward the aim cell;
+ * it flies straight at 12 px across / 8 px down a tick from the next one, and its flight ends at the
+ * first unit or building in its cell, a tree (cleared) or a cliff, or at the aim cell. Then the spell
+ * decides: an own or allied unit makes Fireball fizzle, and any unit at all makes Thunder Hammer fizzle
+ * (a game bug); otherwise a damage area (record 34 / 16) starts where it stopped. The charge is spent
+ * either way. confirmed (docs/re-notes/spells.md "Fireball and Thunder Hammer").
+ */
+function projectileTick(w: World, s: ActiveSpell, caster: Unit): boolean {
+  const g = w.grid;
+  if (!g) return true;
+  if (s.phase === 0) {
+    launch(w, s, caster);
+    return false;
+  }
+  if (s.phase !== 1) return --s.timer <= 0; // after the impact or a fizzle
+  const [ax, ay] = [s.cx, s.cy];
+  const centreX = ax * PX_W + PX_W / 2;
+  const centreY = ay * PX_H + PX_H / 2;
+  if (s.idx === 0) {
+    // The velocity is set once, at the first move (0x02055B14).
+    const [nx, ny] = normalize(centreX - s.px, fx12Mul(centreY - s.py, 0x1800));
+    s.vx = fx12Mul(fx12Mul(nx, 24 << 12), PROJECTILE_SPEED);
+    s.vy = fx12Mul(fx12Mul(ny, 16 << 12), PROJECTILE_SPEED);
+    s.idx = 1;
+  }
+  let [x, y] = projCell(s);
+  if (x === ax && y === ay) return impact(w, s, caster, undefined, true);
+  const dx = centreX - s.px;
+  const dy = centreY - s.py;
+  const whole = (v: number) => Math.floor(v / 4096);
+  if (whole(s.vx) ** 2 + whole(s.vy) ** 2 >= whole(dx) ** 2 + whole(dy) ** 2) {
+    // One more step would pass the centre: snap onto it and arrive, no contact test.
+    s.px += dx;
+    s.py += dy;
+    return impact(w, s, caster, undefined, true);
+  }
+  s.px += s.vx;
+  s.py += s.vy;
+  [x, y] = projCell(s);
+  // Contact test 0x02053F70, in the projectile's cell only: anyone but the caster ends the flight for
+  // the spell (own units are reported too); with nobody there a tree is cleared and stops it, as does a cliff.
+  const hit = w.units.find((u) => u.id !== caster.id && u.hp > 0 && covers(u, x, y));
+  if (hit) return impact(w, s, caster, hit, false);
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return impact(w, s, caster, undefined, false);
+  const c = y * g.width + x;
+  if (g.cells[c] === TERRAIN_TREE) {
+    g.cells[c] = TERRAIN_OPEN;
+    return impact(w, s, caster, undefined, false);
+  }
+  if (g.cells[c] === TERRAIN_CLIFF) return impact(w, s, caster, undefined, false);
+  return false;
+}
+
+/** Whether a unit stands in (or a building covers) cell (x, y). */
+function covers(u: Unit, x: number, y: number): boolean {
+  const [ux, uy] = cellOfUnit(u);
+  return x >= ux && y >= uy && x < ux + u.size && y < uy + u.size;
+}
+
+/**
+ * The first update: the projectile starts at the hero's exact position, aimed at the target unit's
+ * cell or the tapped cell. Taps at or past the range move the aim: Fireball adds `range` cells beyond
+ * the tap (a game bug; past the left or top edge the byte wraps to the far side), Thunder Hammer scales
+ * the offset down to `range` (Manhattan). confirmed
+ */
+function launch(w: World, s: ActiveSpell, caster: Unit): void {
+  const g = w.grid!;
+  const def = w.spellDefs[s.spell]!;
+  const t = s.target ? findById(w.units, s.target) : undefined;
+  const [tx, ty] = t ? cellOfUnit(t) : [s.cx, s.cy];
+  const [hx, hy] = cellOfUnit(caster);
+  const dist = Math.abs(tx - hx) + Math.abs(ty - hy);
+  let ax = tx;
+  let ay = ty;
+  if (s.cls === C_FIREBALL ? dist >= def.range : dist > def.range) {
+    let px: number;
+    let py: number;
+    if (s.cls === C_FIREBALL) {
+      const [nx, ny] = normalize((tx - hx) * 4096, (ty - hy) * 4096);
+      px = tx * 4096 + fx12Mul(nx, def.range * 4096);
+      py = ty * 4096 + fx12Mul(ny, def.range * 4096);
+    } else {
+      const ratio = fxDivRound(def.range, dist);
+      px = hx * 4096 + fx12Mul((tx - hx) * 4096, ratio);
+      py = hy * 4096 + fx12Mul((ty - hy) * 4096, ratio);
+    }
+    ax = Math.min((px >> 12) & 0xff, g.width - 1);
+    ay = Math.min((py >> 12) & 0xff, g.height - 1);
+  }
+  s.cx = ax;
+  s.cy = ay;
+  // Our Q16.16 pixels -> the game's 20.12.
+  s.px = caster.x >> 4;
+  s.py = caster.y >> 4;
+  s.phase = 1;
+  // ThunderHammerEffect draws its starting angle from the game RNG (0x02021960).
+  if (s.cls === C_HAMMER) nextInt(w.rng, 8);
+}
+
+/** The flight is over: hit `u`, or nobody. `arrived` = reached the aim cell (a tree there is cleared). */
+function impact(w: World, s: ActiveSpell, caster: Unit, u: Unit | undefined, arrived: boolean): boolean {
+  const g = w.grid!;
+  const [x, y] = projCell(s);
+  if (arrived && x >= 0 && y >= 0 && x < g.width && y < g.height && g.cells[y * g.width + x] === TERRAIN_TREE) {
+    g.cells[y * g.width + x] = TERRAIN_OPEN; // likely: a global flag the skirmish had on
+  }
+  const fizzle = s.cls === C_HAMMER ? !!u : !!u && allied(w, u.owner, s.owner);
+  if (fizzle) {
+    s.phase = 3;
+    s.timer = 1; // guess: how long a fizzled spell lingers
+    return false;
+  }
+  const def = w.spellDefs[s.cls === C_HAMMER ? HAMMER_DAMAGE : FIREBALL_DAMAGE];
+  if (def) startSpell(w, caster, def, 'point', undefined, { x: (s.px << 4) as Fx, y: (s.py << 4) as Fx }, C_DAMAGE);
+  // The hammer's ring of six pictures draws six more angles.
+  if (s.cls === C_HAMMER) for (let i = 0; i < 6; i++) nextInt(w.rng, 8);
+  s.phase = 2;
+  s.timer = s.cls === C_HAMMER ? HAMMER_AFTER : FIREBALL_AFTER;
+  return false;
+}
+
+/** Where a flying Fireball or Thunder Hammer is (Fx pixels), for the client; null when none is in flight. */
+export function projectileAt(s: ActiveSpell): { x: Fx; y: Fx } | null {
+  return (s.cls === C_FIREBALL || s.cls === C_HAMMER) && s.phase === 1 ? { x: (s.px << 4) as Fx, y: (s.py << 4) as Fx } : null;
 }
 
 /** The spell is over: let go of its units (SpellBase dtor 0x0207ACE8), clear a tracking mark. */

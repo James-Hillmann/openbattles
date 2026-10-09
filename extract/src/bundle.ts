@@ -58,8 +58,9 @@ function mapGraphics(rom: UnpackedRom, name: string, tileset: string) {
 }
 
 /**
- * The ground again after trees were chopped: `terrain` is the live terrain grid; a start
- * tree whose cell is no longer a tree shows the ground under it, and the trees around it
+ * The ground again after trees were chopped or planted: `terrain` is the live terrain grid; a
+ * start tree whose cell is no longer a tree shows the ground under it, a planted tree gets its
+ * tree tile (only on ground that was open in the map), and the trees around it
  * pick their edge tiles anew (the game rewrites the map as a chop ends; that it re-picks
  * neighbours the same way bakeTrees does is likely).
  */
@@ -67,7 +68,8 @@ export function rebakeGround(rom: UnpackedRom, name: string, terrain: Uint8Array
   const parsed = parseMap(romFile(rom, `Maps/${name}.map`));
   const trees = romTreeTable(rom);
   if (!trees) throw new Error('no tree table for this game version');
-  const standing = parsed.trees.map((t, i) => (t && terrain[i] === TERRAIN_TREE ? 1 : 0));
+  // Every tree in the live grid: the map's own that still stand and any a forest spell planted.
+  const standing = parsed.trees.map((_, i) => (terrain[i] === TERRAIN_TREE ? 1 : 0));
   const map = { ...parsed, trees: standing, ...bakeTrees({ ...parsed, trees: standing }, trees) };
   const g = mapGraphics(rom, name, map.tileset);
   return renderMap(map, g.chars, g.pal, g.metatiles);
