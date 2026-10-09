@@ -11,6 +11,7 @@ import {
   cellCenterY,
   cellOf,
   createSkirmish,
+  createWorld,
   hashWorld,
   isWalkableCode,
   orderMove,
@@ -195,5 +196,22 @@ describe('terrain per unit type', () => {
     orderMove(w, flyer, 2 * 6 + 5);
     for (let t = 0; t < 400 && flyer.mv; t++) step(w, []);
     expect(cellOf(flyer.x, flyer.y)).toEqual([5, 2]);
+  });
+});
+
+describe('ships and diagonal land', () => {
+  it('slip through a one-cell diagonal line like the game does, but not a thick one', () => {
+    // Confirmed in DeSmuME with the King and a poked diagonal line of water (movement.md); ships use the same code with the masks swapped.
+    const sea = (thick: boolean) => grid(Array.from({ length: 12 }, (_, y) => Array.from({ length: 20 }, (_, x) => (x === y + 4 || (thick && x === y + 5) ? '.' : '~')).join('')));
+    for (const thick of [false, true]) {
+      const g = sea(thick);
+      const w = createWorld({ seed: 1, grid: g });
+      const ship = spawnUnit(w, 0, cellCenterX(3), cellCenterY(8), { moves: MOVES_WATER, speed: 400 });
+      orderMove(w, ship, 3 * g.width + 16);
+      for (let t = 0; t < 2000 && ship.mv; t++) step(w, []);
+      const crossed = cellOf(ship.x, ship.y)[0] > 9;
+      expect(crossed).toBe(!thick);
+      expect(g.cells[ship.cell]).toBe(3);
+    }
   });
 });
