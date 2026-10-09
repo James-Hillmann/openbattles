@@ -102,5 +102,11 @@ export function hashWorld(w: World): number {
     }
   }
   mix(w.rules ? w.rules.mode : -1);
+  // Spells: only when a hero is on the field or a spell is running, so other worlds keep their hashes.
+  if (w.spells.length > 0 || w.units.some((u) => u.maxCharge > 0)) {
+    for (const u of w.units) mix(u.charge);
+    mix(w.spells.length);
+    for (const s of w.spells) for (const v of [s.id, s.owner, s.spell, s.caster, s.target, s.x, s.y, s.start]) mix(v);
+  }
   return h >>> 0;
 }

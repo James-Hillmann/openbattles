@@ -5,12 +5,13 @@ import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
 import { NEVER, combatStep, findById, stepProjectiles } from './combat';
 import { stepBudget, stepToward } from './motion';
-import { OCC_LAYERS, type AttackStats, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type Unit, type World } from './state';
+import { OCC_LAYERS, type AttackStats, type EntityType, type GameRules, type MeleeBonusTable, type Player, type PlayerId, type SpellDef, type Unit, type World } from './state';
 import { MOVES_GROUND, cellOf, reachableFrom, spreadCells, type TerrainGrid, type TerrainMask } from './terrain';
 import { moveOnMap, orderMove, placeUnit, removeUnit } from './movement';
 import { checkBricks, onUnitLost } from './rules';
+import { orderCast, regenCharge, spellsStep } from './spells';
 import {
-  TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
+  ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, orderBuild, orderConstruct, orderHarvest, orderTrain,
   type SpawnFn,
 } from './economy';
 
@@ -25,13 +26,15 @@ export interface WorldInit {
   types?: (EntityType | undefined)[];
   /** Mine sites from the map's MINE section (cells, y * width + x). */
   mineSites?: number[];
+  /** The ROM's spell table; without it heroes can't cast. */
+  spellDefs?: SpellDef[];
 }
 
-export function createWorld({ seed, grid = null, bonus = null, players = [], rules = null, types = [], mineSites = [] }: WorldInit): World {
+export function createWorld({ seed, grid = null, bonus = null, players = [], rules = null, types = [], mineSites = [], spellDefs = [] }: WorldInit): World {
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
     tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
-    mineSites: [...mineSites],
+    mineSites: [...mineSites], spellDefs, spells: [],
   };
 }
 
@@ -52,6 +55,9 @@ export interface UnitType {
   /** Economy fields; see EntityType. Defaults make a finished 1x1 unit. */
   size?: number;
   buildTime?: number;
+  /** Heroes: most charge (entity +0x64) and spell ids. Others leave these out. */
+  charge?: number;
+  spells?: number[];
 }
 
 /** Entities.ebp speed of a building (+0x0C = 0xFFFF): it never moves, so the sim stores 0. */
@@ -102,6 +108,10 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     queue: [],
     prod: 0,
     payout: 0,
+    // Only heroes carry charge; buildings hold 0xFFFF and units 0 in the table.
+    maxCharge: type.role === ROLE_HERO ? type.charge ?? 0 : 0,
+    charge: type.role === ROLE_HERO ? type.charge ?? 0 : 0,
+    spells: type.role === ROLE_HERO ? [...(type.spells ?? [])] : [],
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
@@ -175,6 +185,9 @@ function applyCommand(w: World, player: PlayerId, cmd: Command): void {
     case 'train':
       orderTrain(w, player, cmd.building, cmd.type);
       break;
+    case 'cast':
+      orderCast(w, player, cmd);
+      break;
   }
 }
 
@@ -220,8 +233,12 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
     if (c.tick !== w.tick) throw new Error(`command for tick ${c.tick} applied on ${w.tick}`);
     applyCommand(w, c.player, c.cmd);
   }
-  for (const u of w.units) combatStep(w, u);
+  for (const u of w.units) {
+    regenCharge(u);
+    combatStep(w, u);
+  }
   stepProjectiles(w);
+  spellsStep(w);
   for (const u of w.units) {
     if (u.hp === 0) continue;
     if (w.grid) moveOnMap(w, u);
@@ -244,11 +261,12 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue] })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells] })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],
     projectiles: w.projectiles.map((p) => ({ ...p })),
+    spells: w.spells.map((s) => ({ ...s })),
     players: w.players.map((p) => ({ ...p })),
   };
 }

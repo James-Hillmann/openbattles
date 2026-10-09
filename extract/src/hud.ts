@@ -163,8 +163,11 @@ export interface TopScreenState {
   /** The selected entity, if any: index into `labels`, and its current HP. */
   selected?: { entity: number; hp: number };
   minimap?: MinimapState;
-  /** While the build/train strip is open: the panel title ("Build Costs") and what the strip offers. Replaces the minimap. */
-  costs?: { title: string; items: { icon: Rgba; cost: number }[] };
+  /**
+   * While the build/train strip is open: the panel title ("Build Costs") and what the strip offers. Replaces the minimap.
+   * The hero's spell strip shows "Magic Costs" the same way, plus the hero's charge and most charge.
+   */
+  costs?: { title: string; items: { icon: Rgba; cost: number }[]; charge?: [number, number] };
 }
 
 /** Minimap contents, all in minimap pixels (map px * 1.5 / cell size, i.e. x / 16, y * 3 / 32). */
@@ -263,7 +266,14 @@ function drawMinimap(out: Rgba, m: MinimapState): void {
  */
 export const COST_PANEL = { x: 136, y: 40, w: 104, h: 128, iconX: 144, iconY: 40, step: 32, cols: 3, rgb: [40, 32, 48] } as const;
 
-function drawCosts(out: Rgba, hud: HudBundle, items: readonly { icon: Rgba; cost: number }[]): void {
+/**
+ * "Magic Costs" (hero selected, spell strip open): the hero's charge as "now/most" on the panel's
+ * bottom text row, centred on x 184 on the 8 px grid like the HP. confirmed in the emulator with
+ * 1000/1000 (x 144), 901/1000 and 96/1000 (x 152), y 128.
+ */
+export const CHARGE_TEXT = { centerX: 184, y: 128 } as const;
+
+function drawCosts(out: Rgba, hud: HudBundle, items: readonly { icon: Rgba; cost: number }[], charge?: [number, number]): void {
   const P = COST_PANEL;
   for (let y = P.y; y < P.y + P.h; y++)
     for (let x = P.x; x < P.x + P.w; x++) out.data.set([P.rgb[0], P.rgb[1], P.rgb[2], 255], (y * TOP_W + x) * 4);
@@ -275,6 +285,10 @@ function drawCosts(out: Rgba, hud: HudBundle, items: readonly { icon: Rgba; cost
     const text = String(it.cost);
     drawDigits(out, hud, text, Math.floor((x + 12 - text.length * 4) / 8) * 8, y + 24);
   });
+  if (charge) {
+    const text = `${charge[0]}/${charge[1]}`;
+    drawDigits(out, hud, text, Math.floor(CHARGE_TEXT.centerX / 8 - text.length / 2) * 8, CHARGE_TEXT.y);
+  }
 }
 
 /** Name text color: sub BG palette bank 0 color 14 (white 0x7FFF). */
@@ -290,7 +304,7 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
   drawDigits(out, hud, String(s.bricks), L.counters.bricks, L.counters.y);
   drawDigits(out, hud, `${s.minifigs}/${s.minifigCap}`, L.counters.minifigs, L.counters.y);
   drawDigits(out, hud, `${s.star[0]}/${s.star[1]}`, L.counters.star, L.counters.y);
-  if (s.costs) drawCosts(out, hud, s.costs.items);
+  if (s.costs) drawCosts(out, hud, s.costs.items, s.costs.charge);
   else if (s.minimap) drawMinimap(out, s.minimap);
   const label = s.selected ? hud.labels[s.selected.entity] : undefined;
   if (s.selected && label) {

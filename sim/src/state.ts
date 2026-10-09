@@ -67,6 +67,13 @@ export interface Unit {
   prod: number;
   /** Mines: ticks until the next payout. */
   payout: number;
+  // Hero spells (sim/src/spells.ts, docs/re-notes/spells.md).
+  /** Magic charge (game: unit +0x1A2): spells cost from it; refills one point a tick. 0 for non-heroes. */
+  charge: number;
+  /** Most charge (entity +0x64): 1000 for heroes, 0 for everything else. Static per unit type. */
+  maxCharge: number;
+  /** Spell ids this hero can cast, in strip order (entity +0x72..+0x76). Static per unit type. */
+  spells: number[];
 }
 
 /** What a builder is doing. Cells are y * width + x. */
@@ -100,6 +107,9 @@ export interface EntityType {
   moves?: TerrainMask;
   layer?: number;
   sight?: number;
+  /** Heroes: most charge and spell ids (see Unit). */
+  charge?: number;
+  spells?: number[];
 }
 
 /**
@@ -199,6 +209,45 @@ export interface World {
   types: (EntityType | undefined)[];
   /** Map cells (y * width + x) where a Mine may stand: the top-left of its footprint. Static map data. */
   mineSites: number[];
+  /** The game's spell table by spell id (ARM9). Static game data, not hashed; empty without a ROM. */
+  spellDefs: SpellDef[];
+  /** Spells being cast or still running, sorted by id like units. */
+  spells: ActiveSpell[];
+}
+
+/**
+ * One record of the game's spell table (ARM9 0x02126CB0 in C5SE); same shape as extract's SpellDef.
+ * Field meanings: docs/re-notes/spells.md.
+ */
+export interface SpellDef {
+  id: number;
+  icon: number;
+  params: [number, number, number, number];
+  /** Cast range in cells: squared cell distance from the hero to the target <= range^2. */
+  range: number;
+  b7: number;
+  flags: number;
+  /** Charge spent; the hero needs strictly more than this. */
+  cost: number;
+  category: number;
+  time: number;
+}
+
+/** A spell in flight or in effect (game: a SpellBase in the SpellPool). */
+export interface ActiveSpell {
+  id: EntityId;
+  owner: PlayerId;
+  /** Spell id (SpellDef.id). */
+  spell: number;
+  /** The hero who cast it. */
+  caster: EntityId;
+  /** Target unit, or 0. */
+  target: EntityId;
+  /** Target point (Fx pixels): the target unit's or the tapped spot. */
+  x: Fx;
+  y: Fx;
+  /** Tick it was cast. */
+  start: number;
 }
 
 /** The game's occupancy layers (OccupationGrid): ground, air, bridges. */
