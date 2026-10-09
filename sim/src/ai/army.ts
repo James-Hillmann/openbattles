@@ -183,6 +183,10 @@ function stepSquad(c: Ctx, s: AiSquad): void {
           issueMove(c, us.map((u) => u.id), t.cell, 2);
         }
       } else if (s.timer >= 2 * GATHER_STEPS) setState(s, 1);
+      // Every 16 steps the gathered units spread out toward the goal (Squad_scatterAround from the gather
+      // state; this is how the game sent a lone swordsman to the enemy base). Which of regroup and scatter
+      // it picks is not traced; scatter is what the emulator showed. likely
+      else if (s.timer % 16 === 0 && us.length) scatter(c, us.filter((u) => u.target === null), t.cell, GROUP_RADIUS, 2);
       break;
     case 4: // hero idle
       heroIdle(c, s, us);
