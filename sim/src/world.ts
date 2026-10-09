@@ -13,6 +13,7 @@ import { checkBricks, onUnitLost } from './rules';
 import { pickupsStep } from './pickups';
 import { countBuilt, countDeath } from './stats';
 import { orderRepair, orderUpgrade } from './structures';
+import { isCarried, orderLoad, orderUnload, transportDeaths, transportStep } from './transport';
 import { BUFF_SLOTS, isFrozen, moveSpeed, orderCast, refreshBoost, regenCharge, spellsStep, startAura } from './spells';
 import {
   ROLE_BRIDGE, ROLE_HERO, TERRAIN_BUILDING, cellPos, clearFootprint, economyStep, isBuilding, isInside, orderBuild, orderCancel, orderConstruct, orderHarvest, orderTrain,
@@ -137,6 +138,9 @@ export function spawnUnit(w: World, owner: PlayerId, x: Fx, y: Fx, type: UnitTyp
     since: w.tick,
     back: 0,
     rally: -1,
+    carrier: 0,
+    cargo: [],
+    board: null,
   };
   w.units.push(u); // ids are monotonic, so push keeps the array sorted
   if (u.size === 1) placeUnit(w, u); // bigger buildings block their footprint in the grid instead
@@ -181,6 +185,8 @@ const isInsideId = (w: World, id: number): boolean => {
 function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
   // Builders inside a building can't be given orders (they're off the map until they come out).
   const cmd = 'unitIds' in cmd0 ? { ...cmd0, unitIds: cmd0.unitIds.filter((id) => !isInsideId(w, id)) } : cmd0;
+  // Any new order replaces walking to a transport (load sets it again).
+  if ('unitIds' in cmd) for (const u of w.units) if (u.board && u.owner === player && cmd.unitIds.includes(u.id)) u.board = null;
   switch (cmd.kind) {
     case 'move': {
       const units = w.units.filter((u) => u.owner === player && u.speed > 0 && cmd.unitIds.includes(u.id));
@@ -248,8 +254,17 @@ function applyCommand(w: World, player: PlayerId, cmd0: Command): void {
     case 'cancel':
       orderCancel(w, player, cmd.building, cmd.index);
       break;
-    case 'cast':
-      orderCast(w, player, cmd);
+    case 'cast': {
+      // A hero riding in a transport can't cast.
+      const c = findById(w.units, cmd.caster);
+      if (c && !isCarried(c)) orderCast(w, player, cmd);
+      break;
+    }
+    case 'load':
+      orderLoad(w, player, cmd.unitIds, cmd.transport);
+      break;
+    case 'unload':
+      orderUnload(w, player, cmd.transports);
       break;
     case 'stop':
       orderStop(w, player, cmd.unitIds);
@@ -324,8 +339,10 @@ export function step(w: World, cmds: readonly ScheduledCommand[]): void {
   }
   pickupsStep(w);
   if (w.types.length > 0) economyStep(w, spawnInCell, placeBuilding);
+  transportStep(w);
   // A bridge going down takes the ground units on it with it, so they die this tick too.
   if (w.grid) for (const b of w.units) if (b.hp === 0 && b.role === ROLE_BRIDGE) collapseBridge(w, b);
+  transportDeaths(w);
   const dead = w.units.filter((u) => u.hp === 0);
   for (const u of dead) {
     removeUnit(w, u);
@@ -346,7 +363,7 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
-    units: w.units.map((u) => ({ ...u, path: [...u.path], route: [...u.route], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs] })),
+    units: w.units.map((u) => ({ ...u, path: [...u.path], route: [...u.route], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs], cargo: [...u.cargo], board: u.board && { ...u.board } })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },
     mineSites: [...w.mineSites],

@@ -9,8 +9,8 @@ import { orderMove, stopMove } from './movement';
 import { damageTaken, meleeDamage } from './spells';
 import { RETURN_WAIT, STANCE_MOVE, STANCE_STAND, holdHere, leashCentre, stanceStep } from './orders';
 
-/** A Builder inside a building is off the map: it can't fight or be hit (economy.ts `isInside`). */
-const isInside = (u: Unit): boolean => u.job?.kind === 'inside';
+/** A Builder inside a building or a unit in a transport is off the map: it can't fight or be hit (economy.ts `isInside`). */
+const isInside = (u: Unit): boolean => u.job?.kind === 'inside' || u.carrier !== 0;
 
 /** lastAttack value for a unit that has never attacked. */
 export const NEVER = -0x40000000;
@@ -266,6 +266,8 @@ const scanTick = (w: World, u: Unit): boolean => (w.tick - u.since) % SCAN_PERIO
  * against +0x19C). The scan clock starts with the unit's current stance (orders.ts).
  */
 export function combatStep(w: World, u: Unit): void {
+  // Walking to a transport replaces the unit's combat command (GarrisonEntityCommand), and a rider is off the map.
+  if (u.board || u.carrier !== 0) return;
   stanceStep(w, u);
   if (!u.attack || u.hp === 0 || isInside(u)) return;
   let t = u.target === null ? undefined : findById(w.units, u.target);

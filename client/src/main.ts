@@ -37,6 +37,9 @@ import {
   TERRAIN_TREE,
   ROLE_BUILDER,
   ROLE_HERO,
+  ROLE_TRANSPORT,
+  capacity,
+  cargoClass,
   ROLE_SHIPYARD,
   QUEUE_MAX,
   isTower,
@@ -501,6 +504,15 @@ app.canvas.addEventListener('contextmenu', (e) => {
     match.issue({ kind: 'construct', unitIds: builders, site: target.id });
     return;
   }
+  // Units sent to one of our transports walk over and get on (tip 1031: select units, then touch a Transport).
+  if (target && target.owner === localPlayer && isTransport(target)) {
+    const riders = unitIds.filter((id) => id !== target.id);
+    if (riders.length) {
+      match.issue({ kind: 'load', unitIds: riders, transport: target.id });
+      tapMark('load', px, py);
+      return;
+    }
+  }
   // Builders and heroes sent to one of our damaged buildings repair it (the game: touch it with a Builder
   // selected; heroes have the same Repair button). docs/re-notes/structures.md
   const fixers = sel.filter((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO).map((u) => u.id);
@@ -833,6 +845,8 @@ function updateStrip() {
       st.role >= 1 && st.role <= 5 ? popUsed(world, localPlayer) < popCap(world, localPlayer) : st.role === 6 ? starsUsed(world, localPlayer) < starCap(world, localPlayer) : true;
     return bar.show(orderHint(), list.map((st) => ({ ...item(st, 'train'), ...(room(st) ? {} : { enabled: false }) })), queue, 'build', acts);
   }
+  const ship = sel.find(isTransport);
+  if (ship) return showCargo(ship, acts);
   const hero = sel.find((u) => u.maxCharge > 0 && u.spells.length > 0);
   if (hero && !sel.some((u) => u.role === ROLE_BUILDER)) return showSpells(hero, acts);
   if (!sel.some((u) => u.role === ROLE_BUILDER)) return bar.show(orderHint(), [], [], 'build', acts);
@@ -881,6 +895,26 @@ function showUpgrade(b: Unit, item: (st: UnitStats, verb: string) => CommandItem
     costActions = [{ key: it.key, label: it.label, enabled: it.enabled }];
   }
   bar.show('', [it], queue);
+}
+
+/**
+ * A selected transport (docs/re-notes/transports.md): Unload on the Actions strip, and its riders where the
+ * game's top screen has 4 round slots for minifigures and 2 star slots for specials. Riding units can't be
+ * picked on the map, so this is the only place they show.
+ */
+function showCargo(ship: Unit, acts: CommandItem[]) {
+  const riders = ship.cargo.map((id) => world.units.find((u) => u.id === id)).filter((u): u is Unit => !!u);
+  const figs = riders.filter((u) => cargoClass(u) <= 3);
+  const specials = riders.filter((u) => cargoClass(u) > 3);
+  const slots = (us: Unit[], n: number, star: boolean) =>
+    Array.from({ length: n }, (_, i) => {
+      const u = us[i];
+      const name = u ? nameByIndex.get(u.kind) ?? '' : '';
+      return { icon: u ? iconFor(name) : null, used: !!u, name: u ? `${u.id}:${displayName(name)}` : '', cancel: false, star };
+    });
+  const queue = [...slots(figs, capacity(ship, 0), false), ...slots(specials, capacity(ship, 4), true)];
+  const hint = orderHint() || feText(FE_TEXT.transportRoom, 'Transports can hold 4 Minifigures and 2 Specials.');
+  bar.show(hint, [], queue, 'build', acts);
 }
 
 /**
@@ -1000,14 +1034,17 @@ function tryCast(px: number, py: number): boolean {
 
 // --- Actions strip: Attack, Stand Ground, Patrol, Move, Stop, Set Rally Point (docs/re-notes/orders.md) ---
 
-type ActionKey = 'attack' | 'repair' | 'stand' | 'patrol' | 'move' | 'stop' | 'rally';
-/** Strip label for each order (the game's own: lang 305, 314, 306, 307, 309, 315). */
+type ActionKey = 'attack' | 'repair' | 'stand' | 'patrol' | 'move' | 'load' | 'unload' | 'stop' | 'rally';
+/** Strip label for each order (the game's own: lang 305, 314, 306, 307, 311, 312, 309, 315). */
 const ACTION_LABEL: Record<ActionKey, string> = {
-  attack: 'Attack', repair: 'Repair', stand: 'Stand Ground', patrol: 'Patrol', move: 'Move', stop: 'Stop', rally: 'Set Rally Point',
+  attack: 'Attack', repair: 'Repair', stand: 'Stand Ground', patrol: 'Patrol', move: 'Move', load: 'Load', unload: 'Unload', stop: 'Stop', rally: 'Set Rally Point',
 };
 
 /** An order picked from the strip, waiting for its spot (Patrol takes two: A then B). */
-let ordering: { act: 'attack' | 'repair' | 'patrol' | 'move' | 'rally'; a?: { cx: number; cy: number } } | null = null;
+let ordering: { act: 'attack' | 'repair' | 'patrol' | 'move' | 'load' | 'rally'; a?: { cx: number; cy: number } } | null = null;
+
+const isTransport = (u: Unit) => u.role === ROLE_TRANSPORT && !isBuilding(u);
+const feText = (id: number, en: string) => armyBundle?.text[id] || en;
 
 const actionIconCache = new Map<ActionIcon, HTMLCanvasElement>();
 function actionIcon(name: ActionIcon): HTMLCanvasElement | null {
@@ -1035,7 +1072,9 @@ function actionItems(sel: Unit[]): CommandItem[] {
         ...(sel.some((u) => u.attack) ? (['attack'] as const) : []),
         ...(sel.some((u) => u.role === ROLE_BUILDER || u.role === ROLE_HERO) ? (['repair'] as const) : []),
         ...(sel.some((u) => u.attack) ? (['stand'] as const) : []),
-        ...(['patrol', 'move', 'stop'] as const),
+        // The fifth button is Load (stairs) for units and Unload for a transport (docs/re-notes/transports.md).
+        // The transport's own Load (sail over and pick units up) isn't in yet.
+        ...(sel.every(isTransport) ? (['patrol', 'unload', 'stop'] as const) : (['patrol', 'load', 'stop'] as const)),
       ];
   return keys.map((k) => ({
     key: `act:${k}`,
@@ -1060,6 +1099,11 @@ function pickAction(k: ActionKey) {
     ordering = null;
     return match.issue({ kind: 'stand', unitIds });
   }
+  if (k === 'unload') {
+    ordering = null;
+    const transports = sel.filter(isTransport).map((u) => u.id);
+    return transports.length ? match.issue({ kind: 'unload', transports }) : undefined;
+  }
   ordering = ordering?.act === k ? null : { act: k };
 }
 
@@ -1070,6 +1114,8 @@ function orderHint(): string {
     repair: 'Pick one of your damaged buildings.',
     move: 'Pick where to move.',
     rally: 'Pick the rally point.',
+    // The game's tip (lang 1031) says "select units then touch on a Transport".
+    load: 'Pick one of your Transports.',
     patrol: ordering.a ? 'Pick the second patrol point.' : 'Pick the first patrol point.',
   }[ordering.act];
   return `${what} Right-click cancels.`;
@@ -1099,6 +1145,13 @@ function tryOrder(px: number, py: number): boolean {
     if (!target || target.owner === localPlayer) return true; // keep waiting for an enemy
     match.issue({ kind: 'attack', unitIds, target: target.id });
     tapMark('attack', px, py);
+  } else if (ordering.act === 'load') {
+    const hit = selection.pick(drawn, px, py);
+    const target = hit && world.units.find((u) => u.id === hit.id);
+    if (!target || target.owner !== localPlayer || !isTransport(target)) return true; // keep waiting for a transport
+    const riders = unitIds.filter((id) => id !== target.id);
+    if (riders.length) match.issue({ kind: 'load', unitIds: riders, transport: target.id });
+    tapMark('load', px, py);
   } else if (ordering.act === 'repair') {
     const hit = selection.pick(drawn, px, py);
     const target = hit && world.units.find((u) => u.id === hit.id);
@@ -1400,6 +1453,9 @@ app.ticker.add((t) => {
   }
   drawSpellAreas();
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
+  // A selected unit that just got on a transport hands the selection to the transport. likely (emulator: the
+  // King's boarding left the ship selected), see docs/re-notes/transports.md
+  for (const u of world.units) if (u.carrier !== 0 && selection.ids.has(u.id)) selection.ids.add(u.carrier);
   selection.prune((id) => world.units.some((u) => u.id === id && !isInside(u)));
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
