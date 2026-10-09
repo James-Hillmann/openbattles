@@ -1,11 +1,13 @@
 import { ARMY_SLOT_TEXT, armyChoices, defaultArmies, parseArmies, readIconTable, stripIcon, type Army } from './armies';
-import { romFile, tryRomFile } from './bundle';
+import { listMaps, romFile, tryRomFile } from './bundle';
 import { parseEntityRecords, unitStats, type EntityRecord, type UnitStats } from './entities';
 import { entityLabels, parseLang } from './lang';
 import { decodeCells, decodeChars, decodePalette, type CharData } from './nitro';
 import { renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
 import { listUnlockables } from './unlocks';
+import { mapTitleId, minimapPalettes, renderMapPreview } from './minimap';
+import { parseMap } from './map';
 
 /**
  * Everything the army select screen and the in-game build/train strip draw, read from the
@@ -24,6 +26,8 @@ export interface ArmyBundle {
   text: Record<number, string>;
   /** Per entity on the screen: display name and the four stats the top screen shows. */
   units: Record<string, ArmyUnitInfo>;
+  /** Skirmish maps (mp01..) with their name and the map picker's preview picture. */
+  maps: Record<string, { title: string; preview?: Rgba }>;
   /** 24x24 army screen heads (UI/MiniHeads) by entity name. */
   heads: Record<string, Rgba>;
   /** 24x24 build/train strip icons (UI/MiniHeadsGame) by entity name, for every unit and building with an icon. */
@@ -156,7 +160,15 @@ export function buildArmyBundle(rom: UnpackedRom, language = 'American_English')
   }
   const text: Record<number, string> = {};
   for (const id of Object.values(FE_TEXT)) text[id] = lang[id] ?? '';
-  return { armies, prefixes, choices, slotLabels: ARMY_SLOT_TEXT.map((id) => lang[id] ?? ''), text, units, heads, stripIcons, cards };
+  const maps: ArmyBundle['maps'] = {};
+  const miniPals = minimapPalettes(rom);
+  for (const m of listMaps(rom)) {
+    const id = mapTitleId(m);
+    if (id === undefined) continue;
+    const pal = miniPals?.[parseMap(romFile(rom, `Maps/${m}.map`)).tileset];
+    maps[m] = { title: lang[id] || m, preview: pal && renderMapPreview(rom, m, pal) };
+  }
+  return { armies, prefixes, choices, slotLabels: ARMY_SLOT_TEXT.map((id) => lang[id] ?? ''), text, units, maps, heads, stripIcons, cards };
 }
 
 

@@ -73,10 +73,27 @@ A dark panel (40,32,48) at x 136-239, y 40-167 replaces the minimap; title "Buil
 each in the HUD digit font, snapped to the 8 px grid: x = floor((x + 12 − len·4) ÷ 8)·8, y + 24.
 confirmed (emulator, Builder and Castle). Code: `drawCosts` in `extract/src/hud.ts`.
 
+## Map select
+
+Single Player → Free Play opens the map picker: the map's minimap in a blue frame, its name on a
+bar underneath, arrows either side, Continue. confirmed (emulator)
+
+- The picture is `<map>mini.NCGR` (the minimap with trees baked in, 1.5 px per cell, 96x96 for
+  every skirmish map) drawn 1:1 at bottom-screen (80,15). confirmed (pixel-exact on mp01, mp02, mp03, mp23)
+- Its colours depend on the map's tileset: ARM9 `C5SE` 0x0212799C holds three 16-colour palettes,
+  King, Pirate, Mars, in that order. Colours 1-7 of the King one equal `LS_Maps` bank 9, which is
+  how we find the table. confirmed (mp01 King, mp02 Mars, mp03 and mp23 Pirate)
+- Names: mpNN is LOC string 1241 + 2·(NN − 1) ("The Pond" … "Ruthless"); the strings between are
+  placeholder "Multiplayer Mission NN (Mission Description)" text. likely (mp01, mp02, mp03, mp23 seen)
+- The Free Play list in our save had 23 maps: left from The Pond goes to Lost Lagoon (mp23). Whether
+  mp24-mp30 are locked or multiplayer-only isn't traced; we offer all 30.
+- The in-game HUD minimap (`renderMinimap`) still always uses `LS_Maps` bank 9; it probably needs the
+  tileset palette too on Pirate and Mars maps. guess, not checked in game.
+
 ## Emulator recipes
 
 - Profile → main menu: `w1200 t128,96 w300 t210,170 w120 t35,92 t35,92 t210,165 w300`.
-- Single Player (88,62), Free Play (175,90) twice, Continue (215,165) twice → army screen.
+- Single Player (88,62), Free Play (175,90) twice → map select (arrows (48,135) / (208,135)); Continue (215,165) twice → army screen.
 - Unlock everything: find `FF FF 50 00 … 00 FD 03` in RAM and write 37 × 0xFF at each hit.
 
 ## Ours
