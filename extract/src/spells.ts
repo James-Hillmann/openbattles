@@ -59,8 +59,8 @@ export function readSpellTable(arm9: Uint8Array, ramAddress: number, gameCode: s
 
 /**
  * Where each spell icon sits in the strip texture UI/AllInOne/UI_MainCastle (256x256): the spell
- * strip's buttons in UI/Game/UIMgrData.bin, in order, are the 24x24 image elements drawn in palette
- * bank 9 (element bytes 00 01 01 09, then x, y, w, h as u16). Button n (1-based) is icon n: the strip
+ * strip's buttons in UI/Game/UIMgrData.bin, in order, are the 24x24 image elements (marker u16s
+ * 0x0100 0x0901 0 0, then x, y, w, h as u16). Button n (1-based) is icon n: the strip
  * code (0x020DC062) shows the button numbered by the record's +0x01.
  * likely: the King's four icons (3, 7, 8, 11) match the emulator; the element format is not traced.
  */
