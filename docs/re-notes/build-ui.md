@@ -53,6 +53,8 @@ construction: see "Construction effect" below.
 - The strip opens as soon as a Builder or a finished production building is selected (no tab tap),
   at the game's spot (DS y 32, shown at 2x): a red band from the left edge that ends after the last
   icon, unaffordable icons checkered. The prices are on the top screen's Build Costs panel (armies.md).
+- Not in the game: each icon also has its price on a dark row under it, in the status-bar digit font
+  (`priceLabel`), because players asked for it.
 - Icons come from the ARM9 icon table (armies.md); a unit with no strip icon shows its head.
 - Placement: click a spot (green = `canPlace`), right-click or Escape cancels. No check mark.
 - Right-click a tree with Builders: harvest. Right-click your unfinished building: help build it.

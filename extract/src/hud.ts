@@ -188,6 +188,37 @@ function draw(out: Rgba, img: Rgba, px: number, py: number): void {
   }
 }
 
+/**
+ * A number in the status-bar digit font, packed tight (each glyph cropped to its own columns, 1 px
+ * apart) so four digits fit under a 24 px strip icon. Ours: the game only prints prices on the top
+ * screen's Build Costs panel, on its 8 px grid.
+ */
+export function priceLabel(hud: HudBundle, n: number): Rgba {
+  const cols = (g: Rgba) => {
+    let lo = g.width;
+    let hi = -1;
+    for (let y = 0; y < g.height; y++) {
+      for (let x = 0; x < g.width; x++) {
+        if (!g.data[(y * g.width + x) * 4 + 3]) continue;
+        lo = Math.min(lo, x);
+        hi = Math.max(hi, x);
+      }
+    }
+    return hi < 0 ? [0, -1] : [lo, hi];
+  };
+  const glyphs = [...String(n)].map((c) => hud.glyphs[c]).filter((g): g is Rgba => !!g);
+  const spans = glyphs.map(cols);
+  const width = Math.max(1, spans.reduce((w, [lo, hi]) => w + hi! - lo! + 2, -1));
+  const out = blank(width, 8);
+  let x = 0;
+  glyphs.forEach((g, i) => {
+    const [lo, hi] = spans[i]!;
+    draw(out, g, x - lo!, 0);
+    x += hi! - lo! + 2;
+  });
+  return out;
+}
+
 function drawDigits(out: Rgba, hud: HudBundle, text: string, x: number, y: number): void {
   for (const c of text) {
     const g = hud.glyphs[c];

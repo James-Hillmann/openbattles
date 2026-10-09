@@ -44,7 +44,7 @@ import {
   type TerrainGrid,
   type World,
 } from '@lbw/sim';
-import { FE_TEXT, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { FE_TEXT, priceLabel, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, drawUnitBars } from './hud';
 import { animate, attack, facing, type AnimState } from './unitAnim';
 import { ModelView, type ModelClipName } from './modelView';
@@ -295,6 +295,8 @@ const MINIMAP_DOT: [number, number, number][] = [[255, 82, 0], [0, 82, 255]];
 function onMap(b: MapBundle, hud: HudBundle) {
   ground.texture = textureFrom(b.ground);
   hudView.setBundle(hud);
+  hudBundle = hud;
+  priceCanvases.clear();
   siteFx = hud.particles ? new SiteFx(hud.particles) : null;
   minimap = b.minimap;
   combatBonus = b.combatBonus;
@@ -630,6 +632,16 @@ function iconFor(name: string): HTMLCanvasElement | null {
 
 const displayName = (name: string) => hudView.label(name)?.display ?? name.replace(/^._/, '');
 
+let hudBundle: HudBundle | null = null;
+const priceCanvases = new Map<number, HTMLCanvasElement>();
+/** A price in the game's digit font for the strip, or null before a ROM's HUD is loaded. */
+function priceCanvas(cost: number): HTMLCanvasElement | null {
+  if (!hudBundle) return null;
+  let c = priceCanvases.get(cost);
+  if (!c) priceCanvases.set(cost, (c = canvasOf(priceLabel(hudBundle, cost))));
+  return c;
+}
+
 /** What the top screen's "Build Costs" panel shows while the strip is open, or null. */
 let stripCosts: { title: string; items: { icon: Rgba; cost: number }[] } | null = null;
 
@@ -642,6 +654,7 @@ function updateStrip() {
     key: `${verb}:${st.index}`,
     label: `${displayName(st.name)}: ${st.cost} bricks`,
     cost: st.cost,
+    price: priceCanvas(st.cost),
     icon: iconFor(st.name),
     enabled: me.bricks >= st.cost,
   });

@@ -13,6 +13,8 @@ export interface CommandItem {
   label: string;
   cost: number;
   icon: HTMLCanvasElement | null;
+  /** The price in the game's digit font (priceLabel), drawn under the icon; text if missing. */
+  price?: HTMLCanvasElement | null;
   /** False when the player can't afford it or has no room for it. */
   enabled: boolean;
 }
@@ -26,6 +28,11 @@ export interface QueueItem {
 /** DS layout, in DS pixels: band at y 32, 24 px icons with a 1 px dark rule between them. Shown at 2x. */
 const SCALE = 2;
 const ICON = 24;
+/**
+ * Ours, asked for by players: each icon's price on a dark row under it, in the game's digit font and the
+ * Build Costs panel's colour. The DS only lists prices on the top screen (kept too).
+ */
+const PRICE_H = 9;
 
 export class CommandBar {
   readonly el = document.createElement('div');
@@ -39,19 +46,22 @@ export class CommandBar {
     css.textContent = `
       .cmdbar { position: absolute; left: 0; right: 0; top: ${32 * SCALE}px; user-select: none; pointer-events: none; font: bold 13px 'Trebuchet MS', sans-serif; color: #fff; }
       .cmdbar[hidden] { display: none; }
-      .cmdbar .band { display: flex; width: max-content; max-width: 100%; height: ${ICON * SCALE}px; background: #e82010; border-top: 2px solid #ff8070; border-bottom: 2px solid #600; pointer-events: auto; box-shadow: 0 3px 0 #0006; }
+      .cmdbar .band { display: flex; width: max-content; max-width: 100%; height: ${(ICON + PRICE_H) * SCALE}px; background: #e82010; border-top: 2px solid #ff8070; border-bottom: 2px solid #600; pointer-events: auto; box-shadow: 0 3px 0 #0006; }
       .cmdbar .band::before { content: ''; width: ${8 * SCALE}px; background: #c00; border-right: 2px solid #600; }
       /* The band stops after the last icon with a short end cap, as on the DS. */
       .cmdbar .band::after { content: ''; width: ${8 * SCALE}px; background: linear-gradient(90deg, #e82010 40%, #ff8070 40% 60%, #c00 60%); }
-      .cmdbar button { position: relative; width: ${ICON * SCALE}px; height: ${ICON * SCALE}px; padding: 0; margin: 0; border: 0; border-right: 2px solid #600;
-        background: #e82010; cursor: pointer; }
+      .cmdbar button { position: relative; width: ${ICON * SCALE}px; height: ${(ICON + PRICE_H) * SCALE}px; padding: 0; margin: 0; border: 0; border-right: 2px solid #600;
+        background: #e82010; cursor: pointer; display: flex; flex-direction: column; }
+      .cmdbar .price { height: ${PRICE_H * SCALE}px; display: flex; align-items: center; justify-content: center; background: rgb(40,32,48); border-top: 2px solid #600; box-sizing: border-box;
+        font: bold 12px monospace; color: #fff; }
+      .cmdbar .price canvas { width: auto; height: ${8 * SCALE}px; }
       .cmdbar button:hover:not(:disabled) { filter: brightness(1.25); }
       .cmdbar button:disabled { cursor: default; }
       /* The game checkers an icon you can't afford; we lay a 2 px checkerboard over it. */
-      .cmdbar button:disabled::after { content: ''; position: absolute; inset: 0;
+      .cmdbar button:disabled::after { content: ''; position: absolute; inset: 0 0 ${PRICE_H * SCALE}px 0;
         background: repeating-conic-gradient(#600 0 25%, transparent 0 50%) 0 0 / ${2 * SCALE}px ${2 * SCALE}px; opacity: 0.8; }
-      .cmdbar button canvas { width: ${ICON * SCALE}px; height: ${ICON * SCALE}px; display: block; }
-      .cmdbar button .name { display: flex; height: 100%; align-items: center; justify-content: center; font-size: 10px; line-height: 1; padding: 2px; }
+      .cmdbar button > canvas { width: ${ICON * SCALE}px; height: ${ICON * SCALE}px; display: block; flex: none; }
+      .cmdbar button .name { display: flex; height: ${ICON * SCALE}px; align-items: center; justify-content: center; font-size: 10px; line-height: 1; padding: 2px; }
       .cmdbar .under { display: flex; gap: 10px; align-items: center; padding: 6px ${8 * SCALE}px; }
       .cmdbar .hint { text-shadow: 1px 1px 0 #000, -1px 0 0 #000; }
       .cmdbar .queue { display: flex; gap: 2px; }
@@ -69,7 +79,7 @@ export class CommandBar {
 
   /** `hint` is a line under the band (e.g. where to place a building); the title belongs to the top screen. */
   show(hint: string, items: readonly CommandItem[], queue: readonly QueueItem[] = []): void {
-    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled]), queue.map((q) => q.pct)]);
+    const key = JSON.stringify([hint, items.map((i) => [i.key, i.enabled, i.cost]), queue.map((q) => q.pct)]);
     this.el.hidden = items.length === 0 && queue.length === 0 && !hint;
     if (key === this.shown) return;
     this.shown = key;
@@ -83,6 +93,14 @@ export class CommandBar {
         b.disabled = !it.enabled;
         if (it.icon) b.appendChild(copy(it.icon));
         else b.appendChild(Object.assign(document.createElement('span'), { className: 'name', textContent: it.label.split(':')[0]! }));
+        const price = document.createElement('span');
+        price.className = 'price';
+        if (it.price) {
+          const c = copy(it.price);
+          c.style.width = `${it.price.width * SCALE}px`;
+          price.appendChild(c);
+        } else price.textContent = String(it.cost);
+        b.appendChild(price);
         b.addEventListener('pointerdown', (e) => e.stopPropagation());
         b.addEventListener('click', (e) => {
           e.stopPropagation();
