@@ -177,23 +177,40 @@ describe('auto-targeting', () => {
     const w = createWorld({ seed: 1 });
     const u = spawnUnit(w, 0, ...at(5, 5), SWORDSMAN);
     for (let i = 0; i <= FIRST_SCAN; i++) step(w, []);
-    const foe = spawnUnit(w, 1, ...at(8, 5), { hp: 100 }); // in sight, spawned after the first scan
+    const foe = spawnUnit(w, 1, ...at(8, 5), { hp: 100, priority: 10 }); // in sight, spawned after the first scan
     while (w.tick < FIRST_SCAN + 30) step(w, []);
     expect(u.target).toBeNull();
     step(w, []);
     expect(u.target).toBe(foe.id);
   });
 
-  it('prefers an enemy in attack range, then higher priority, then the nearer one', () => {
+  it('prefers an enemy in attack range, then higher priority, then the one later in the row-by-row scan', () => {
     const w = createWorld({ seed: 1 });
     const archer = spawnUnit(w, 0, ...at(5, 5), ARCHER); // range 5, sight 7
     spawnUnit(w, 1, ...at(11, 5), { hp: 100, priority: 65 }); // 6 cells: in sight, out of range
     const builder = spawnUnit(w, 1, ...at(5, 9), { hp: 100, priority: 11 });
     const knight = spawnUnit(w, 1, ...at(9, 5), { hp: 100, priority: 20 });
-    spawnUnit(w, 1, ...at(5, 1), { hp: 100, priority: 20 }); // same priority, same distance, higher id
+    spawnUnit(w, 1, ...at(5, 1), { hp: 100, priority: 20 }); // same priority, same distance, but higher up: scanned earlier
     for (let i = 0; i <= FIRST_SCAN; i++) step(w, []);
     expect(archer.target).toBe(knight.id);
     expect(builder.hp).toBe(100);
+  });
+
+  it('breaks a tie the game\'s way: the one later in the row-by-row scan, so lower, then further right', () => {
+    const w = createWorld({ seed: 1 });
+    const archer = spawnUnit(w, 0, ...at(5, 5), ARCHER);
+    spawnUnit(w, 1, ...at(3, 5), { hp: 100, priority: 20 });
+    const right = spawnUnit(w, 1, ...at(7, 5), { hp: 100, priority: 20 });
+    for (let i = 0; i <= FIRST_SCAN; i++) step(w, []);
+    expect(archer.target).toBe(right.id);
+  });
+
+  it('never picks a priority-0 enemy out of range', () => {
+    const w = createWorld({ seed: 1 });
+    const sword = spawnUnit(w, 0, ...at(5, 5), SWORDSMAN);
+    spawnUnit(w, 1, ...at(8, 5), { hp: 100, priority: 0 });
+    for (let i = 0; i <= FIRST_SCAN; i++) step(w, []);
+    expect(sword.target).toBeNull();
   });
 
   it('switches to a better target on a later scan, but not away from an attack order', () => {
@@ -344,6 +361,6 @@ describe('combat determinism', () => {
     const w = battle(log.seed);
     replay(w, log);
     expect(w.units.length).toBeLessThan(10);
-    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"d4676fe6"`);
+    expect(hashWorld(w).toString(16)).toMatchInlineSnapshot(`"2dcd7a60"`);
   });
 });
