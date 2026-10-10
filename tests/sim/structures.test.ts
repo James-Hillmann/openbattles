@@ -59,6 +59,7 @@ describe('build prerequisites', () => {
     placeBuilding(w, 0, BARRACKS, 28, 20);
     expect(missingPrerequisites(w, 0, STABLES)).toEqual([]);
     run(w, 1, [{ kind: 'build', unitIds: [b.id], type: STABLES.kind, cx: 10, cy: 10 }]);
+    run(w, 200); // walk there; the site goes down on arrival
     expect(ofRole(w, 12)).toHaveLength(1);
     expect(bricks(w)).toBe(5000 - 350);
   });

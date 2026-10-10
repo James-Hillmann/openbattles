@@ -219,3 +219,12 @@ When a function's logic gets ported to `/sim`, add a section:
 | `0x0207FF24` | ARM | `Map_ringSearch` | Ring search round a footprint, top/bottom then left/right | confirmed | matcher 0x02080708; transports.md |
 | `0x0205B788` | ARM | `Container_ejectAll` | On death: eject last-to-first, kill all if none got off | likely |  |
 | `0x0205BDE4` | ARM | `Unit_effectiveCell` | A carried unit's cell is its carrier's | likely |  |
+| `0x02080430` | ARM | `Map_nearestCell` | Ring search out from a cell, order from three tables reshuffled every tick; left/right of centre never tried | confirmed | ai.md "Ring search"; `sim/src/ring.ts` |
+| `0x02080398` | ARM | `Map_shuffleRing` | One shared-RNG draw per tick swaps a pair in each ring table | confirmed | called first by the tick function `0x02083680` |
+| `0x0208014C` | ARM | `Map_resetRing` | Match-start reset of the ring tables to 0..3, 0..3, 0..7 (undoes the random setup `0x0208019C`) | confirmed | RAM |
+| `0x0207FEF0` | ARM | `Map_findTerrain` | Ring search for a terrain code (the CPU tree search) | confirmed | ai.md |
+| `0x0207F194` | ARM | `Map_findBuildSpot` | Ring search with the spot test; mines take the nearest free mine site instead | confirmed | ai.md "Placement" |
+| `0x020016AC` | ARM | `Build_spotOk` | Footprint test, with the CPU's margin of spacing + 1 | confirmed | ai.md "Placement" |
+| `0x0208ADA0` | THUMB | `AI_seedRandom` | Seeds the AI RNG at boot from the time of day | confirmed | ai.md "Timing" |
+| `0x02094324` | THUMB | `AIResources_assignBuild` | Plan to an idle builder, or a harvester under the steal rules | confirmed | ai.md |
+| `0x020951F0` | THUMB | `AIResources_setPlan` | Replaces the plan only for a strictly higher priority; works out the reserve | confirmed | ai.md |

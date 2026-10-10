@@ -44,7 +44,14 @@ The local player is at `0x0224D350` in a King skirmish (likely the same every ma
 
 ## Construction
 
-- Placing a building pays its cost (+0x5E) at once (Farm: 500 -> 425). confirmed
+- A building order costs nothing up front. `ConstructStructureEntityCommand` checks the price, the limit and
+  the prerequisites when it starts (`0x02068B74`), then the Builder walks to the nearest free cell next to the
+  footprint (state 0 of `0x02068CD0`, up to 5 tries). Only there (state 1) does the site go down and the price
+  (+0x5E) get paid: units on the footprint are asked to step aside and the Builder waits for them, an own
+  unfinished site of the same type on the spot is joined instead, and too few bricks, the limit or a missing
+  Barracks/Farm (sites count here) end the order. confirmed (code; emulator: a Farm ordered 5 cells away left
+  the bank at 500 while the Builder walked; site, dust and 500 -> 425 came as he arrived). The earlier "paid at
+  once" reading was a Builder standing next to the spot.
   Walls and bridges are the exception: each is paid when the work on it starts ([walls-bridges.md](walls-bridges.md)).
 - The site appears with 1 HP. Progress ticks up once per tick of work; **build time is +0x60 in
   ticks** (Farm 360: started tick 386, finished tick 746). HP rises with it to the full value.

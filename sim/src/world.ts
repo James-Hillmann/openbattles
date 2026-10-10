@@ -1,6 +1,7 @@
 import { type Fx } from './fixed';
 import { DEFAULT_SPEED } from './config';
 import { makeRng } from './rng';
+import { newRing, shuffleRing } from './ring';
 import type { Command, ScheduledCommand } from './commands';
 import { orderCommands } from './commands';
 import { aiStep } from './ai';
@@ -46,7 +47,7 @@ export interface WorldInit {
 export function createWorld({ seed, grid = null, bonus = null, players = [], rules = null, types = [], mineSites = [], spellDefs = [], bridgeSites = [] }: WorldInit): World {
   const occ = grid ? new Int32Array(OCC_LAYERS * grid.width * grid.height) : null;
   return {
-    tick: 0, rng: makeRng(seed), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
+    tick: 0, rng: makeRng(seed), ring: newRing(), nextId: 1, units: [], projectiles: [], grid, bonus, occ, players, rules, types,
     mineSites: [...mineSites], bridgeSites: bridgeSites.map((s) => ({ ...s })), spellDefs, spells: [], nextSpell: 1, scanQueue: [], pickups: [], nextPickup: 1, lastDead: [], ai: [],
   };
 }
@@ -319,6 +320,9 @@ function moveUnit(u: Unit): void {
 
 /** Advance one tick. `cmds` must all be scheduled for `w.tick`. */
 export function step(w: World, cmds: readonly ScheduledCommand[]): void {
+  // The game reshuffles the ring search's tables first thing every tick (ring.ts). Only on a map with the
+  // economy on, so bare test worlds keep their hashes.
+  if (w.grid && w.types.length > 0) shuffleRing(w);
   for (const c of orderCommands(cmds)) {
     if (c.tick !== w.tick) throw new Error(`command for tick ${c.tick} applied on ${w.tick}`);
     applyCommand(w, c.player, c.cmd);
@@ -363,6 +367,7 @@ export function cloneWorld(w: World): World {
   return {
     ...w,
     rng: { ...w.rng },
+    ring: [...w.ring],
     units: w.units.map((u) => ({ ...u, path: [...u.path], route: [...u.route], mv: u.mv && { ...u.mv }, job: u.job && { ...u.job }, queue: [...u.queue], spells: [...u.spells], buffs: [...u.buffs], cargo: [...u.cargo], board: u.board && { ...u.board } })),
     occ: w.occ && w.occ.slice(),
     grid: w.grid && { ...w.grid, cells: w.grid.cells.slice() },

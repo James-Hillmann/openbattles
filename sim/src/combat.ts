@@ -196,57 +196,84 @@ const SCAN_PERIOD = 30;
 const SCAN_PHASE = 2;
 
 /**
- * Game: 0x020638A8. The search covers the unit's sight around where it stands; a candidate must also
- * lie between min range and sight + max range of the cell it guards (hold: its post, CombatHoldPosition
- * +0x20; confirmed by reading the code, the range check gets the post as its centre). One in attack range
- * beats one that isn't; then higher priority (+0x70) wins. The game's tie order is unknown; here nearer,
- * then lower id, wins (guess).
+ * The search's candidate list (0x0207EC24 -> 0x0207E994) is every occupant of the square of cells within
+ * `r` (Chebyshev) of the searcher's cell, clipped to the map, added row by row from the top-left; a
+ * building is added at its first footprint cell in that order. The pick then walks the list from the end.
+ * So of two equal candidates the one found later in that row-major scan (lower, then further right) is
+ * kept. Returns the scan position, or -1 when o is outside the square. confirmed (code); two units sharing
+ * a cell (which the game doesn't allow) go by id, higher first (our rule)
+ */
+function scanKey(w: World, cx: number, cy: number, r: number, o: Unit): number {
+  const f = footprint(o);
+  const W = w.grid ? w.grid.width : 0x10000;
+  const x = Math.max(f.x0, cx - r), y = Math.max(f.y0, cy - r);
+  if (x > Math.min(f.x0 + f.w - 1, cx + r) || y > Math.min(f.y0 + f.h - 1, cy + r)) return -1;
+  return y * W + x;
+}
+/** True when `o` was found later in the scan than `best` (so the pick, walking backwards, sees it first). */
+const scansLater = (k: number, o: Unit, bestK: number, best: Unit) => k > bestK || (k === bestK && o.id > best.id);
+
+/**
+ * Game: 0x020638A8. The search covers the square of `sight` cells around the unit (towers: their max range); a
+ * candidate must also lie between min range and sight + max range of the cell it guards (hold: its post,
+ * CombatHoldPosition +0x20; the range check gets the post as its centre). Walking the candidates from the
+ * end of the scan: one in attack range beats one that isn't; otherwise a strictly higher priority (+0x70)
+ * wins, so ties keep the one met first, the latest in the scan (scanKey). A candidate of priority 0 is
+ * taken only to replace an out-of-range pick. confirmed (code)
  */
 function pickTarget(w: World, u: Unit): Unit | undefined {
   const a = u.attack!;
   // Buildings (role 8-19, i.e. towers) search their max range instead of their sight (likely: code).
   const sight = u.role >= 8 && u.role <= 19 ? a.maxRange : u.sight;
-  const sight2 = sight * sight;
   const min2 = a.minRange * a.minRange;
   const far = sight + a.maxRange;
   const centre = leashCentre(w, u);
-  let best: Unit | undefined;
-  let bestIn = false;
-  let bestD = 0;
+  const cx = cellX(u.x), cy = cellY(u.y);
+  const cands: { o: Unit; k: number }[] = [];
   for (const o of w.units) {
     if (o.owner === u.owner || o.hp === 0 || isInside(o)) continue;
-    const d = cellDist2(u, o);
-    if (d > sight2) continue;
-    const dc = centre ? cellToFootprint2(centre[0], centre[1], o) : d;
+    const k = scanKey(w, cx, cy, sight, o);
+    if (k < 0) continue;
+    const dc = centre ? cellToFootprint2(centre[0], centre[1], o) : cellDist2(u, o);
     if (dc < min2 || dc > far * far) continue;
+    cands.push({ o, k });
+  }
+  // The game's order: from the end of the scan backwards.
+  cands.sort((p, q) => (scansLater(p.k, p.o, q.k, q.o) ? -1 : 1));
+  let best: Unit | undefined;
+  let bestIn = false;
+  let bestPrio = 0;
+  for (const { o } of cands) {
+    const d = cellDist2(u, o);
     const isIn = d >= min2 && d <= a.maxRange * a.maxRange;
-    if (best) {
-      if (bestIn !== isIn) {
-        if (bestIn) continue;
-      } else if (o.priority !== best.priority) {
-        if (o.priority < best.priority) continue;
-      } else if (d >= bestD) continue;
+    if (best && bestIn && !isIn) continue;
+    if (o.priority > bestPrio || (isIn && !bestIn)) {
+      best = o;
+      bestIn = isIn;
+      bestPrio = o.priority;
     }
-    best = o;
-    bestIn = isIn;
-    bestD = d;
   }
   return best;
 }
 
 /**
- * Stand ground's scan (0x02067258 / 0x020673FC): search max range around the unit; only enemies in attack
- * range count, and the highest priority wins (ties: nearer, then lower id; guess).
+ * Stand ground's scan (0x02067258 / 0x020673FC): the square of max range around the unit; only enemies in
+ * attack range count, and a strictly higher priority wins, walking the scan from its end, so ties keep the
+ * latest in the scan (scanKey) and priority 0 is never picked. confirmed (code)
  */
 function pickInRange(w: World, u: Unit): Unit | undefined {
+  const r = u.attack!.maxRange;
+  const cx = cellX(u.x), cy = cellY(u.y);
   let best: Unit | undefined;
-  let bestD = 0;
+  let bestK = -1;
   for (const o of w.units) {
     if (o.owner === u.owner || o.hp === 0 || isInside(o) || !inRange(u, o)) continue;
-    const d = cellDist2(u, o);
-    if (best && (o.priority < best.priority || (o.priority === best.priority && d >= bestD))) continue;
+    const k = scanKey(w, cx, cy, r, o);
+    if (k < 0) continue;
+    if (best && (o.priority < best.priority || (o.priority === best.priority && !scansLater(k, o, bestK, best)))) continue;
+    if (!best && o.priority === 0) continue;
     best = o;
-    bestD = d;
+    bestK = k;
   }
   return best;
 }

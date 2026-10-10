@@ -3,6 +3,7 @@ import { cellCenterX, cellCenterY } from '../terrain';
 import type { EntityType, Player, Unit, World } from '../state';
 import { getPlayer, isBuilding, isFinished, isInside, popCap, popUsed, ROLE_BASE, ROLE_BUILDER, ROLE_HERO, ROLE_TRANSPORT, TERRAIN_TREE } from '../economy';
 import { unitCell } from '../movement';
+import { ringSearch } from '../ring';
 import { fpH, fpW } from '../footprint';
 import type { AiPlayer, AiRequest } from './state';
 
@@ -14,6 +15,8 @@ export interface Ctx {
   out: Command[];
   /** Own live units and buildings, by id. */
   own: Unit[];
+  /** Set this pass when the plan looked for an idle builder and found none (AIResources +0x20). */
+  noIdle?: boolean;
 }
 
 export const W = (c: Ctx) => c.w.grid!.width;
@@ -35,6 +38,27 @@ export const enemies = (c: Ctx) => c.w.units.filter((u) => u.owner !== c.ai.play
 
 /** A builder with nothing to do (game: squad task 0x22, idle). */
 export const isIdleBuilder = (u: Unit) => u.role === ROLE_BUILDER && u.job === null && u.tx === null;
+/**
+ * A builder is on a building of this role: walking to put it down, or walking to or working on its site (a
+ * builder squad with the Construct task for the role, 0x0209DDC4). A site nobody works on doesn't count.
+ */
+export const constructing = (c: Ctx, role: number): boolean => constructingCount(c, role) > 0;
+
+/** How many builders are on a building of this role (0x0209DE1C counts builder squads; ours are one each). */
+export function constructingCount(c: Ctx, role: number): number {
+  const siteRole = (id: number) => {
+    const s = c.w.units.find((b) => b.id === id);
+    return s && !isFinished(s) ? s.role : -1;
+  };
+  return c.own.filter((u) => {
+    const j = u.job;
+    if (!j || u.role !== ROLE_BUILDER) return false;
+    if (j.kind === 'place') return c.w.types[j.type]?.role === role;
+    if (j.kind === 'build') return siteRole(j.site) === role;
+    if (j.kind === 'inside' && j.tree < 0) return siteRole(j.building) === role;
+    return false;
+  }).length;
+}
 export const isHarvesting = (u: Unit) => u.job !== null && (u.job.kind === 'chop' || u.job.kind === 'deliver' || (u.job.kind === 'inside' && u.job.tree >= 0));
 
 /** Entity kinds of a role the player may make: its army's units, or its base faction's buildings. */
@@ -96,18 +120,13 @@ export function queuedOfRole(c: Ctx, q: readonly AiRequest[], role: number): num
 }
 
 /** Nearest cell to `from` (rings 0..r-1, row-major within a ring) of terrain `code` (FindNearestGroundType 0x0207FEF0). */
+/**
+ * The first cell of terrain `code` in the game's ring order (sim/src/ring.ts) within `r` rings of `from`: the
+ * CPU's tree search (0x0207FEF0). Its area test passes "any area", so only the terrain counts. confirmed (code)
+ */
 export function nearestTerrain(c: Ctx, from: number, code: number, r: number): number {
   const g = c.w.grid!;
-  const x0 = cx(c, from), y0 = cy(c, from);
-  for (let d = 0; d < r; d++) {
-    for (let y = y0 - d; y <= y0 + d; y++) {
-      for (let x = x0 - d; x <= x0 + d; x++) {
-        if (Math.max(Math.abs(x - x0), Math.abs(y - y0)) !== d || x < 0 || y < 0 || x >= g.width || y >= g.height) continue;
-        if (g.cells[y * g.width + x] === code) return y * g.width + x;
-      }
-    }
-  }
-  return -1;
+  return ringSearch(c.w, cx(c, from), cy(c, from), r, (x, y) => g.cells[y * g.width + x] === code);
 }
 export const nearestTree = (c: Ctx, from: number, r: number) => nearestTerrain(c, from, TERRAIN_TREE, r);
 

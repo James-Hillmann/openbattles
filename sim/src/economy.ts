@@ -94,16 +94,37 @@ export const ROLE_WALL = 19;
 export const isStructure = (role: number): boolean => role >= ROLE_BRIDGE && role <= ROLE_WALL;
 
 /**
- * Unit roles each production building trains, by building role. Castle (hero, builder) and
- * Barracks (melee, ranged, mounted) are confirmed from their build strips in the emulator;
- * Stables (the star units) and Shipyard (transport) are a guess from their icons and costs.
+ * Unit roles each production building may train, by building role (the strip's list builder 0x020D9754): Castle
+ * hero and builder, Barracks melee, ranged and mounted, Stables and Shipyard the specials (role 6) and the
+ * transport (role 5), split by `isNaval` (see `trains`). confirmed (code; Castle and Barracks strips also in the
+ * emulator)
  */
 export const TRAINS: Readonly<Record<number, readonly number[]>> = {
   [ROLE_BASE]: [ROLE_HERO, ROLE_BUILDER],
   [ROLE_BARRACKS]: [2, 3, 4],
-  [ROLE_STABLES]: [ROLE_SIEGE],
-  [ROLE_SHIPYARD]: [ROLE_TRANSPORT],
+  [ROLE_STABLES]: [ROLE_SIEGE, ROLE_TRANSPORT],
+  [ROLE_SHIPYARD]: [ROLE_SIEGE, ROLE_TRANSPORT],
 };
+
+/**
+ * Naval in the strip's sense: moves on water only (not open or rough ground) and on the ground layer. Such
+ * specials and transports come from the Shipyard, all others from the Stables. So the Pirates' and Imperials'
+ * specials (the Dirigible included: its record is a water unit) are Shipyard units and their Stables trains
+ * nothing, while Earth and Aliens fly their transport, which the Stables trains, leaving their Shipyard empty.
+ * confirmed (code, 0x020D9754)
+ */
+export const isNaval = (t: { moves?: number; layer?: number }): boolean => {
+  const m = t.moves ?? MOVES_GROUND;
+  return (m & (1 | 4)) === 0 && (m & 8) !== 0 && (t.layer ?? 0) === 0;
+};
+
+/** May a building of role `building` train type t? */
+export function trains(building: number, t: { role: number; moves?: number; layer?: number }): boolean {
+  if (!(TRAINS[building] ?? []).includes(t.role)) return false;
+  if (building === ROLE_STABLES) return !isNaval(t);
+  if (building === ROLE_SHIPYARD) return isNaval(t);
+  return true;
+}
 
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
 /** A Builder inside a building (dropping off or building) or a unit in a transport: off the map, not drawn, not targetable. */
@@ -325,9 +346,17 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const builders = ownBuilders(w, player, ids);
   if (!t || !p || t.role < ROLE_BASE || isStructure(t.role) || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
   if (!mayBuild(w, player, t)) return; // prerequisites and building limits (structures.ts)
-  if (!spendBricks(p, t.cost)) return;
-  const site = place(w, player, t, cx, cy, false);
-  for (const u of builders) setBuildJob(w, u, site);
+  // The order only checks the price; nothing is paid and no site appears until a Builder gets there
+  // (ConstructStructureEntityCommand: start 0x02068B74, update 0x02068CD0 states 0-1). confirmed (code; emulator:
+  // a Farm ordered 5 cells away left the bank at 500 while the Builder walked, and its site and the -75 came
+  // as he arrived)
+  if (p.bricks < t.cost) return;
+  const cell = cy * w.grid!.width + cx;
+  for (const u of builders) {
+    u.target = null;
+    stopMove(w, u);
+    u.job = { kind: 'place', type, cell };
+  }
 }
 
 export function setBuildJob(w: World, u: Unit, site: Unit): void {
@@ -351,7 +380,7 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const t = w.types[type];
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
-  if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
+  if (!trains(b.role, t) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
   // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code). The game's strip greys the
   // icon instead; refusing the order here keeps a second hero out of the queue the same way.
   if (t.role === ROLE_HERO && (heroAlive(w, player) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;
@@ -411,6 +440,9 @@ function stepJob(w: World, u: Unit, place: PlaceFn): void {
       return;
     case 'bridge':
       stepBridgeJob(w, u, place);
+      return;
+    case 'place':
+      stepPlaceJob(w, u, place);
       return;
     case 'chop': {
       if (g.cells[job.tree] !== TERRAIN_TREE) {
@@ -500,6 +532,62 @@ function comeOut(w: World, u: Unit, c: number, next: Job | null): void {
   u.tx = u.ty = null;
   placeUnit(w, u);
   u.job = next;
+}
+
+/**
+ * A Builder sent to put down a new building (ConstructStructureEntityCommand states 0-1, 0x02068CD0): it walks
+ * next to the footprint; there, an own unfinished site of the same type on that spot is simply joined (another
+ * Builder got there first). Otherwise units standing on the footprint are asked to step aside and the Builder
+ * waits for them; anything else in the way, a limit or prerequisite that no longer holds, or too few bricks
+ * ends the order. Then the price is paid, the site goes down with 1 HP and the Builder goes in.
+ * confirmed (code, and the Farm watched in the emulator); how units are moved off the spot (0x0205A088) is not
+ * traced, ours walk to the nearest free cell (guess).
+ */
+function stepPlaceJob(w: World, u: Unit, place: PlaceFn): void {
+  const job = u.job;
+  if (job?.kind !== 'place') return;
+  const g = w.grid!;
+  const t = w.types[job.type];
+  const p = getPlayer(w, u.owner);
+  if (!t || !p) {
+    u.job = null;
+    return;
+  }
+  const fw = fpW(t.size), fh = fpH(t.size);
+  const a = approach(w, u, job.cell, fw, fh);
+  if (a === 'stuck') u.job = null;
+  if (a !== 'there') return;
+  const x0 = cellX(g, job.cell), y0 = cellY(g, job.cell);
+  const site = w.units.find((s) => s.hp > 0 && s.owner === u.owner && s.kind === t.kind && !isFinished(s) && originCell(w, s) === job.cell);
+  if (site) {
+    setBuildJob(w, u, site);
+    return;
+  }
+  let waiting = false;
+  for (let y = y0; y < y0 + fh; y++) {
+    for (let x = x0; x < x0 + fw; x++) {
+      const c = y * g.width + x;
+      const o = w.occ![c];
+      if (!o) continue;
+      const v = findById(w.units, o);
+      if (!v || isBuilding(v)) continue;
+      waiting = true;
+      if (!v.mv && v !== u) {
+        const to = freeCellNear(w, x0 + (fw >> 1), y0 + fh, 7);
+        if (to >= 0) orderMove(w, v, to);
+      }
+    }
+  }
+  if (waiting) return;
+  if (!canPlace(w, t, x0, y0) || !mayBuild(w, u.owner, t) || !spendBricks(p, t.cost)) {
+    u.job = null;
+    return;
+  }
+  // In through the site's wall at once, like a Builder reaching an existing site (the game goes in on its next
+  // state; which tick work starts on is not measured).
+  const s = place(w, u.owner, t, x0, y0, false);
+  removeUnit(w, u);
+  u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
 }
 
 /** A builder inside the site, working on it. */

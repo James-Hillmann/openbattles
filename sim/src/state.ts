@@ -132,6 +132,11 @@ export type Job =
   /** Work on the construction site `site`. */
   | { kind: 'build'; site: EntityId }
   /**
+   * Walk next to the spot for a new building of entity kind `type` with its top-left at `cell`, then put the
+   * site down and pay for it (game: ConstructStructureEntityCommand states 0 and 1).
+   */
+  | { kind: 'place'; type: number; cell: number }
+  /**
    * Inside `building`, off the map: dropping off a load (then back to `tree`) or building a site
    * (`tree` = -1). `timer` counts down to coming out; -1 = until the site is finished.
    */
@@ -255,6 +260,8 @@ export interface MeleeBonusTable {
 export interface World {
   tick: number;
   rng: Rng;
+  /** The ring search's three direction tables (ring.ts), reshuffled every tick on a map with the economy on. */
+  ring: number[];
   nextId: EntityId;
   /**
    * Always kept sorted by id. Iterate this array, never an object's keys or a

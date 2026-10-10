@@ -39,14 +39,21 @@ at least 1 left. The group is the entity record's byte +0x09.
 | 0 | heroes | 1 | | confirmed (economy.md) |
 | 1 | minifigures | 20 | roles 1-4 | confirmed (economy.md) |
 | 2 | specials | 4 | roles 5, 6 | confirmed (economy.md) |
-| 3 | towers | **7** | roles 13-15, any level | likely (code) |
-| 4 | buildings | **14** | roles 7-12, 16, 18 (Castle to Stables, Shipyard, gates; not towers, bridges or walls) | likely (code) |
-| 6 | walls | 20 | role 19 | likely (code); walls are another thread's |
-| 7 | bridges | 8 | role 17 | likely (code) |
-| 8 | gates | 0 | role 18 | likely (code): gates can't be built in skirmish |
+| 3 | towers | **7** | roles 13-15, any level | confirmed |
+| 4 | buildings | **14** | roles 7-12, 16, 18 (Castle to Stables, Shipyard, gates; not towers, bridges or walls) | confirmed (code) |
+| 6 | walls | 20 | role 19 | confirmed (code); walls are another thread's |
+| 7 | bridges | 8 | role 17 | confirmed (code) |
+| 8 | gates | 0 | role 18 | confirmed (code): gates can't be built in skirmish |
 
-Not reached in the emulator (it takes 14 buildings). `0x020863B8` doubles groups 3, 4 and 6 for some players
-in one game mode (story?), but the build check reads the table directly.
+Decompiled `0x02086088`: each group counts the team's entities whose role is listed above (towers and walls
+through `Team_countRole` with sites included), adds the slots reserved at team +0xC5 + group, and returns
+the table entry minus that, floored at 0. The order's start (`0x02068B74`) refuses at 0, and so does the
+placement on arrival (economy.md "Construction"). The check reads the ROM table at `0x02126CA4` itself. In
+the emulator, writing 0 over the tower entry (RAM `0x02126CA7`) checkered the Builder's tower button and
+writing 8 lit it again, so the strip and the order really follow that table entry; 7 towers weren't built to
+watch it hit. `0x020863B8` keeps a per-team copy at team +0xCF + group, doubled for groups 3, 4 and 6 for the
+non-local teams in one setup (a game type and a difficulty-like value of 2; not traced to a menu option), but
+nothing in the build path reads that copy.
 
 ## Tower upgrades
 
@@ -78,7 +85,9 @@ while it upgrades is not checked; ours does (it's the same entity until the swap
 - **How it's ordered**: with a Builder selected, touch a damaged building (tip 959). confirmed. The command
   doesn't check the owner; ours repairs own buildings only (1v1 has no allies).
 - **What**: a building (roles 7-19) below full HP. A full one ends the order at once. The action also needs
-  building +0x227 set, which we take to mean "finished" (sites are built, not repaired). likely
+  building +0x227 set, which we took to mean "finished" (sites are built, not repaired). But +0x227 is already
+  set on a fresh site (a Farm at 9 %, read in RAM), so it means "on the map"; whether a Builder can be sent to
+  repair a damaged unfinished site is open. guess
 - **Where**: the unit walks next to the building and works from **outside**, facing it, playing its work
   animation (`0x0205A6A4` mode 2). If it isn't next to it the action ends and the command walks it back. confirmed
   (emulator: the Builder stood beside the tower, visible, the whole time)

@@ -14,7 +14,7 @@
 | Original sim tick rate | no fixed tick: the main loop aims for 30 Hz but sometimes updates 1 VBlank apart, depending on frame cost (formats.md "Movement speed and update rate") | **answered** |
 | Does combat use randomness? | yes: melee adds `rand(+0x6A)`, projectiles roll `min + rand(max-min)`; RNG is SDK `MATH_Rand32` (combat.md) | **answered** |
 | Auto-targeting: how idle units pick enemies, and what +0x71 is | scan every 30 ticks within sight (+0x71), in-range first, then priority +0x70 (combat.md) | **answered** |
-| Auto-targeting tie order, and which AI states move/attack orders use | trace how the search queue fills its candidate list; watch AI state at unit +0x2A0 under orders | open |
+| Auto-targeting tie order, and which AI states move/attack orders use | tie order **answered**: the candidate list is a row-major scan of the search square, walked from the end (combat.md); AI states under orders still open | partly answered |
 | Projectile flight: homing or fixed aim point, splash (+0x6B) | homes, hits on entering the target cell; splash 5x5 at 100/80/60% (combat.md) | **answered** |
 | Game logic in ARM9 or overlays? | overlays are all tiny and share one address | **answered: ARM9** |
 | Fixed-point format(s) used | 20.12 for positions (cells), damage and multipliers | **answered** |
@@ -28,8 +28,8 @@
 | Do several Builders build faster? | watch two Builders on one Farm | open |
 | Mine payout seen in the emulator | find a reachable mine site on The Pond and build one with poked bricks | open (code read only) |
 | Where a Builder goes after delivering a load | trace `HarvestEngineerEntityCommand` (vtable `0x02149C2C`) | open (sim guesses) |
-| Building placement rules | which terrain codes allow a footprint; units in the way | open |
-| Which buildings train which units, queue length | castle trains hero + builder (HUD); others not checked | open |
+| Building placement rules | per-cell test `0x02001938` via `0x020016AC`; the CPU adds a margin (ai.md "Placement"); units on the footprint are asked to move when the Builder arrives (economy.md "Construction") | partly answered |
+| Which buildings train which units, queue length | `0x020D9754`: Castle 0-1, Barracks 2-4, Stables/Shipyard roles 6 and 5 split by ship or not (build-ui.md); queue 3 (economy.md) | **answered** (code) |
 | Minimap: dot colors for teams 3+, maps wider than 64 cells (minimap file is 128 px), the last few tree-border pixels | see hud.md | open |
 | What the HUD's red-star counter ("0/0") counts | transports + siege units, capped by finished Farms (economy.md) | **answered** (likely) |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |
