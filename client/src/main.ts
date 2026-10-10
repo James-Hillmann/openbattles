@@ -31,6 +31,7 @@ import {
   starCap,
   unitCell,
   TRAINS,
+  trains as buildingTrains,
   PLAYING,
   WON,
   START_BRICKS,
@@ -829,9 +830,9 @@ function updateStrip() {
     const name = nameByIndex.get(b.kind) ?? '';
     if (!isFinished(b)) return bar.show(`${displayName(name)}: ${Math.floor((100 * b.progress) / Math.max(1, b.buildTime))}%`, []);
     if (isTower(b.role)) return showUpgrade(b, item);
-    const roles = TRAINS[b.role] ?? [];
-    // One hero icon (the first), as the Castle strip shows in the emulator.
-    const list = armyUnits(localPlayer).filter((st, i, all) => roles.includes(st.role) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
+    // One hero icon (the first), as the Castle strip shows in the emulator. Stables and Shipyard split the
+    // specials and transport by water (isNaval).
+    const list = armyUnits(localPlayer).filter((st, i, all) => buildingTrains(b.role, st) && st.speed !== 0xffff && (st.role !== 0 || all.find((x) => x.role === 0) === st));
     costs(list, 'train');
     // Three slots, filled front first; clicking one cancels it (the game's top-screen queue panel).
     const queue = Array.from({ length: QUEUE_MAX }, (_, i) => {

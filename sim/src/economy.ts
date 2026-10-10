@@ -94,16 +94,37 @@ export const ROLE_WALL = 19;
 export const isStructure = (role: number): boolean => role >= ROLE_BRIDGE && role <= ROLE_WALL;
 
 /**
- * Unit roles each production building trains, by building role. Castle (hero, builder) and
- * Barracks (melee, ranged, mounted) are confirmed from their build strips in the emulator;
- * Stables (the star units) and Shipyard (transport) are a guess from their icons and costs.
+ * Unit roles each production building may train, by building role (the strip's list builder 0x020D9754): Castle
+ * hero and builder, Barracks melee, ranged and mounted, Stables and Shipyard the specials (role 6) and the
+ * transport (role 5), split by `isNaval` (see `trains`). confirmed (code; Castle and Barracks strips also in the
+ * emulator)
  */
 export const TRAINS: Readonly<Record<number, readonly number[]>> = {
   [ROLE_BASE]: [ROLE_HERO, ROLE_BUILDER],
   [ROLE_BARRACKS]: [2, 3, 4],
-  [ROLE_STABLES]: [ROLE_SIEGE],
-  [ROLE_SHIPYARD]: [ROLE_TRANSPORT],
+  [ROLE_STABLES]: [ROLE_SIEGE, ROLE_TRANSPORT],
+  [ROLE_SHIPYARD]: [ROLE_SIEGE, ROLE_TRANSPORT],
 };
+
+/**
+ * Naval in the strip's sense: moves on water only (not open or rough ground) and on the ground layer. Such
+ * specials and transports come from the Shipyard, all others from the Stables. So the Pirates' and Imperials'
+ * specials (the Dirigible included: its record is a water unit) are Shipyard units and their Stables trains
+ * nothing, while Earth and Aliens fly their transport, which the Stables trains, leaving their Shipyard empty.
+ * confirmed (code, 0x020D9754)
+ */
+export const isNaval = (t: { moves?: number; layer?: number }): boolean => {
+  const m = t.moves ?? MOVES_GROUND;
+  return (m & (1 | 4)) === 0 && (m & 8) !== 0 && (t.layer ?? 0) === 0;
+};
+
+/** May a building of role `building` train type t? */
+export function trains(building: number, t: { role: number; moves?: number; layer?: number }): boolean {
+  if (!(TRAINS[building] ?? []).includes(t.role)) return false;
+  if (building === ROLE_STABLES) return !isNaval(t);
+  if (building === ROLE_SHIPYARD) return isNaval(t);
+  return true;
+}
 
 export const isBuilding = (u: Unit): boolean => u.role >= ROLE_BASE;
 /** A Builder inside a building (dropping off or building) or a unit in a transport: off the map, not drawn, not targetable. */
@@ -359,7 +380,7 @@ export function orderTrain(w: World, player: PlayerId, building: EntityId, type:
   const t = w.types[type];
   const p = getPlayer(w, player);
   if (!b || !t || !p || b.owner !== player || !isBuilding(b) || !isFinished(b)) return;
-  if (!(TRAINS[b.role] ?? []).includes(t.role) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
+  if (!trains(b.role, t) || !allowed(w, player, b, t) || b.queue.length >= QUEUE_MAX) return;
   // One hero at a time (limit table at 0x02126CA4, MAX_HEROES). confirmed (code). The game's strip greys the
   // icon instead; refusing the order here keeps a second hero out of the queue the same way.
   if (t.role === ROLE_HERO && (heroAlive(w, player) || w.units.some((u) => u.owner === player && u.queue.some((k) => w.types[k]?.role === ROLE_HERO)))) return;

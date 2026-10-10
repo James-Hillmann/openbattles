@@ -36,7 +36,8 @@ export const PREREQUISITES: Readonly<Record<number, readonly number[]>> = {
 /**
  * Per-player ceilings from the limit table at 0x02126CA4, checked before a build (0x02086088):
  * entry 3 = 7 towers (roles 13-15), entry 4 = 14 other buildings (roles 7-12, 16 and gates 18;
- * bridges and walls have their own entries). Sites count. likely (code; not reached in the emulator)
+ * bridges and walls have their own entries). Sites count (+0x227 is set on a site). confirmed (code; emulator:
+ * the tower button follows the table entry)
  */
 export const MAX_TOWERS = 7;
 export const MAX_BUILDINGS = 14;
