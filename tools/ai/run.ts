@@ -3,9 +3,10 @@
  * it gets, with the tick, plus its bricks now and then. For comparing with the game in DeSmuME
  * (docs/re-notes/ai.md "Checking against the game").
  *
- *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both]
+ *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both] [--bricks]
  *
- * Player 0 (you) stays idle unless --both, which makes both players computers.
+ * Player 0 (you) stays idle unless --both, which makes both players computers. --bricks prints every
+ * change to the CPU's bricks.
  */
 import { readFileSync } from 'node:fs';
 import { buildArmyBundle, buildMapBundle, buildUnitBundle, tryRomFile, unpackRom, type UnitStats } from '../../extract/src/index';
@@ -13,6 +14,7 @@ import { addAi, createSkirmish, getPlayer, step, type EntityType, type World } f
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const both = process.argv.includes('--both');
+const logBricks = process.argv.includes('--bricks');
 const [romPath, mapName = 'mp01', ticksArg = '6000', youArmy = 'King', cpuArmy = 'Wizard'] = args;
 if (!romPath) throw new Error('usage: run.ts rom.nds [map] [ticks] [you] [cpu] [--both]');
 
@@ -60,8 +62,12 @@ if (both) addAi(w, 0, 1, marks, towers);
 const seen = new Set<number>();
 const ticks = Number(ticksArg);
 const cellOf = (u: { x: number; y: number }) => `(${Math.floor(u.x / 65536 / 24)},${Math.floor(u.y / 65536 / 16)})`;
+let lastBricks = -1;
 for (let t = 0; t < ticks; t++) {
   step(w, []);
+  const cpu = getPlayer(w, 1)!;
+  if (logBricks && cpu.bricks !== lastBricks) console.log(`${w.tick} P1 bricks ${lastBricks} -> ${cpu.bricks}`);
+  lastBricks = cpu.bricks;
   for (const u of w.units) {
     if (seen.has(u.id)) continue;
     seen.add(u.id);

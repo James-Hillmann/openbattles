@@ -3,6 +3,7 @@ import { cellCenterX, cellCenterY } from '../terrain';
 import type { EntityType, Player, Unit, World } from '../state';
 import { getPlayer, isBuilding, isFinished, isInside, popCap, popUsed, ROLE_BASE, ROLE_BUILDER, ROLE_HERO, ROLE_TRANSPORT, TERRAIN_TREE } from '../economy';
 import { unitCell } from '../movement';
+import { ringSearch } from '../ring';
 import { fpH, fpW } from '../footprint';
 import type { AiPlayer, AiRequest } from './state';
 
@@ -96,18 +97,13 @@ export function queuedOfRole(c: Ctx, q: readonly AiRequest[], role: number): num
 }
 
 /** Nearest cell to `from` (rings 0..r-1, row-major within a ring) of terrain `code` (FindNearestGroundType 0x0207FEF0). */
+/**
+ * The first cell of terrain `code` in the game's ring order (sim/src/ring.ts) within `r` rings of `from`: the
+ * CPU's tree search (0x0207FEF0). Its area test passes "any area", so only the terrain counts. confirmed (code)
+ */
 export function nearestTerrain(c: Ctx, from: number, code: number, r: number): number {
   const g = c.w.grid!;
-  const x0 = cx(c, from), y0 = cy(c, from);
-  for (let d = 0; d < r; d++) {
-    for (let y = y0 - d; y <= y0 + d; y++) {
-      for (let x = x0 - d; x <= x0 + d; x++) {
-        if (Math.max(Math.abs(x - x0), Math.abs(y - y0)) !== d || x < 0 || y < 0 || x >= g.width || y >= g.height) continue;
-        if (g.cells[y * g.width + x] === code) return y * g.width + x;
-      }
-    }
-  }
-  return -1;
+  return ringSearch(c.w, cx(c, from), cy(c, from), r, (x, y) => g.cells[y * g.width + x] === code);
 }
 export const nearestTree = (c: Ctx, from: number, r: number) => nearestTerrain(c, from, TERRAIN_TREE, r);
 

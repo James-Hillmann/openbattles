@@ -255,6 +255,8 @@ export interface MeleeBonusTable {
 export interface World {
   tick: number;
   rng: Rng;
+  /** The ring search's three direction tables (ring.ts), reshuffled every tick on a map with the economy on. */
+  ring: number[];
   nextId: EntityId;
   /**
    * Always kept sorted by id. Iterate this array, never an object's keys or a
