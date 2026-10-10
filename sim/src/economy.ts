@@ -325,9 +325,17 @@ export function orderBuild(w: World, player: PlayerId, ids: readonly EntityId[],
   const builders = ownBuilders(w, player, ids);
   if (!t || !p || t.role < ROLE_BASE || isStructure(t.role) || builders.length === 0 || !allowed(w, player, builders[0]!, t) || !canPlace(w, t, cx, cy)) return;
   if (!mayBuild(w, player, t)) return; // prerequisites and building limits (structures.ts)
-  if (!spendBricks(p, t.cost)) return;
-  const site = place(w, player, t, cx, cy, false);
-  for (const u of builders) setBuildJob(w, u, site);
+  // The order only checks the price; nothing is paid and no site appears until a Builder gets there
+  // (ConstructStructureEntityCommand: start 0x02068B74, update 0x02068CD0 states 0-1). confirmed (code; emulator:
+  // a Farm ordered 5 cells away left the bank at 500 while the Builder walked, and its site and the -75 came
+  // as he arrived)
+  if (p.bricks < t.cost) return;
+  const cell = cy * w.grid!.width + cx;
+  for (const u of builders) {
+    u.target = null;
+    stopMove(w, u);
+    u.job = { kind: 'place', type, cell };
+  }
 }
 
 export function setBuildJob(w: World, u: Unit, site: Unit): void {
@@ -411,6 +419,9 @@ function stepJob(w: World, u: Unit, place: PlaceFn): void {
       return;
     case 'bridge':
       stepBridgeJob(w, u, place);
+      return;
+    case 'place':
+      stepPlaceJob(w, u, place);
       return;
     case 'chop': {
       if (g.cells[job.tree] !== TERRAIN_TREE) {
@@ -500,6 +511,62 @@ function comeOut(w: World, u: Unit, c: number, next: Job | null): void {
   u.tx = u.ty = null;
   placeUnit(w, u);
   u.job = next;
+}
+
+/**
+ * A Builder sent to put down a new building (ConstructStructureEntityCommand states 0-1, 0x02068CD0): it walks
+ * next to the footprint; there, an own unfinished site of the same type on that spot is simply joined (another
+ * Builder got there first). Otherwise units standing on the footprint are asked to step aside and the Builder
+ * waits for them; anything else in the way, a limit or prerequisite that no longer holds, or too few bricks
+ * ends the order. Then the price is paid, the site goes down with 1 HP and the Builder goes in.
+ * confirmed (code, and the Farm watched in the emulator); how units are moved off the spot (0x0205A088) is not
+ * traced, ours walk to the nearest free cell (guess).
+ */
+function stepPlaceJob(w: World, u: Unit, place: PlaceFn): void {
+  const job = u.job;
+  if (job?.kind !== 'place') return;
+  const g = w.grid!;
+  const t = w.types[job.type];
+  const p = getPlayer(w, u.owner);
+  if (!t || !p) {
+    u.job = null;
+    return;
+  }
+  const fw = fpW(t.size), fh = fpH(t.size);
+  const a = approach(w, u, job.cell, fw, fh);
+  if (a === 'stuck') u.job = null;
+  if (a !== 'there') return;
+  const x0 = cellX(g, job.cell), y0 = cellY(g, job.cell);
+  const site = w.units.find((s) => s.hp > 0 && s.owner === u.owner && s.kind === t.kind && !isFinished(s) && originCell(w, s) === job.cell);
+  if (site) {
+    setBuildJob(w, u, site);
+    return;
+  }
+  let waiting = false;
+  for (let y = y0; y < y0 + fh; y++) {
+    for (let x = x0; x < x0 + fw; x++) {
+      const c = y * g.width + x;
+      const o = w.occ![c];
+      if (!o) continue;
+      const v = findById(w.units, o);
+      if (!v || isBuilding(v)) continue;
+      waiting = true;
+      if (!v.mv && v !== u) {
+        const to = freeCellNear(w, x0 + (fw >> 1), y0 + fh, 7);
+        if (to >= 0) orderMove(w, v, to);
+      }
+    }
+  }
+  if (waiting) return;
+  if (!canPlace(w, t, x0, y0) || !mayBuild(w, u.owner, t) || !spendBricks(p, t.cost)) {
+    u.job = null;
+    return;
+  }
+  // In through the site's wall at once, like a Builder reaching an existing site (the game goes in on its next
+  // state; which tick work starts on is not measured).
+  const s = place(w, u.owner, t, x0, y0, false);
+  removeUnit(w, u);
+  u.job = { kind: 'inside', building: s.id, timer: -1, tree: -1 };
 }
 
 /** A builder inside the site, working on it. */

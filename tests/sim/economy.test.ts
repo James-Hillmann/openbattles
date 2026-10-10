@@ -235,8 +235,48 @@ describe('economy', () => {
       { kind: 'build', unitIds: [builder.id], type: K_FARM.kind, cx: 18, cy: 18 },
     ]);
     expect(castle.queue).toEqual([P_BUILDER.kind]);
+    expect(bricks(w)).toBe(5000 - 45); // the Farm isn't paid until the Builder gets there
+    run(w, 60);
     expect(bricks(w)).toBe(5000 - 45 - 75);
     expect(w.units.some((u) => u.kind === K_FARM.kind)).toBe(true);
+  });
+
+  it('a building is put down and paid for when the Builder gets there, not when it is ordered', () => {
+    const w = world();
+    placeBuilding(w, 0, CASTLE, 10, 10);
+    const b = at(w, 6, 6);
+    run(w, 1, [{ kind: 'build', unitIds: [b.id], type: FARM.kind, cx: 20, cy: 6 }]);
+    expect(bricks(w)).toBe(500);
+    expect(w.units.some((u) => u.kind === FARM.kind)).toBe(false);
+    expect(b.job?.kind).toBe('place');
+    let t = 0;
+    while (!w.units.some((u) => u.kind === FARM.kind) && t++ < 400) run(w, 1);
+    expect(t).toBeGreaterThan(20); // it walked first
+    expect(bricks(w)).toBe(425);
+    expect(b.job?.kind).toBe('inside');
+  });
+
+  it('a second Builder sent to the same spot joins the first one\'s site', () => {
+    const w = world();
+    placeBuilding(w, 0, CASTLE, 10, 10);
+    const a = at(w, 6, 6);
+    const b = at(w, 6, 9);
+    run(w, 1, [{ kind: 'build', unitIds: [a.id, b.id], type: FARM.kind, cx: 20, cy: 6 }]);
+    run(w, 400);
+    expect(w.units.filter((u) => u.kind === FARM.kind)).toHaveLength(1);
+    expect(bricks(w)).toBe(425);
+  });
+
+  it('a Builder that arrives without the bricks gives up', () => {
+    const w = world(100);
+    placeBuilding(w, 0, CASTLE, 10, 10);
+    const b = at(w, 6, 6);
+    run(w, 1, [{ kind: 'build', unitIds: [b.id], type: FARM.kind, cx: 20, cy: 6 }]);
+    getPlayer(w, 0)!.bricks = 50;
+    run(w, 400);
+    expect(w.units.some((u) => u.kind === FARM.kind)).toBe(false);
+    expect(b.job).toBeNull();
+    expect(bricks(w)).toBe(50);
   });
 
   it('at the population cap the front unit waits unpaid and holds up the queue', () => {

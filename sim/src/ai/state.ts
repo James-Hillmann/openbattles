@@ -110,6 +110,12 @@ export interface AiResources {
   role: number;
   /** Bricks held back (AITeamStats +0x58): worked out when a plan is set and when an own building is created. */
   reserve: number;
+  /**
+   * The main building's cell (AIResources +0x54), -1 until set: the start point at first, then once, on the first
+   * economy pass that gives no harvest order, the cell of the castle nearest the start (0x020949BC). confirmed
+   * (emulator: the first barracks was proposed at the start point (52,48) on The Pond, later farms at the castle (51,51))
+   */
+  main: number;
 }
 
 export interface AiRequest {
@@ -157,6 +163,12 @@ export interface AiSquad {
 
 export const AI_CYCLE = 13;
 
+/**
+ * Optional trace of the AI's decisions (proposals, plans handed out, harvest targets), for comparing with the
+ * game's in the emulator (tools/ai/run.ts --trace). Output only: nothing reads it back, so it can't desync.
+ */
+export const aiTrace: { log: ((tick: number, player: number, what: string) => void) | null } = { log: null };
+
 /** A new computer opponent for `player` against `enemy`. */
 export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = []): AiPlayer {
   return {
@@ -170,7 +182,7 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     events: 0,
     stats: { lastBricks: 0, incomeAvg: 0, ring: new Array<number>(10).fill(0), ringPos: 0, income: 0, builderShare: 50, military: 0, buildings: 0, away: 100 },
     brain: { count: 0, sinceAttack: 0, scoutCount: 900, bonus: 0 },
-    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [], role: 20, reserve: 0 },
+    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [], role: 20, reserve: 0, main: -1 },
     armyQ: [],
     builderQ: [],
     squads: [{ id: 0, state: 12, prev: 12, timer: 0, units: [], job: -1, jobState: 0, target: 0, goal: -1, last: -1, need: 0, strength: 0 }],
@@ -212,7 +224,7 @@ export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void
     const b = a.brain;
     for (const v of [b.count, b.sinceAttack, b.scoutCount, b.bonus]) mix(v);
     const r = a.res;
-    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers, r.upInterval, r.upCount, r.towersClaimed.length, ...r.towersClaimed, r.role, r.reserve]) mix(v);
+    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers, r.upInterval, r.upCount, r.towersClaimed.length, ...r.towersClaimed, r.role, r.reserve, r.main]) mix(v);
     for (const q of [a.armyQ, a.builderQ]) {
       mix(q.length);
       for (const it of q) (mix(it.kind), mix(it.prio), mix(it.cell));

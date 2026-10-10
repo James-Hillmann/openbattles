@@ -166,26 +166,31 @@ waypoints 12 cells along a walkable route. How the game's CPU gets around water 
 
 ## Checking against the game
 
-Run in DeSmuME (py-desmume, tools/emu) with the human idle, King vs Wizard CPU on mp01, logging every
-entity the CPU creates. The CPU's first barracks came at ~190 ticks, builders at 175-1833, its
-first soldier at 1895, a lumber mill at 2234, towers from 1572, a mine at 3250, and it killed the
-idle King's base around tick 5100. `npx tsx tools/ai/run.ts game.nds mp01 9000 King Wizard` gives our
-port's timeline on the same setup:
+Run in DeSmuME (py-desmume, tools/emu) with the human idle, King vs Wizard CPU on mp01, from a fresh profile,
+with exec hooks on the CPU's propose (0x02097354), hand-out (0x02096988) and harvest (0x020965CC) functions and
+its per-role counters (team +0xDA, which count sites) read every 30 frames. Two matches, started 137 frames
+apart; the AI's draws were the same until about tick 1800, when combat timing split them.
+`npx tsx tools/ai/run.ts game.nds mp01 9000 King Wizard --trace` gives our port's timeline and decisions on the
+same setup. Ticks below are when each site went down (or the unit came out):
 
-| | game | port |
-|---|---|---|
-| first barracks | ~190 | 12 |
-| first tower | 1572 | 1676 |
-| first soldier | 1895 | 2083 |
-| special factory | 2798 | 3808 |
-| lumber mill | 2234 | 6818 |
-| second barracks | 2769 | 8274 |
-| first tower upgrade done | 4684 | 4771 |
-| idle King beaten | ~5100 | 8277 |
+| | game A | game B | port |
+|---|---|---|---|
+| first barracks (proposed 25, handed out 175) | 272 | 276 | 272 |
+| first farm (proposed 344, handed out 357) | 395 | 385 | 449 |
+| first tower | 1313 | 1306 | 948 |
+| first soldier | 1849 | 1841 | 1968 |
+| second barracks | 2616 | 2650 | 2753 |
+| special factory | 3255 | 2665 | 3378 |
+| lumber mill | 3075 | 4072 | 3260 |
+| mine | 5513 | 4116 | 5419 |
+| first Tower II | 2943 | 2902 | 4219 |
+| idle King beaten | not by 6500 | not by 6500 | 6128 |
 
-The first barracks comes early because the game's priority-99 barracks plan waited until ~175 for a
-builder, for a reason we haven't found. The late second barracks and lumber mill and the slow win are
-open: the port spends more on towers early and its first attack is smaller.
+Up to the first farm the port makes the same decisions on the same ticks, at the same cells for the
+barracks (47,51). After that the AI's random rolls (its own seed, the game's from the clock) and the shared
+ring-search shuffle decide spots and order, so single matches differ; the later milestones fall in the
+range of the two game runs. Known gaps: the first tower in both game runs came from a 4-in-100 roll at tick
+389 that let it propose with only 235 bricks, and the game's Tower II comes earlier (its upgrade timer).
 
 ## Not ported yet
 
