@@ -88,6 +88,7 @@ export function hashWorld(w: World): number {
         mix(5), mix(j.type), mix(j.i), mix(j.site), mix(j.cells.length);
         for (const c of j.cells) mix(c);
       } else if (j.kind === 'bridge') (mix(6), mix(j.type), mix(j.cell));
+      else if (j.kind === 'place') (mix(8), mix(j.type), mix(j.cell));
       else (mix(7), mix(j.building), mix(j.hp), mix(j.bricks));
     }
   }

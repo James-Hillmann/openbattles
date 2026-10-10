@@ -3,18 +3,19 @@
  * it gets, with the tick, plus its bricks now and then. For comparing with the game in DeSmuME
  * (docs/re-notes/ai.md "Checking against the game").
  *
- *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both] [--bricks]
+ *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both] [--bricks] [--trace]
  *
  * Player 0 (you) stays idle unless --both, which makes both players computers. --bricks prints every
- * change to the CPU's bricks.
+ * change to the CPU's bricks, --trace its building proposals, plans handed out and harvest targets.
  */
 import { readFileSync } from 'node:fs';
 import { buildArmyBundle, buildMapBundle, buildUnitBundle, tryRomFile, unpackRom, type UnitStats } from '../../extract/src/index';
-import { addAi, createSkirmish, getPlayer, step, type EntityType, type World } from '../../sim/src/index';
+import { addAi, aiTrace, createSkirmish, getPlayer, step, type EntityType, type World } from '../../sim/src/index';
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const both = process.argv.includes('--both');
 const logBricks = process.argv.includes('--bricks');
+if (process.argv.includes('--trace')) aiTrace.log = (tick, player, what) => console.log(`t${tick} P${player} ${what}`);
 const [romPath, mapName = 'mp01', ticksArg = '6000', youArmy = 'King', cpuArmy = 'Wizard'] = args;
 if (!romPath) throw new Error('usage: run.ts rom.nds [map] [ticks] [you] [cpu] [--both]');
 

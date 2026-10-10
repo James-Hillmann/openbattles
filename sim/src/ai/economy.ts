@@ -4,10 +4,10 @@ import { mayBuild } from '../structures';
 import { MOVES_GROUND, isWalkableCode } from '../terrain';
 import { fpH, fpW } from '../footprint';
 import type { Unit } from '../state';
-import { aiRand, type AiRequest } from './state';
-import { avail, computeReserve, finishSites, mainCell, tryOther } from './buildings';
+import { aiRand, aiTrace, type AiRequest } from './state';
+import { avail, computeReserve, finishSites, mainCell, setMainCell, tryOther } from './buildings';
 import {
-  at, builders, cellOfXY, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
+  at, builders, cellOfXY, constructing, constructingCount, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
   nearestTree, ofRole, pushRequest, queuedOfRole, typeOf, W, type Ctx,
 } from './ctx';
 
@@ -45,6 +45,7 @@ function economy(c: Ctx): void {
   // Every 12th tick: the pool chores, and nothing else (not even the hero rebuy).
   if (c.w.tick % 12 === 0) return poolChores(c);
   if (!minesAndHarvest(c)) {
+    setMainCell(c);
     if (ofRole(c, ROLE_BASE).length === 0) propose(c, ROLE_BASE, c.ai.home, 75);
     if (c.own.some((u) => isBuilding(u) && !isFinished(u))) towerPlanner(c);
   }
@@ -128,6 +129,7 @@ function harvest(c: Ctx, u: Unit): boolean {
     lumberMill(c, tree);
   }
   res.harvests++;
+  aiTrace.log?.(c.w.tick, c.ai.player, `harvest unit ${u.id} at ${cx(c, tree)},${cy(c, tree)}`);
   c.out.push({ kind: 'harvest', unitIds: [u.id], cx: cx(c, tree), cy: cy(c, tree) });
   return true;
 }
@@ -141,7 +143,7 @@ function harvest(c: Ctx, u: Unit): boolean {
  */
 function lumberMill(c: Ctx, tree: number): void {
   if (c.me.bricks <= 1500 && manhattan(c, tree, c.ai.home) < 16) return;
-  if (avail(c) <= 355 || c.own.some((b) => b.role === ROLE_LUMBER_MILL && !isFinished(b))) return;
+  if (avail(c) <= 355 || constructing(c, ROLE_LUMBER_MILL)) return;
   const kind = kindsOfRole(c, ROLE_LUMBER_MILL)[0];
   if (kind === undefined) return;
   const spot = placementSearch(c, kind, tree, 16, 0);
@@ -163,9 +165,8 @@ function mineSite(c: Ctx, from: number, r: number): number {
 /** FarmPlanner (0x02094BBC): a farm when the population is about to run out. */
 function farmPlanner(c: Ctx): void {
   const want = Math.min(2, (c.me.bricks > 2575 ? 2 : 1) - freePop(c));
-  const building = c.own.filter((b) => b.role === ROLE_FARM && !isFinished(b)).length;
-  const main = ofRole(c, ROLE_BASE)[0];
-  if (want > building) propose(c, ROLE_FARM, main ? centre(c, main) : c.ai.home, 80);
+  // Farms already in hand are builders on a farm (squads with the Construct task), not unfinished sites.
+  if (want > 0 && constructingCount(c, ROLE_FARM) < want) propose(c, ROLE_FARM, mainCell(c), 80);
 }
 
 /**
@@ -214,6 +215,7 @@ export function propose(c: Ctx, role: number, cell: number, prio: number): boole
     if (res.plan.kind < 0) res.role = 20;
     return false;
   }
+  aiTrace.log?.(c.w.tick, c.ai.player, `propose role ${role} prio ${prio} at ${cx(c, cell)},${cy(c, cell)}`);
   if (res.plan.kind >= 0 && prio <= res.plan.prio) return false;
   res.plan = { kind, prio, cell };
   res.wait = 0;
@@ -236,11 +238,12 @@ function assignBuild(c: Ctx): boolean {
     if (plan.prio >= 11) plan.prio--;
     return false;
   }
-  if (c.own.some((b) => b.role === role && !isFinished(b))) return false;
+  if (constructing(c, role)) return false;
   res.wait++;
   const bs = builders(c);
   let u = nearest(c, bs.filter(isIdleBuilder), plan.cell);
   if (!u) {
+    c.noIdle = true;
     // Taking a harvester: never with fewer than 2 harvesting (so the first barracks waits for the
     // second builder), always with 8; otherwise once the plan has waited 56 passes, or with more than
     // 1500 available bricks, or for a plan of priority 76 or more, or with 3 harvesting and more than 750.
@@ -279,6 +282,7 @@ export function issueBuild(c: Ctx, u: Unit, kind: number, role: number, cell: nu
     return false;
   }
   res.wait = 0;
+  aiTrace.log?.(c.w.tick, c.ai.player, `issueBuild role ${role} unit ${u.id} at ${cx(c, spot)},${cy(c, spot)}`);
   c.out.push({ kind: 'build', unitIds: [u.id], type: kind, cx: cx(c, spot), cy: cy(c, spot) });
   return true;
 }
