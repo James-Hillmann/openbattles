@@ -1,18 +1,29 @@
+<div align="center">
+
 # OpenBattles
 
+**LEGO Battles (Nintendo DS, 2009), rebuilt for the browser from the original game's machine code, with 1v1 online play.**
+
 [![ci](https://github.com/James-Hillmann/openbattles/actions/workflows/ci.yml/badge.svg)](https://github.com/James-Hillmann/openbattles/actions/workflows/ci.yml)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![PixiJS](https://img.shields.io/badge/PixiJS-8-e91e63)
+![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
+![Node](https://img.shields.io/badge/Node-22-339933?logo=node.js&logoColor=white)
 
-**A browser reimplementation of LEGO Battles (Nintendo DS, 2009), rebuilt from the original
-game's machine code, with 1v1 online play.**
+### [▶ Play the live demo](https://openbattles.onrender.com/)
 
-**[Play the live demo](https://openbattles.onrender.com/)** (free hosting, so the first load can
-take about a minute to wake up). You need your own dump of the game: the page reads it locally and
-nothing from the game is uploaded or shipped.
+<img src="docs/media/battle.png" alt="The King's army fighting the Wizard's army by a lake" width="820">
+
+</div>
 
 OpenBattles is a clean-room style engine rewrite. The real-time strategy rules, unit stats,
 pathfinding, AI, netcode and UI flow are reverse-engineered from the DS game's ARM9 binary,
 checked against the real game running in an emulator, and rebuilt in TypeScript. Graphics, maps
 and sound are decoded at runtime from the player's own ROM, in a Web Worker, in the browser.
+
+> **You need your own dump of the game.** The page reads it locally; nothing from the game is
+> uploaded, hosted or committed here. The demo runs on free hosting, so the first load can take
+> about a minute to wake up.
 
 ## Highlights
 
@@ -28,6 +39,25 @@ and sound are decoded at runtime from the player's own ROM, in a Web Worker, in 
   music and streams).
 - **Every number has a source.** Findings are written up in [`docs/re-notes/`](docs/re-notes/) with
   the ARM9 address they came from and a confidence level (confirmed / likely / guess).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/base.png" alt="Base with the Castle selected and its build strip open"><br><sub><b>Base building.</b> Castle selected, with its train strip and the DS-style top screen: portrait, minimap, bricks, population and heroes.</sub></td>
+    <td width="50%"><img src="docs/media/train.png" alt="Barracks training a queue of units"><br><sub><b>Training queue.</b> Barracks with three units queued; each can be cancelled from the strip.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/skirmish-setup.png" alt="Skirmish setup screen with map preview and game modes"><br><sub><b>Skirmish setup.</b> Every skirmish map, the three game modes, Prebase, Random Start and starting bank, plus the CPU's army.</sub></td>
+    <td><img src="docs/media/army-select.png" alt="Army select screen with all six armies and their units"><br><sub><b>Army select.</b> All six armies, with per-unit stats read from the game's tables.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/online-lobby.png" alt="Online lobby with a room code, map and game settings"><br><sub><b>Online lobby.</b> Share the room code, pick a map, mode, team color and army, then launch.</sub></td>
+    <td><img src="docs/media/menu.png" alt="Main menu"><br><sub><b>Main menu.</b> Single player against the computer, or online multiplayer.</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots are of OpenBattles running with the author's own ROM dump; the game art shown is decoded at runtime from that ROM, and no game files ship in this repository.</sub>
 
 ## Architecture
 
@@ -128,6 +158,6 @@ some effect graphics, a few animation timings, and the remaining guesses listed 
 ## Legal
 
 OpenBattles is an unofficial fan project, not affiliated with or endorsed by the LEGO Group,
-Warner Bros. Games, TT Games, Hellbent Games, or Nintendo. It contains no game code or assets;
+Warner Bros. Games, TT Games, Hellbent Games, or Nintendo. It contains no game code or game files;
 you need your own legally obtained copy of the game. The ROM is read in your browser and never
 leaves your machine.
