@@ -35,10 +35,16 @@ around 0x02085000-0x02088FFF are ARM. Addresses below are function starts.
 the tick is a multiple of 5), else `(c+3)%8==0` goal expiry. The brain alternates: every 4th update
 economy and the away %, two updates later the squads, every odd update attack planning.
 
+The counter is in step with the game's tick: on tick t it is ((t - 1) mod 13) + 1, so the resources pass runs
+on ticks with t mod 13 = 6 or 12 (all 40-odd passes in two emulator matches; ours starts it at 13 on tick 0).
+The resources pass gets the tick itself: even ticks do the economy (and every 12th tick only the pool chores),
+odd ticks hand out the plan or do a "try other" chore. confirmed
+
 All randomness comes from the AI's own generator (0x0208AEF0): a 64-bit LCG
 `s = s*0x5D588B656C078965 + 0x269EC3`, result `(hi32 * n) >> 32`. It is separate from the combat RNG,
-so the AI doesn't shift combat rolls. We seed it from the world seed and player id (the game's seed
-is not reproduced; guess that it matters only for exact replays against the cartridge).
+so the AI doesn't shift combat rolls. The game seeds it once at boot from the DS clock's time of day,
+`hours << 12 | minutes << 6 | seconds` (0x0208ADA0 via 0x020F10CC; two boots gave 0xF210 and 0xF4E4), so no two
+sessions play the same. We seed it from the world seed and player id. confirmed
 
 ## Skirmish setup (confirmed in RAM)
 
@@ -51,17 +57,46 @@ is not reproduced; guess that it matters only for exact replays against the cart
 
 - Builders: keep at least 3 and at most 9 (priority 99 request) while the builder share is under the
   target %. confirmed
-- Harvest: the nearest tree within 4 cells of the builder, else the map's forest markers (MARK
-  records of type 0) with a rotating ±3 offset, searched within 7. confirmed
-- Lumber mill priority 81; mine priority 99 (76 when bricks > 1920 or more than 10 soldiers); farm
+- Harvest (0x020965CC): the first tree within 4 rings of the builder, else from the map's forest markers
+  (MARK records of type 0): the nearest unclaimed one to home (every other time to the builder), moved 3 cells
+  up, down, left, right in turn by the harvest count (up only when y > 4, left only when x > 4), then the
+  first tree within 7 rings of that. Both searches use the game's ring order (below). A marker with no tree
+  left is given up; with no marker left the CPU wants one more mine. confirmed (code; emulator: the first
+  search went from (58,49), 3 above the marker at (58,52), and picked the tree at (59,50))
+- **Ring search** (0x02080430, `sim/src/ring.ts`): ring by ring, and within a ring nearer the side's middle
+  first; among the symmetric cells at the same spot the order comes from three small tables the game reshuffles
+  with its shared RNG at the start of every tick (0x02080398). A setup bug leaves the cells straight left and
+  right of the centre out of every search. Building placement uses the same search. confirmed (code, tables read
+  from RAM)
+- Lumber mill (part of the harvest pass, for a tree found from a marker): with 1500 bricks or less only when
+  that tree is 16 or more cells from home; then with more than 355 available, the CPU finds a spot within 16 of
+  the tree and proposes a mill there at priority 81 unless one of its mills is closer than 11. So it can build a
+  second mill at another forest. confirmed (code; emulator proposals at (57,47) and (42,61))
+- Mine priority 99 (76 when bricks > 1920 or more than 10 soldiers); farm
   priority 80 when free population runs low (wants 2 if bricks > 2575). confirmed (code), likely (values in play)
-- Every 12th tick the economy pass does only its "pool chores" (towers where squad-less builders
-  stand); that pool was empty at all 175 calls we watched, and our builders have no such state, so
-  it does nothing here. likely
+- Every 12th tick the economy pass does only its "pool chores" (0x02097054): for each builder not yet in a
+  squad, a tower at priority 76 where it stands (if a barracks exists and the spot check passes), and a walk
+  home if it is more than 15 from home. It fired once in 6000 emulator ticks, on a Builder trained 12 ticks
+  earlier (tick 1800, tower at (52,54)). Our builders have no squad-less state, so it does nothing here. Not
+  ported.
 - Placement: anchor next to the base, farms on the side away from the enemy, barracks, factories and
-  towers toward it; spacing roll `rand(10)`; ring search up to 16 cells (28 for the second pass, +8
-  for farms). confirmed
-- Builders that are harvesting get pulled to build only under the steal rules in `assignBuild`. likely
+  towers toward it; spacing roll `rand(10)`: 0 below 3, 1 below 9, else 2 (farms 1); ring search up to 16
+  rings (28 after 10 failures while fewer than 2 markers are given up, +8 for farms). The spot test
+  (0x020016AC) asks the CPU's buildings, except mines, shipyards, bridges, gates and walls, for a margin of
+  spacing + 1 cells all round inside the map, on ground the building could stand on (no trees) and without
+  other buildings (walls and mines don't count). confirmed (code)
+- Plans (0x02097354 / 0x020951F0): a proposal replaces the plan only when the plan is empty or of strictly
+  lower priority, and says so; a plan of the same role counts as yes. It needs the available bricks (below)
+  to cover the price and, for a building, a builder. An unaffordable plan loses a priority point per odd pass,
+  down to 10. confirmed (code)
+- Available bricks (AITeamStats +0x3C) are the bank as the income pass last saw it, or 0 when the reserve is
+  larger. The reserve and the planned role are worked out when a plan is set and when an own building is
+  created, and the role stays until a building of it appears. confirmed (code)
+- Handing the plan out (0x02094324): to the nearest idle builder, else to the nearest harvester if 8 are
+  harvesting, or if at least 2 are and the plan has waited 56 passes, or there are more than 1500 available
+  bricks, or the plan's priority is 76 or more, or 3 harvest and more than 750 are available. With fewer than
+  2 harvesting it waits, which is why the first barracks (priority 99, proposed at tick 25) went to the second
+  Builder as it came out at tick 175 in both emulator matches. confirmed (code and emulator)
 - Repair: damaged own buildings get the nearest idle builder. likely
 - Army units (`AIBrain_pickArmyUnit` 0x0208BF70): melee by default; ranged when melee > ranged + 4;
   mounted when ranged > 3 and bricks > 200; 50% chance of a special when bricks > 750, a special slot
@@ -87,7 +122,10 @@ When no plan went to a builder on an odd pass, the CPU rolls `AI_rand(4)` and do
      by 1500 (seen at tick 2619); a third when it has 2, a special factory and 2575 bricks, at
      `(base + enemy start) / 3` per axis. That is the sum over 3, not a third of the way: (20,22) on
      mp01, next to the human base, rebuilt every time it falls. confirmed
-   - Special factory (stables role): the first above 355 bricks, a second above 2575; priority 50. confirmed
+   - Special factory (stables role): the first above 355 bricks, a second above 2575; priority 50. The
+     shipyard proposer runs between them whenever the barracks proposer said no *or no shipyard stands*, and
+     its answer replaces the barracks', so without a shipyard the special factory is always tried as well
+     (emulator: barracks 99 and special factory 50 proposed on the same pass, tick 25). confirmed
    - Shipyard: needs the island test (0x02093A50), not traced; it never fired on mp01. Not ported.
 4. **Upgrade timer.** Counts passes; past the interval (40 at start, 1 after any tower appears,
    reset to 60 or 20 by case 1) it upgrades the Tower I nearest the base that is at least 100 ticks

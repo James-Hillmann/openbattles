@@ -92,6 +92,7 @@ export function hashWorld(w: World): number {
     }
   }
   if (w.grid) {
+    if (w.types.length > 0) for (const v of w.ring) mix(v);
     mix(w.grid.width);
     mix(w.grid.height);
     for (const c of w.grid.cells) mix(c);

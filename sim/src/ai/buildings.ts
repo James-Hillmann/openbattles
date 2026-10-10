@@ -37,18 +37,24 @@ export function mainCell(c: Ctx): number {
 /**
  * Bricks held back for a planned building (AITeamStats_computeReserve 0x02093F7C): 420 while a
  * special factory is planned, 420 before tick 7000 with more than 4 soldiers and no lumber mill, 600
- * for a late mine. likely (code; the emulator showed 0 and 420)
+ * for a late mine. The game works it out only when a plan is set (0x020951F0) and when an own building
+ * is created (0x0208A85C), and keeps the planned role until a building of that role appears, so the
+ * value is cached in `res.reserve`. confirmed (code)
  */
-export function reserve(c: Ctx): number {
+export function computeReserve(c: Ctx): void {
+  const res = c.ai.res;
   let r = 0;
-  const role = planned(c);
-  if (role === ROLE_MINE && c.w.tick > 16000 && cnt(c, ROLE_MINE) < 1 && c.ai.res.mines > 0) r += 600;
-  if (role === ROLE_FACTORY) r += 420;
+  if (res.role === ROLE_MINE && c.w.tick > 16000 && cnt(c, ROLE_MINE) < 1 && res.mines > 0) r += 600;
+  if (res.role === ROLE_FACTORY) r += 420;
   if (c.w.tick < 7000 && c.ai.stats.military > 4 && near(c, ROLE_LUMBER_MILL, 0, 0) < 1) r += 420;
-  return r;
+  res.reserve = r;
 }
-/** "Available" bricks: the bank, or 0 when the reserve is larger. */
-const avail = (c: Ctx) => (reserve(c) > c.me.bricks ? 0 : c.me.bricks);
+export const reserve = (c: Ctx): number => c.ai.res.reserve;
+/**
+ * "Available" bricks: the bank as the stats last saw it (AITeamStats +0x3C, refreshed on the income
+ * passes), or 0 when the reserve is larger. confirmed (code)
+ */
+export const avail = (c: Ctx): number => (c.ai.stats.lastBricks < reserve(c) ? 0 : c.ai.stats.lastBricks);
 
 /**
  * TowerSpotOK (0x02093664): a tower may go here when an own building stands within 6 and the
@@ -108,9 +114,15 @@ function productionBranch(c: Ctx): void {
   const nb = cnt(c, ROLE_BARRACKS);
   const tb = c.me.bricks;
   if (!(nb === 0 || (c.ai.stats.military >= 6 && tb > 355) || tb > 1500)) return;
-  // ProductionBuildings (0x0209550C). The shipyard proposer needs the island test (0x02093A50), which
-  // we haven't traced; it found no islands on The Pond and never proposed. Not ported.
-  if (!barracksProposer(c)) specialFactoryProposer(c);
+  // ProductionBuildings (0x0209550C): the barracks proposer, then the shipyard proposer when that
+  // proposed nothing *or no shipyard stands*, then the special factory when the last answer was no. The
+  // shipyard proposer's answer replaces the barracks', so without a shipyard the special factory is
+  // always tried too (the emulator showed barracks 99 and special factory 50 proposed on the same pass).
+  // The shipyard proposer needs the island test (0x02093A50), which we haven't traced; it found no
+  // islands on The Pond and never proposed. Not ported: it answers no.
+  let done = barracksProposer(c);
+  if (!done || cnt(c, ROLE_SHIPYARD) === 0) done = false;
+  if (!done) specialFactoryProposer(c);
 }
 
 /** Case 4: count passes; past the interval, upgrade a tower. */
@@ -220,6 +232,9 @@ export function onCreated(c: Ctx): void {
   for (const u of c.own) {
     if (u.id <= ai.seen || !isBuilding(u) || u.progress === 0 || isFinished(u) || ai.fired.includes(u.id)) continue;
     ai.fired.push(u.id);
+    // The planned role is done with once a building of it goes down; the reserve is worked out again.
+    if (ai.res.role === u.role) ai.res.role = 20;
+    computeReserve(c);
     if (isTower(u.role)) ai.res.upInterval = 1;
     else if (u.role === ROLE_LUMBER_MILL || u.role === ROLE_MINE || u.role === ROLE_BARRACKS || u.role === ROLE_FACTORY) {
       for (let i = 0; i < 2; i++) if (towerNextTo(c, at(c, u))) break;

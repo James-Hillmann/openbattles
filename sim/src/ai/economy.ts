@@ -1,10 +1,11 @@
-import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, TERRAIN_TREE, TRAINS } from '../economy';
+import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_WALL, TRAINS } from '../economy';
+import { ringSearch } from '../ring';
 import { mayBuild } from '../structures';
 import { MOVES_GROUND, isWalkableCode } from '../terrain';
 import { fpH, fpW } from '../footprint';
 import type { Unit } from '../state';
 import { aiRand, type AiRequest } from './state';
-import { finishSites, mainCell, tryOther } from './buildings';
+import { avail, computeReserve, finishSites, mainCell, tryOther } from './buildings';
 import {
   at, builders, cellOfXY, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
   nearestTree, ofRole, pushRequest, queuedOfRole, typeOf, W, type Ctx,
@@ -88,7 +89,7 @@ function minesAndHarvest(c: Ctx): boolean {
   return false;
 }
 
-/** HarvestDecide (0x020965CC): a tree near the builder, else one near a forest mark. */
+/** HarvestDecide (0x020965CC): a tree near the builder, else one near a forest mark. confirmed (code and emulator) */
 function harvest(c: Ctx, u: Unit): boolean {
   const res = c.ai.res;
   const here = at(c, u);
@@ -104,27 +105,48 @@ function harvest(c: Ctx, u: Unit): boolean {
     }
     const m = best >= 0 ? best : here;
     let x = cx(c, m), y = cy(c, m);
+    // The search point steps 3 cells off the mark, turning with the harvest count: up, down, left, right.
+    // (emulator: the first search went from (58,49), 3 above the mark at (58,52))
     switch (res.harvests % 4) {
-      case 0: x += 3; break;
-      case 1: if (x > 4) x -= 3; break;
-      case 2: y += 3; break;
-      default: y -= 3;
+      case 0: if (y > 4) y -= 3; break;
+      case 1: y += 3; break;
+      case 2: if (x > 4) x -= 3; break;
+      default: x += 3;
     }
-    x = clamp(x, 1, W(c) - 1);
-    y = clamp(y, 1, H(c) - 1);
+    // Clamped like the game: 0 becomes 1, and the far edges by its own (slightly uneven) tests.
+    if (x === 0) x = 1;
+    if (y === 0) y = 1;
+    if (x >= W(c)) x = W(c) - 1;
+    if (y > H(c)) y = H(c) - 1;
     tree = nearestTree(c, cellOfXY(c, x, y), 7);
     if (tree < 0) {
+      // A mark with no trees left is given up; with no mark at all it wants one more mine instead.
       if (best >= 0) res.claimed.push(best);
+      else res.mines = Math.min(res.mines + 1, c.w.mineSites.length);
       return false;
     }
-    const bricks = c.me.bricks;
-    const building = c.own.some((b) => b.role === ROLE_LUMBER_MILL && !isFinished(b));
-    if (ofRole(c, ROLE_LUMBER_MILL).length === 0 && !building && (bricks > 1500 || manhattan(c, tree, c.ai.home) > 15) && bricks > 355)
-      propose(c, ROLE_LUMBER_MILL, tree, 81);
+    lumberMill(c, tree);
   }
   res.harvests++;
   c.out.push({ kind: 'harvest', unitIds: [u.id], cx: cx(c, tree), cy: cy(c, tree) });
   return true;
+}
+
+/**
+ * The lumber mill part of HarvestDecide, for a tree found near a forest mark: with 1500 bricks or less only
+ * when the tree is 16 or more cells (Manhattan) from home; then, with more than 355 available and no builder
+ * already on a mill, it finds a spot for one within 16 of the tree (the CPU's placement search) and proposes
+ * it at priority 81 if no own mill stands closer than 11 to that spot. So it can have more than one mill, each by
+ * its own forest. confirmed (code; emulator: proposals at (57,47) and (42,61) on The Pond)
+ */
+function lumberMill(c: Ctx, tree: number): void {
+  if (c.me.bricks <= 1500 && manhattan(c, tree, c.ai.home) < 16) return;
+  if (avail(c) <= 355 || c.own.some((b) => b.role === ROLE_LUMBER_MILL && !isFinished(b))) return;
+  const kind = kindsOfRole(c, ROLE_LUMBER_MILL)[0];
+  if (kind === undefined) return;
+  const spot = placementSearch(c, kind, tree, 16, 0);
+  if (spot < 0 || c.own.some((b) => b.role === ROLE_LUMBER_MILL && manhattan(c, centre(c, b), spot) < 11)) return;
+  propose(c, ROLE_LUMBER_MILL, spot, 81);
 }
 
 /** Nearest free Mine site to `from` within r cells (0x02092B6C). */
@@ -174,15 +196,29 @@ function rebuyHero(c: Ctx): void {
   c.ai.builderQ.push({ kind, prio: 100, cell: c.ai.home });
 }
 
-/** Propose a building (0x02097354): kept only if the plan is empty or of lower priority. */
+/** CanAfford (0x0209639C): available bricks cover the price, and a building needs a builder. */
+const canAfford = (c: Ctx, cost: number, role: number): boolean => avail(c) >= cost && (role < ROLE_BASE || builders(c).length > 0);
+
+/**
+ * Propose a building (0x02097354, plan set by 0x020951F0): it replaces the plan only if the plan is empty
+ * or of strictly lower priority, and says whether it did. A plan of the same role already counts as yes.
+ * Setting a plan records its role and works out the reserve again. confirmed (code)
+ */
 export function propose(c: Ctx, role: number, cell: number, prio: number): boolean {
   const res = c.ai.res;
   const kind = kindsOfRole(c, role)[0];
   if (kind === undefined) return false;
   if (res.plan.kind >= 0 && typeOf(c, res.plan.kind)?.role === role) return true;
   const t = typeOf(c, kind)!;
-  if (t.cost > c.me.bricks || !mayBuild(c.w, c.ai.player, t) || builders(c).length === 0) return false;
-  if (res.plan.kind < 0 || res.plan.prio < prio) res.plan = { kind, prio, cell };
+  if (!canAfford(c, t.cost, role) || !mayBuild(c.w, c.ai.player, t)) {
+    if (res.plan.kind < 0) res.role = 20;
+    return false;
+  }
+  if (res.plan.kind >= 0 && prio <= res.plan.prio) return false;
+  res.plan = { kind, prio, cell };
+  res.wait = 0;
+  res.role = role;
+  computeReserve(c);
   return true;
 }
 
@@ -194,22 +230,31 @@ function assignBuild(c: Ctx): boolean {
   const t = typeOf(c, plan.kind);
   if (!t) return (res.plan = NONE), false;
   const role = t.role;
+  // Unaffordable plans lose a priority point a pass, down to 10; a plan whose role a builder is
+  // already putting up waits.
+  if (!canAfford(c, t.cost, role)) {
+    if (plan.prio >= 11) plan.prio--;
+    return false;
+  }
   if (c.own.some((b) => b.role === role && !isFinished(b))) return false;
   res.wait++;
   const bs = builders(c);
   let u = nearest(c, bs.filter(isIdleBuilder), plan.cell);
   if (!u) {
+    // Taking a harvester: never with fewer than 2 harvesting (so the first barracks waits for the
+    // second builder), always with 8; otherwise once the plan has waited 56 passes, or with more than
+    // 1500 available bricks, or for a plan of priority 76 or more, or with 3 harvesting and more than 750.
+    // confirmed (code; emulator: the first barracks went to the second builder as it came out, tick 175)
     const harv = bs.filter(isHarvesting);
-    const b = c.me.bricks;
-    if (harv.length >= 8 || (harv.length >= 2 && res.wait > 55) || b > 1500 || plan.prio > 75 || (harv.length > 2 && b > 750)) u = nearest(c, harv, plan.cell);
+    const n = harv.length;
+    const av = avail(c);
+    const take = n >= MAX_BUILDERS - 1 || (n >= 2 && (res.wait >= 56 || av > 1500 || plan.prio >= 76 || (n >= 3 && av > 750)));
+    if (take) u = nearest(c, harv, plan.cell);
   }
-  if (u && t.cost <= c.me.bricks) {
-    const cell = plan.cell;
-    res.plan = NONE;
-    return issueBuild(c, u, t.kind, role, cell);
-  }
-  if (t.cost > c.me.bricks) plan.prio = Math.max(10, plan.prio - 1);
-  return false;
+  if (!u) return false;
+  const cell = plan.cell;
+  res.plan = NONE;
+  return issueBuild(c, u, t.kind, role, cell);
 }
 
 /** IssueBuild (0x02096988): find a spot around the anchor at `cell` and send the builder. */
@@ -271,36 +316,34 @@ function placementAnchor(c: Ctx, role: number, cell: number, size: number): numb
 }
 
 /**
- * PlacementSearch (0x0207F194): rings out from the anchor for a spot where the footprint fits
- * and `spacing` cells around it are clear and inside the map. Ring order within a ring: row-major (guess).
+ * PlacementSearch (0x0207F194 with the test 0x020016AC): the game's ring search (sim/src/ring.ts) out from the
+ * anchor, `radius` rings, for a top-left cell where the building fits. For the CPU every building but a Mine,
+ * Shipyard, bridge, gate or wall also needs a margin of `spacing + 1` cells all round that stays inside the
+ * map, is ground the building itself could stand on (so no trees) and holds no building (walls and mines don't
+ * count; units do no harm). Footprint cells must be free. confirmed (code)
  */
-function placementSearch(c: Ctx, kind: number, anchor: number, radius: number, spacing: number): number {
+export function placementSearch(c: Ctx, kind: number, anchor: number, radius: number, spacing: number): number {
   const t = typeOf(c, kind)!;
   const g = c.w.grid!;
   const fw = fpW(t.size), fh = fpH(t.size);
-  const x0 = cx(c, anchor), y0 = cy(c, anchor);
-  const clear = (x: number, y: number) => {
-    for (let yy = y - spacing; yy < y + fh + spacing; yy++) {
-      for (let xx = x - spacing; xx < x + fw + spacing; xx++) {
-        if (xx < 0 || yy < 0 || xx >= g.width || yy >= g.height) return false;
+  const moves = t.moves ?? MOVES_GROUND;
+  const margin = (t.role >= ROLE_BASE && t.role <= 15 && t.role !== ROLE_MINE) ? spacing + 1 : 0;
+  const fits = (x: number, y: number) => {
+    if (!canPlace(c.w, t, x, y)) return false;
+    if (margin === 0) return true;
+    if (x - margin < 0 || y - margin < 0 || x + fw - 1 + margin >= g.width || y + fh - 1 + margin >= g.height) return false;
+    for (let yy = y - margin; yy < y + fh + margin; yy++) {
+      for (let xx = x - margin; xx < x + fw + margin; xx++) {
         if (xx >= x && xx < x + fw && yy >= y && yy < y + fh) continue;
         const cell = yy * g.width + xx;
-        if (!isWalkableCode(g.cells[cell]!, MOVES_GROUND) && g.cells[cell] !== TERRAIN_TREE) return false;
+        if (!isWalkableCode(g.cells[cell]!, moves)) return false;
         const o = c.w.occ![cell];
-        if (o !== 0 && c.w.units.some((u) => u.id === o && isBuilding(u))) return false;
+        if (o !== 0 && c.w.units.some((u) => u.id === o && isBuilding(u) && u.role !== ROLE_MINE && u.role !== ROLE_WALL)) return false;
       }
     }
     return true;
   };
-  for (let d = 0; d <= radius; d++) {
-    for (let y = y0 - d; y <= y0 + d; y++) {
-      for (let x = x0 - d; x <= x0 + d; x++) {
-        if (Math.max(Math.abs(x - x0), Math.abs(y - y0)) !== d) continue;
-        if (canPlace(c.w, t, x, y) && (spacing === 0 || clear(x, y))) return cellOfXY(c, x, y);
-      }
-    }
-  }
-  return -1;
+  return ringSearch(c.w, cx(c, anchor), cy(c, anchor), radius, fits);
 }
 
 /**

@@ -10,9 +10,16 @@ export interface AiPlayer {
   player: PlayerId;
   /** The player it plays against (AIPlayer +0x37: the human team in skirmish). */
   enemy: PlayerId;
-  /** The dispatcher's 1..13 counter (AIPlayer +0x35). */
+  /**
+   * The dispatcher's 1..13 counter (AIPlayer +0x35). It starts at 13 on tick 0, so on tick t it is
+   * ((t - 1) mod 13) + 1: in the emulator every AIResources pass fell on a tick with t mod 13 = 6 or 12
+   * (two matches). confirmed
+   */
   cycle: number;
-  /** AI_rand state (0x021568C8): a 64-bit LCG, kept as two 32-bit halves. */
+  /**
+   * AI_rand state (0x021568C8): a 64-bit LCG, kept as two 32-bit halves. The game seeds it at boot with
+   * the time of day, `h << 12 | m << 6 | s` (0x0208ADA0 via 0x020F10CC), so no two sessions match. confirmed
+   */
   seedHi: number;
   seedLo: number;
   /** Builder share target in percent (AIPlayer +0x5C): 70, then 18 from LATE_TICK. */
@@ -96,6 +103,13 @@ export interface AiResources {
   upCount: number;
   /** Tower markers given up on (AITeamStats +0x74), cells. */
   towersClaimed: number[];
+  /**
+   * Role of the building last planned (AITeamStats +0x54), 20 for none. It stays set after the plan goes to a
+   * builder, until a building of that role is created, so its reserve keeps holding bricks back.
+   */
+  role: number;
+  /** Bricks held back (AITeamStats +0x58): worked out when a plan is set and when an own building is created. */
+  reserve: number;
 }
 
 export interface AiRequest {
@@ -148,7 +162,7 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
   return {
     player,
     enemy,
-    cycle: 1,
+    cycle: AI_CYCLE,
     seedHi: (seed ^ 0x5d588b65) | 0,
     seedLo: (Math.imul(seed, 0x6c078965) ^ (player + 1)) | 0,
     builderPct: 70,
@@ -156,7 +170,7 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     events: 0,
     stats: { lastBricks: 0, incomeAvg: 0, ring: new Array<number>(10).fill(0), ringPos: 0, income: 0, builderShare: 50, military: 0, buildings: 0, away: 100 },
     brain: { count: 0, sinceAttack: 0, scoutCount: 900, bonus: 0 },
-    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [] },
+    res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [], role: 20, reserve: 0 },
     armyQ: [],
     builderQ: [],
     squads: [{ id: 0, state: 12, prev: 12, timer: 0, units: [], job: -1, jobState: 0, target: 0, goal: -1, last: -1, need: 0, strength: 0 }],
@@ -198,7 +212,7 @@ export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void
     const b = a.brain;
     for (const v of [b.count, b.sinceAttack, b.scoutCount, b.bonus]) mix(v);
     const r = a.res;
-    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers, r.upInterval, r.upCount, r.towersClaimed.length, ...r.towersClaimed]) mix(v);
+    for (const v of [r.plan.kind, r.plan.prio, r.plan.cell, r.wait, r.harvests, r.fails, r.mines, r.claimed.length, ...r.claimed, r.repairers.length, ...r.repairers, r.upInterval, r.upCount, r.towersClaimed.length, ...r.towersClaimed, r.role, r.reserve]) mix(v);
     for (const q of [a.armyQ, a.builderQ]) {
       mix(q.length);
       for (const it of q) (mix(it.kind), mix(it.prio), mix(it.cell));
