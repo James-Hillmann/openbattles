@@ -28,8 +28,8 @@
 | Do several Builders build faster? | watch two Builders on one Farm | open |
 | Mine payout seen in the emulator | find a reachable mine site on The Pond and build one with poked bricks | open (code read only) |
 | Where a Builder goes after delivering a load | trace `HarvestEngineerEntityCommand` (vtable `0x02149C2C`) | open (sim guesses) |
-| Building placement rules | which terrain codes allow a footprint; units in the way | open |
-| Which buildings train which units, queue length | castle trains hero + builder (HUD); others not checked | open |
+| Building placement rules | per-cell test `0x02001938` via `0x020016AC`; the CPU adds a margin (ai.md "Placement"); units on the footprint are asked to move when the Builder arrives (economy.md "Construction") | partly answered |
+| Which buildings train which units, queue length | `0x020D9754`: Castle 0-1, Barracks 2-4, Stables/Shipyard roles 6 and 5 split by ship or not (build-ui.md); queue 3 (economy.md) | **answered** (code) |
 | Minimap: dot colors for teams 3+, maps wider than 64 cells (minimap file is 128 px), the last few tree-border pixels | see hud.md | open |
 | What the HUD's red-star counter ("0/0") counts | transports + siege units, capped by finished Farms (economy.md) | **answered** (likely) |
 | Unit +0x1D4: other reason a unit shows its bars | set it in RAM and the builder's bar appears | open |

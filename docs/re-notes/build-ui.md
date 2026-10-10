@@ -23,9 +23,26 @@ the strip and placement code in `client/src/main.ts`; building pictures in `extr
 | Builder (King) | Castle 1000, Farm 75, Lumber Mill 400, Mine 600, Barracks 200, Stables (star icon) 350, Shipyard 350, Tower 300, Wall 10, Bridge 10 | confirmed (emulator) |
 | Castle | hero 500 (one icon while the King is alive), Builder 50 | confirmed (emulator) |
 | Barracks | Swordsman 100, Archer 150, Knight 250 | confirmed (emulator) |
-| Stables | the star (siege/flying) units | guess: from the star icon and the star cap; not opened yet |
-| Shipyard | Transport Ship | guess |
+| Stables | the army's specials (role 6), then its transport (role 5), leaving out ships | confirmed (code) |
+| Shipyard | the same lists, ships only | confirmed (code) |
 | King (hero) | four spells: 100, 100, 400, 600 | confirmed (emulator); spells not built |
+
+The strip's list builder (`0x020D9754`) gives the Castle roles 0 and 1 and the Barracks roles 2-4 from the
+army's list. The Stables and the Shipyard both start from roles 6 then 5 and then drop units by one test: a
+unit is a ship when its record allows water only (+0x18 set, +0x16 open and +0x17 rough clear) on the ground
+layer (+0x1A). Ships stay on the Shipyard's list, everything else on the Stables'. With the six armies' records:
+
+| army | Stables | Shipyard |
+|---|---|---|
+| King | Ballista, Catapult, Gryphon | Transport Ship |
+| Wizard | Ballista, Giant, Dragon | Transport Ship |
+| Pirates | nothing | Barracuda, Battleship, Flying Dutchman, Transport Ship |
+| Imperial | nothing | Clipper, Battleship, Dirigible, Transport Ship |
+| Earth, Aliens | Siege One, Two, Three, Transport Ship (it flies) | nothing |
+
+(The Imperial Dirigible's record is a water unit.) The CPU's own factory pick (`0x0208C4E0`) splits the same way
+for every unit of the six armies. The King's lists match the guess we had; the others weren't watched (their
+units are locked on a fresh profile). The ported rule is `trains` in `sim/src/economy.ts`.
 
 So the Barracks also trains the mounted unit, and the "Stables" building is the one with the star
 icon. The sim enforces this table (`TRAINS` in `sim/src/economy.ts`). One hero at a time is a
@@ -72,7 +89,7 @@ construction: see "Construction effect" below.
 ## Open
 
 - Strip icons of Imperial, Earth and Aliens units; the strip's exact end cap and stop button (atlas cells in `UI/AllInOne/UI_MainCastle`, see hud.md).
-- Stables and Shipyard lists; the blue order strip. (Wall and Bridge placement: [walls-bridges.md](walls-bridges.md).)
+- The blue order strip. (Wall and Bridge placement: [walls-bridges.md](walls-bridges.md).)
 - The game's placement rules beyond "walkable and free"; the yellow outline under a site.
 
 ## Builder at work (emulator, 2026-10-08)

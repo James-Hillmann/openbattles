@@ -1,4 +1,4 @@
-import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_WALL, TRAINS } from '../economy';
+import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_WALL, trains } from '../economy';
 import { ringSearch } from '../ring';
 import { mayBuild } from '../structures';
 import { MOVES_GROUND, isWalkableCode } from '../terrain';
@@ -391,7 +391,7 @@ function idleFactory(c: Ctx, kind: number, cell: number): Unit | undefined {
   const t = typeOf(c, kind);
   if (!t) return undefined;
   const role = factoryRole(t.role, ((t.moves ?? 0) & 0b1000) !== 0 && t.layer !== 1);
-  if (!(TRAINS[role] ?? []).includes(t.role)) return undefined;
+  if (!trains(role, t)) return undefined;
   const fs = c.own.filter((b) => b.role === role && isFinished(b) && b.queue.length === 0);
   return cell >= 0 ? nearest(c, fs, cell) : fs[0];
 }
