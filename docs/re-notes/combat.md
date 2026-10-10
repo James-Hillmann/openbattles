@@ -35,7 +35,7 @@ Archers, towers, siege and ships point +0x66 at one of these (`Arrow`, `Crossbow
 |---|---|---|---|
 | +0x0C | u16 | flight speed, 1/4096 cell per tick like unit speed (Arrow 2048) | likely |
 | +0x6B | u8 | 1 = splash damage (Boulder, TBoulder, OgreBoulder, Fireball, TFireball, AirFireball, ICannonBall, PCannonBall, PlasmaBall, LaserCannon, Gift) | confirmed (code) |
-| +0x6C, +0x6E | u16 | always equal to +0x70/+0x72 in this ROM; not read by the hit code we traced | guess |
+| +0x6C, +0x6E | u16 | min/max damage of the in-flight hit (`0x0206E3E8`, a callback the flight calls with the entity it hits); +0x70/+0x72 are the arrival hit's (`0x0206E430`). Always equal in this ROM, so no visible difference | confirmed (code) |
 | +0x70 | u16 | min damage | confirmed (code) |
 | +0x72 | u16 | max damage, exclusive: damage = min + rand(max - min) | confirmed (code) |
 
@@ -51,7 +51,11 @@ Called every tick for a unit that is attacking a target in range.
 3. `roll = damageRand > 0 ? rand(damageRand) : 0` (one draw from the game RNG).
 4. `base = max(1, damage + bonus(attacker, defender))` (`0x0205CC68`).
 5. HP -= `(roll + base) * defenderMultiplier` in 20.12, clamped at 0. The multiplier sits in the
-   defender's stats component (+0x10) and was 1.0 for every unit we saw (likely a buff/upgrade hook).
+   defender's stats component (unit +0x164, multiplier at +0x10, read through `0x0205CBD4`). It is rebuilt
+   from the unit's buffs (`0x0205CCA4`): 1.0 normally, 0.5 with a positive buff in slot 2 (the armor spell,
+   spells.md) and 2.0 with a negative one. The same routine scales speed (slot 0: x1.5, or a cut), damage
+   (slot 1: x2 or x0.5) and two more stats (slots 3, 4). confirmed (code); no skirmish spell we know gives a
+   negative buff
 
 Emulator log (King: damage 40, rand 10, cooldown 20 vs Wizard Swordsman: 15, 5, 30):
 
@@ -98,8 +102,13 @@ projectile object, +0xEC/+0xF0 in 20.12 px):
 | sideways | adjacent | 0 | its first move, on the firing tick, already enters the King's cell |
 
 The game puts units at cell corners and rounds positions to cells; the sim puts them at cell
-centres and floors, which gives the same cells. If the target dies first the projectile does no
-damage (guess).
+centres and floors, which gives the same cells.
+
+On arrival (`0x0206E430`) a shot fired at a unit (mode 1, set when the shooter had a target, `0x0206E0F4`)
+damages that unit only if it is still alive; a splash shot explodes on its own cell either way. A shot fired
+at a cell (mode 0) hits every enemy standing in that cell. confirmed (code). Whether a shot keeps flying after
+its target dies (so a splash shot still explodes there) is in the flight action (`0x0205482C`, update
+`0x02053C44`), not traced: the sim drops it.
 
 ### Splash (`0x0206E5EC`, confirmed by reading the code)
 
@@ -128,10 +137,18 @@ Each unit has an AI component (unit +0x2A0) with a tick counter (+0x48).
 - The sim scans while holding, patrolling or attacking an enemy it picked itself; not while
   walking under a move order, and it never drops a target the player ordered. Idle units hold a
   post and measure the pick from it; Stand Ground only takes enemies in range (orders.md).
-- **Pick** (`0x020638A8`): drop candidates outside `min range <= d <= sight + max range`. A candidate
-  in attack range always beats one that isn't; otherwise higher priority (+0x70) wins. On equal
-  terms the earlier candidate stays. The list order is unknown, so the sim breaks ties by nearest,
-  then lowest id (guess).
+- **Candidates** (`0x0207EC24` -> `0x0207E994`): every occupant of the square of cells within the search
+  radius of the unit's cell (Chebyshev, clipped to the map), added row by row from the top-left; a building
+  once, at its first footprint cell in that order. confirmed (code)
+- **Pick** (`0x020638A8`): walk that list from the end. Drop candidates outside
+  `min range <= d <= sight + max range` (of the post when holding). Once the pick is in attack range, an
+  out-of-range candidate is skipped; otherwise a candidate replaces the pick when its priority (+0x70) is
+  strictly higher, or when it is in range and the pick isn't. So ties keep the candidate found **last** in
+  the row-major scan (lower, then further right), and a priority-0 enemy is never picked unless it is in range
+  and nothing in range was picked before. confirmed (code); two units sharing a cell (the sim allows it) go by
+  higher id first (our rule)
+- **Stand ground** (`0x020673FC`): the same walk over the max-range square, in-range candidates only, strictly
+  higher priority replaces, so the same tie order and priority 0 never. confirmed (code)
 
 ## Cheat flags (likely, not ported)
 
@@ -177,6 +194,5 @@ can't be matched in a lockstep game anyway. The sim uses its own seeded RNG with
   (castles, farms, mills, barracks...) never attack: the sim drops their attack stats at spawn.
   The formula above would otherwise give them max(1, bonus) a swing. Likely, not watched.
 
-- Auto-target ties go to the nearest, then lowest id.
 - Without pathing, melee units walk to the cell beside the target on the side they come from.
 - Damage multiplier fixed at 1.0.
