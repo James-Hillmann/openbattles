@@ -6,6 +6,7 @@ import {
   createFog,
   createWorld,
   isVisible,
+  inRange,
   isExplored,
   updateFog,
   visionCell,
@@ -77,7 +78,8 @@ import {
 } from '@lbw/sim';
 import { FE_TEXT, priceLabel, type ActionIcon, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
 import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
-import { animate, attack, facing, type AnimState } from './unitAnim';
+import { animate, attack, facing, fight, type AnimState } from './unitAnim';
+import { hitFrame } from './hitShake';
 import { ModelView, type ModelClipName } from './modelView';
 import { createRom, savedRom, saveRom, skirmishFirst } from './romPanel';
 import { Selection, type Pickable } from './selection';
@@ -114,9 +116,6 @@ let online: { settings: GameSettings; relay: RelayClient; ready: boolean } | nul
 const MAX_CATCHUP_TICKS = 8;
 /** Our hash at each hash tick, for the two-tab test and for desync reports. */
 const hashLog = new Map<number, number>();
-/** Hit flash window, in ticks after the tick the damage landed. */
-const HIT_FLASH_FROM = 2.5;
-const HIT_FLASH_TO = 5.5;
 
 /** Seed for the next world: fixed offline, the relay's online. */
 let worldSeed = 1234;
@@ -1531,9 +1530,9 @@ app.ticker.add((t) => {
     const bank = bankOf(u.owner) + (isSelected ? 1 : 0);
     // Models carry team colors only; a selected one gets an outline instead of the odd bank.
     const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`) ?? unitTypes.get(`${unitKind.get(u.id)}@${bank & ~1}`);
-    // Hit flash: drawn in the grey bank from 2.5 to 5.5 ticks after the damage tick (emulator).
-    const sinceHit = world.tick - 1 - u.lastHit + alpha;
-    const flash = sinceHit >= HIT_FLASH_FROM && sinceHit < HIT_FLASH_TO ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
+    // Hit reaction: the sprite shakes sideways and turns grey for a few ticks (docs/re-notes/combat.md).
+    const hit = hitFrame(hudBundle?.hitReaction, world.tick - 1 - u.lastHit + alpha);
+    const flash = hit.flash ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
     if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[teamColor[u.owner] ?? u.owner] ?? 0xffffff);
       continue;
@@ -1553,10 +1552,19 @@ app.ticker.add((t) => {
     if (moving) Object.assign(a, face(u.x - p.x, u.y - p.y));
     const target = u.target === null ? undefined : world.units.find((o) => o.id === u.target);
     if (u.lastAttack !== a.swing) {
-      // The sim just attacked: face the target and play one swing.
+      // The sim just attacked: face the target, and swing if not already in the fight loop.
       a.swing = u.lastAttack;
       if (target) Object.assign(a, face(target.x - u.x, target.y - u.y));
-      a.state = attack(animTime);
+      if (a.state.mode !== 'fight') a.state = attack(animTime);
+    }
+    // Standing in a fight, the game loops the attack frames without a break; the hits land on the
+    // cooldown at any point of the loop (emulator, King vs Wizard swordsman: docs/re-notes/combat.md).
+    if (target && !moving && !type.model && inRange(u, target)) {
+      Object.assign(a, face(target.x - u.x, target.y - u.y));
+      if (a.state.mode !== 'fight') a.state = fight(animTime);
+    } else if (a.state.mode === 'fight') {
+      // The fight is over (target gone or out of reach); dropping straight to idle is a guess.
+      a.state = { mode: 'idle' };
     }
     // Builders at work swing their attack frames over and over, facing the tree or site
     // (emulator: 6 poses x 4 VBlanks, looping, while chopping; that building looks the same is a guess).
@@ -1580,7 +1588,8 @@ app.ticker.add((t) => {
     }
     unitAnim.set(u.id, a);
     s.visible = true;
-    s.position.set(Math.round(x), Math.round(y));
+    // Only sprites shake; the bars stay put (emulator).
+    s.position.set(Math.round(x) + (type.model ? 0 : hit.dx), Math.round(y));
     s.zIndex = y;
     // Ours, not the game's (its SpellIcons*Effect pictures aren't ported yet): a frozen unit is
     // tinted ice blue and each buff shows as a pip over the head.

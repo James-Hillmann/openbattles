@@ -4,7 +4,9 @@
  * Seen in the emulator (docs/re-notes/formats.md "Unit animation"):
  * - every unit animation advances one frame per 4 VBlanks (15 fps);
  * - the walk cycle keeps running across facing changes;
- * - when a unit arrives it finishes the current pass of its walk cycle before going idle.
+ * - when a unit arrives it finishes the current pass of its walk cycle before going idle;
+ * - a unit standing in a fight loops its attack frames (5 + the idle pose) for as long as it
+ *   fights; the hits land on the attack cooldown, at any point of the loop (combat.md).
  */
 export const ANIM_FRAME_MS = (4 * 1000) / 60;
 
@@ -19,12 +21,18 @@ export type AnimState =
   | { mode: 'walk'; start: number }
   /** Arrived; playing out the walk pass that was running. */
   | { mode: 'stopping'; start: number; endPass: number }
-  | { mode: 'attack'; start: number };
+  | { mode: 'attack'; start: number }
+  /** Fighting: the attack frames over and over until the unit walks or stops fighting. */
+  | { mode: 'fight'; start: number };
 
 const frameIndex = (start: number, now: number) => Math.floor((now - start) / ANIM_FRAME_MS);
 
 /** Advance the state for this render frame and return it with the atlas column to draw. */
 export function animate(seq: Sequences, s: AnimState, moving: boolean, now: number): { state: AnimState; col: number } {
+  if (s.mode === 'fight') {
+    if (!moving) return { state: s, col: seq.attack[frameIndex(s.start, now) % seq.attack.length]! };
+    s = { mode: 'idle' };
+  }
   if (s.mode === 'attack') {
     const i = frameIndex(s.start, now);
     if (i < seq.attack.length) return { state: s, col: seq.attack[i]! };
@@ -49,6 +57,9 @@ export function animate(seq: Sequences, s: AnimState, moving: boolean, now: numb
 
 /** Start an attack swing now. It plays once and ends on the idle pose. */
 export const attack = (now: number): AnimState => ({ mode: 'attack', start: now });
+
+/** Start looping the attack frames now (a unit that stands and fights). */
+export const fight = (now: number): AnimState => ({ mode: 'fight', start: now });
 
 /**
  * Facing row + mirror from a movement vector. Rows are back, back-right, right,

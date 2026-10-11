@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ANIM_FRAME_MS, animate, attack, facing, type AnimState } from '../../client/src/unitAnim';
+import { ANIM_FRAME_MS, animate, attack, facing, fight, type AnimState } from '../../client/src/unitAnim';
 
 /** Infantry: walk = 5 sheet frames then the idle pose (col 0). */
 const seq = { idle: 0, walk: [1, 2, 3, 4, 5, 0], attack: [6, 7, 8, 9, 10, 0] };
@@ -14,6 +14,12 @@ function run(steps: { at: number; moving: boolean }[], s: AnimState = { mode: 'i
 }
 
 describe('unit animation', () => {
+  it('loops the attack frames while fighting, and walks when the unit moves off', () => {
+    const steps = [0, 1, 2, 3, 4, 5, 6, 7].map((f) => ({ at: t(f), moving: false }));
+    steps.push({ at: t(8), moving: true });
+    expect(run(steps, fight(0))).toEqual([6, 7, 8, 9, 10, 0, 6, 7, 1]);
+  });
+
   it('loops the walk cycle at 15 fps while moving', () => {
     const cols = run([0, 1, 2, 3, 4, 5, 6, 7].map((f) => ({ at: t(f), moving: true })));
     expect(cols).toEqual([1, 2, 3, 4, 5, 0, 1, 2]);
