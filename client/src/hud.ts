@@ -76,7 +76,7 @@ export class HudView {
 
   update(state: TopScreenState): void {
     if (!this.hud) return;
-    // The minimap image only changes with the map, and setBundle() resets `shown` then.
+    // The minimap image changes with the map (setBundle() resets `shown`) and with fog (its version).
     const key = JSON.stringify({
       ...state,
       // Repaint when an icon frame changes, not on every tick of the clock.

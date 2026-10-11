@@ -27,6 +27,7 @@ export * from './modelClips';
 export * from './armies';
 export * from './armyBundle';
 export * from './effects';
+export * from './fogArt';
 export * from './spells';
 export * from './sdat';
 export * from './sseq';

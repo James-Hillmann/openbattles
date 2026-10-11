@@ -191,6 +191,8 @@ export interface TopScreenState {
 /** Minimap contents, all in minimap pixels (map px * 1.5 / cell size, i.e. x / 16, y * 3 / 32). */
 export interface MinimapState {
   image: Rgba;
+  /** Changes whenever `image` does (fog), so the top screen knows to repaint. */
+  version?: number;
   /** The battlefield view: a 1 px white frame (16x18 for the DS's 256x192 view). */
   view?: { x: number; y: number; w: number; h: number };
   /** Units are 1 px, buildings 2x2 (castle measured). */
