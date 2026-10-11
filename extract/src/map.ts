@@ -30,6 +30,11 @@ export interface GameMap {
   forestMarks: { x: number; y: number }[];
   /** MARK type 3: tower spots the computer opponent builds at. */
   towerMarks: { x: number; y: number }[];
+  /**
+   * MARK type 6: shipyard spots. The computer opponent proposes a Shipyard only on maps with 4 or more
+   * (0x02093A50) and builds it near one of them (0x02093AD8). confirmed (code)
+   */
+  shipMarks: { x: number; y: number }[];
   /** Starting units and buildings per start slot, in file order (EVNT section). */
   starts: StartRecord[];
   /** Pickups placed at map start (EVNT section): cell and collectable blueprint index. */
@@ -71,7 +76,7 @@ export function parseMap(d: Uint8Array): GameMap {
   if (groundStart < 0x2b + n) throw new Error('TERR section too short');
   const ground = new Uint16Array(n);
   for (let i = 0; i < n; i++) ground[i] = u16(d, groundStart + i * 2);
-  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), bridgeMarks: readBridgeMarks(d), forestMarks: readMarks(d, 0), towerMarks: readMarks(d, 3), ...readEvents(d) };
+  return { width, height, tileset, terrain, edges, regions, trees, ground, mineSites: readMineSites(d), bridgeMarks: readBridgeMarks(d), forestMarks: readMarks(d, 0), towerMarks: readMarks(d, 3), shipMarks: readMarks(d, 6), ...readEvents(d) };
 }
 
 /** MINE section: four lists of `L`, u8 count, count x (u8 x, u8 y). Only the second is ever non-empty. */

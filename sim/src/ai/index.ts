@@ -32,9 +32,13 @@ const TARGET_LIFE = 7500;
 
 /**
  * Make `player` a computer opponent against `enemy`. `marks` are the map's MARK type-0 points
- * (cells), where it looks for forests, and `towerMarks` its MARK type-3 points, where it puts towers. Call once, right after the world is created.
+ * (cells), where it looks for forests, `towerMarks` its MARK type-3 points, where it puts towers, `shipMarks` its MARK type-6
+ * points, where it puts shipyards, and `regions` the map's region plane. Call once, right after the world is created.
  */
-export function addAi(w: World, player: PlayerId, enemy: PlayerId, marks: readonly number[] = [], towerMarks: readonly number[] = []): AiPlayer {
+export function addAi(
+  w: World, player: PlayerId, enemy: PlayerId, marks: readonly number[] = [], towerMarks: readonly number[] = [], shipMarks: readonly number[] = [],
+  regions: ArrayLike<number> = [],
+): AiPlayer {
   const p = getPlayer(w, player);
   const g = w.grid;
   if (!p || !g) throw new Error('addAi needs a skirmish world');
@@ -44,7 +48,7 @@ export function addAi(w: World, player: PlayerId, enemy: PlayerId, marks: readon
     const b = w.units.find((u) => u.owner === id && u.role === ROLE_BASE);
     return b ? centre({ w } as Ctx, b) : 0;
   };
-  const ai = newAi(player, enemy, w.rng.s ^ Math.imul(player + 1, 0x9e3779b9), base(player), base(enemy), marks, towerMarks);
+  const ai = newAi(player, enemy, w.rng.s ^ Math.imul(player + 1, 0x9e3779b9), base(player), base(enemy), marks, towerMarks, shipMarks, regions);
   ai.seen = w.units.reduce((m, u) => Math.max(m, u.id), 0); // the starting buildings aren't "created"
   addBricks(p, AI_BONUS_BRICKS);
   ai.stats.lastBricks = p.bricks;

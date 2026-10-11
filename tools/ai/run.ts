@@ -57,8 +57,9 @@ const w: World = createSkirmish(
 );
 const marks = map.forestMarks.map((m) => m.y * map.width + m.x);
 const towers = map.towerMarks.map((m) => m.y * map.width + m.x);
-addAi(w, 1, 0, marks, towers);
-if (both) addAi(w, 0, 1, marks, towers);
+const ships = map.shipMarks.map((m) => m.y * map.width + m.x);
+addAi(w, 1, 0, marks, towers, ships, map.regions);
+if (both) addAi(w, 0, 1, marks, towers, ships, map.regions);
 
 const seen = new Set<number>();
 const ticks = Number(ticksArg);

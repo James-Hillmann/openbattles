@@ -106,9 +106,12 @@ centres and floors, which gives the same cells.
 
 On arrival (`0x0206E430`) a shot fired at a unit (mode 1, set when the shooter had a target, `0x0206E0F4`)
 damages that unit only if it is still alive; a splash shot explodes on its own cell either way. A shot fired
-at a cell (mode 0) hits every enemy standing in that cell. confirmed (code). Whether a shot keeps flying after
-its target dies (so a splash shot still explodes there) is in the flight action (`0x0205482C`, update
-`0x02053C44`), not traced: the sim drops it.
+at a cell (mode 0) hits every enemy standing in that cell. confirmed (code).
+
+**A shot whose target dies on the way vanishes**: no hit, and no splash either. confirmed (emulator: with a
+Wizard Ballista boulder (splash) and a Crossbowman bolt in flight at a King tower, the tower was set to 1 HP
+and a Swordsman's hit killed it at tick 5720; both shots disappeared 2 and 4 ticks later without the arrival
+handler ever running and without touching anyone's HP). The sim drops such shots the same way.
 
 ### Splash (`0x0206E5EC`, confirmed by reading the code)
 
