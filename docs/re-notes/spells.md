@@ -206,10 +206,93 @@ over the head that turns into a gold picture of the spell, and plays the dome ag
 - Removing one (effect method 9) makes it blink: still at step 0, alpha 31 and 5 on alternate ticks, gone
   after 11 ticks.
 
-Not ported yet: `Particles/SpellIncreaseEffect.hps` (the blue plus signs on buffed units), the damage spells'
-own pictures (EarthQuakeEffect, ArrowVolleyEffect and so on) and FreezeEffect. The client still marks those
-with a see-through diamond (damage) or square (freeze) over the area, an ice tint on frozen units and a dot
-for a Fireball or Thunder Hammer in flight. Planted trees use the map's own tree tiles.
+### Spell effects (found 2026-10-11)
+
+The damage, freeze and projectile spells' own pictures, ported in `client/src/spellAnims.ts` (pictures
+cut by `extract/src/spellFx.ts`, `SPELL_FX_PICS`). Each effect is an object the effect manager
+(`0x020168B8`) updates once a game tick; its quads are 3D quads with an alpha 0-31 and a depth of screen
+y + 11 + a per-effect bias (bigger draws on top). Sources: each class's update and draw (vtables found by
+their RTTI names) plus emulator traces of every cast from the King with the spell id poked into his
+spell slot (`out/re/trace.py` logs every quad set at `0x02015E24`). Confidence is **confirmed** (code,
+matched in the trace) unless marked.
+
+Position rules: a quad's x, y are its centre, because `0x02015DE0` subtracts half the previous size; the
+explosion, Roar's puffs and the laser keep their top-left there. Effects on a unit follow its box: x =
+corner + 12 px per footprint cell, y = the box's top (the corner is 12 px left of and 8 px above our
+unit position). The game draws the pictures' random numbers from its own RNG (the sim keeps those draws
+so lockstep matches, `spells.ts`); the client uses its own generator, so the same cast scatters
+differently but in the same way.
+
+- **GenericExplosion** (`0x02019CAC`): pictures 0x4D9-0x4DD, 24 x 24, top-left at its spot; a new frame
+  every 2 updates (the first shows for 1), gone after 11.
+- **EarthQuake** (13, `0x02015880`): no picture. The camera shakes sideways by the s16 table at
+  `0x02142F4C` over 35 updates (0, 0, 1, 1, ... 13, 13, 15 x 6, 14, ... 2, 2, 0), negative on even ticks.
+  Three slots (effect id mod 3) are summed and capped at 15. If the squared cell distance from the
+  view's middle cell (camera cell + (5, 6)) to the hero is 36 or more, the amount is scaled by 36 / that
+  (`0x020F2B5C`). Ours measures from the middle of our larger view (likely equivalent).
+- **ArrowVolley** (25, `0x0200EE44`): one at the spot's cell corner and one on every unit that joins.
+  An arrow every 6 updates, 5 in all, at x = rand(10) - 5, y = -(rand(40) + 40); it falls from speed 1,
+  x1.25 an update, until y >= 15, then sticks (0x4EF) and fades 31, 15, 7, 3, 1. Bias 50.
+- **ClusterBomb** (31, `0x02012338`): rand(2) + 1 bombs at the spot corner + (rand(61) - 30, rand(61) - 30),
+  dropping from 64 px up at speed 1 x1.15, blinking on a counter from 11. On landing 4 explosions at
+  +-20 px on counter 7, 5, 3, 1. Bias 200.
+- **Artillery** (23, `0x0200FB88`) and **CoconutStorm** (22, `0x02012CC4`): on the hero, once its cast effect
+  shows the spell picture (+0x10A). The muzzle sits at the box's centre column, 15 px left or 5 px right
+  toward the target, raised sprite height / 15. Shells fly a quadratic curve whose control point is the
+  midpoint pushed sideways by r * (Ey, -Ex), r = 0.5-1 (`rand(0x800) + 0x800` in 20.12), mirrored for a
+  target on the left. Artillery: a shell every min(n, 10) + 1 updates, n = max(7, 30 * min(1, (len /
+  128)^2)), straight when the shot is under 30 px or steeply up; explosions at the muzzle and the
+  impact (bias 200). Coconut: every 11 updates, target + rand(21) - 10 each way, always curved, 20 steps,
+  landing pictures 0x446-0x44A one an update, no explosion. **not ported**: the hero icon turning toward
+  the target.
+- **MonkeySwarm** (20, `0x0201D7FC`): on every unit that joins. Two monkeys 11-20 px left and right drop
+  from 20-39 px up (x1.15 an update) flickering alpha 31 / 15, then sit, swapping 0x4F4 / 0x4F5 every 3
+  updates. When the spell ends each shows a puff (0x432) for 5 updates and the last explosion frame for 5.
+  Bias 40.
+- **CrabSwarm** (21, `0x02013B88`): on every unit that joins. Up to 4 crabs, one an update, each in a free
+  cell of a 4 x 4 grid shared by all crab swarms (`0x02151020`; col = rand(4), row = rand(4), 16 tries,
+  else (36, 24)) at x = -12 + 12 col, y = -8 + 8 row. A crab climbs out over 9 updates (picture squashed
+  to k px while rising 1 px an update, dust 0x4F7 / 0x4F8 flickering 4 px above), then flips every 3
+  updates; when the spell ends it sinks back.
+- **SpaceLaser** (28, `0x0201F45C`): on every unit that joins. 7 beam segments (8 x 8, top-left 56 - 8i px
+  up), segment i starting i updates in and playing frames 0..min(i, 3); from update 7 the impact (15 x 15,
+  top-left (-2, -4)) loops 3 frames. After 70 updates or the spell's end it fades 4 alpha an update,
+  segment i going after 8 - i updates. Bias 200 / 220.
+- **Roar** (18, `0x0201E704`): on the hero (its box's middle) once the cast picture shows. Puffs
+  (0x45F-0x465, 15 x 15, top-left on the spot, one frame an update) in rings: 5 on the axes at 25 + 15k px
+  starting 8 + k updates in, 6 at 26.5 degrees off the x axis at 25 + 15k starting 12 + k in. Bias 240.
+- **FireBall** (14, kind 0x2E): follows the projectile. Its first five updates each add a trail particle
+  (15 x 15); particle k plays frames 0..k (0x456 + frame) and holds, the last loops 3..8 (bias 220, the
+  rest 200). Particles sit ahead of the fireball by v * (0.25, 0.5, 1.25, 2, 2.5, 2.5, 2.5, 2.75) by age
+  (**likely**: fitted to the trace, not read from code). At impact an explosion with its top-left 16 px
+  right, 8 px down; 3 updates later six more fireballs (trails and all) fly from the impact to
+  record 34's radius at 0, 60 .. 300 degrees (24 x 16 px a cell) in 30 updates, ending without an
+  explosion. The game also swings a scale 0.6-0.7 (`0x02151088`), which doesn't change the quads' size
+  in the trace (**likely** unused for drawing).
+- **LightningBolt** (15, kind 0x1E): made by the strike (`0x02079C88`). 8 bolts from the hero's cell
+  corner to cells range (10) away at 0, 45 .. 315 degrees clockwise from up, offset (floor(R sin),
+  floor(-R cos)), in 30 updates, then 4 more while the 16 x 16 quad (top-left 8 px right of the bolt)
+  halves in size and alpha, then an explosion. Up/down 0x4D6, sideways 0x4D6 turned 90 degrees,
+  diagonals 0x4D8 (mirrored for up-right / down-left). The game keeps targets inside the camera's
+  cells; ours keeps them on the map (**guess**: the difference only shows near the view's edge).
+- **ThunderHammer** (16, kind 0x1F): a 24 x 24 hammer on the projectile, swapping 0x4F1 / 0x4F2 every
+  update and turning 90 degrees every 2 from 90 * rand(8); an explosion where it stops. 6 updates after
+  a real impact (not a fizzle) six hammers fly from 10 px out to record 16's radius in 30 updates, each
+  ending in an explosion. Fizzles: **guess** that Fireball also explodes where it stopped.
+- **EAttack** (27 kind 0x25, 29 kind 0x27): 8 flakes (0x494 for 27, 0x493 for 29, 15 x 15) fly out of the
+  spot's cell corner at 45-degree steps, b7 cells (24 x 16 px a cell) in the record's time, turning 90
+  degrees every other update. Bias 0.
+- **Freeze** (kind 0x31): a frozen minifigure or vehicle is drawn in grey palette bank 12 for as long as
+  it is frozen (table `0x02143188`, the hit flash's bank). It also spins a swirl (0x493 / 0x494 for
+  vehicles) at depth 30, which the unit covers in the emulator, so it isn't drawn.
+- **SpellIncreaseEffect** (`Particles/SpellIncreaseEffect.hps`, id 2 of the particle table at
+  `0x02126AC8`): when a unit's count in some buff slot goes up (`0x0205F6A0` -> `0x0205D06C` compares the
+  counts with last update's), the blue plus signs play over it once, one frame a tick, following it, at
+  its box corner + (sprite width / 2, -sprite height / 4) = 14 px above our position. A count going down
+  plays SpellDecreaseEffect, but our sim has no debuffs.
+
+Without the ROM's pictures the client still marks damage and freeze areas with a see-through diamond or
+square. Planted trees use the map's own tree tiles.
 
 ## Forest spells (ForrestSpell 10, 11, 12; confirmed)
 

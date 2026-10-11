@@ -4,7 +4,8 @@ import { decodeChars, decodePalette } from './nitro';
 import { renderMap, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
 import { minimapShroudRemap, renderMinimap } from './minimap';
-import { readFogArt, type FogArt } from './fogArt';
+import { TILESET_CYCLES, readFogArt, type FogArt } from './fogArt';
+import { groundCycles, type GroundCycles } from './groundCycles';
 import { TERRAIN_TREE, bakeTrees, readTreeTable, type TreeTable } from './trees';
 import { readCombatBonus, type CombatBonus } from './entities';
 import { buildStructureArt, type StructureArt } from './structures';
@@ -17,6 +18,8 @@ export interface MapBundle {
   /** Logical terrain code per cell; will drive pathing in M2. */
   terrain: Uint8Array;
   ground: Rgba;
+  /** Ground pixels in the palette's turning colours (water, lava); undefined when none turn. */
+  groundCycles?: GroundCycles;
   /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
   minimap?: Rgba;
   /** The minimap under fog: where the local player has looked before but can't see now. */
@@ -106,8 +109,9 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
   // Bridges come from the tileset's own metatiles, not the map's detail table.
   const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));
+  const cycles = groundCycles(map, chars, pal, metatiles, TILESET_CYCLES[map.tileset] ?? []);
   return {
-    name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, minimapShroud, fog, combatBonus,
+    name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), ...(cycles ? { groundCycles: cycles } : {}), minimap, minimapShroud, fog, combatBonus,
     starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, forestMarks: map.forestMarks, towerMarks: map.towerMarks, shipMarks: map.shipMarks, regions: map.regions, structures, pickups: map.pickups,
   };
 }

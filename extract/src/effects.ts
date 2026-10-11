@@ -40,6 +40,8 @@ export interface ParticleFx {
   studDestroy?: ParticleAnim;
   /** `Particles/LegoSmallStudDestroy.hps`: the same for a unit. */
   smallStudDestroy?: ParticleAnim;
+  /** `Particles/SpellIncreaseEffect.hps`: blue plus signs over a unit whose buff count went up (docs/re-notes/spells.md "Spell effects"). */
+  spellIncrease?: ParticleAnim;
   /** The Blue Stud's spinning gold brick, 16x16 frames (docs/re-notes/pickups.md "Look"). */
   blueStud?: Rgba[];
   /** Sprite pictures by hash (hex), cut from `UI/AllInOne/CastleEffects` with palette bank 0. */
@@ -101,13 +103,15 @@ export function buildParticleFx(rom: UnpackedRom): ParticleFx | undefined {
   const destroyFile = tryRomFile(rom, 'Particles/LegoStudDestroy.hps');
   const smallFile = tryRomFile(rom, 'Particles/LegoSmallStudDestroy.hps');
   const studDestroy = destroyFile ? decodeHps(destroyFile) : undefined;
+  const increaseFile = tryRomFile(rom, 'Particles/SpellIncreaseEffect.hps');
+  const spellIncrease = increaseFile ? decodeHps(increaseFile) : undefined;
   const smallStudDestroy = smallFile ? decodeHps(smallFile) : undefined;
   // A 256x256 4bpp bitmap stored linearly (not as tiles), drawn with palette bank 0.
   const sheet = decodeChars(romFile(rom, 'UI/AllInOne/CastleEffects.NCBR'));
   const pal = decodePalette(romFile(rom, 'UI/AllInOne/CastleEffects.NCLR'));
   const stride = sheet.tilesWide * 8;
   const sprites: Record<string, Rgba> = {};
-  for (const p of [...dust, ...studs, ...(studDestroy ?? []), ...(smallStudDestroy ?? [])].flat()) {
+  for (const p of [...dust, ...studs, ...(studDestroy ?? []), ...(smallStudDestroy ?? []), ...(spellIncrease ?? [])].flat()) {
     if (sprites[p.sprite]) continue;
     const r = spriteRect(ui, parseInt(p.sprite, 16));
     if (!r) continue;
@@ -123,7 +127,7 @@ export function buildParticleFx(rom: UnpackedRom): ParticleFx | undefined {
     sprites[p.sprite] = img;
   }
   const blueStud = buildBlueStud(rom);
-  return { dust, studs, sprites, ...(blueStud ? { blueStud } : {}), ...(studDestroy ? { studDestroy } : {}), ...(smallStudDestroy ? { smallStudDestroy } : {}) };
+  return { dust, studs, sprites, ...(blueStud ? { blueStud } : {}), ...(studDestroy ? { studDestroy } : {}), ...(smallStudDestroy ? { smallStudDestroy } : {}), ...(spellIncrease ? { spellIncrease } : {}) };
 }
 
 /**

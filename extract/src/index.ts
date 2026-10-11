@@ -28,6 +28,7 @@ export * from './armies';
 export * from './armyBundle';
 export * from './effects';
 export * from './fogArt';
+export * from './groundCycles';
 export * from './hitReaction';
 export * from './spellFx';
 export * from './spells';

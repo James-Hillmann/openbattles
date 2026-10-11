@@ -100,6 +100,8 @@ import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
 import { FogView } from './fogView';
 import { SpellFxView, type FxUnit } from './spellFx';
+import { SpellAnims } from './spellAnims';
+import { WaterView } from './waterView';
 import { fogMinimap } from './fogMinimap';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
@@ -165,6 +167,10 @@ const camera = new Container();
 app.stage.addChild(camera);
 const ground = new Sprite();
 camera.addChild(ground);
+/** Water and lava colours turning over the ground (waterView.ts). */
+const waterLayer = new Container();
+camera.addChild(waterLayer);
+let waterView: WaterView | null = null;
 /** Walls and finished bridges: part of the map layer in the game, so under every unit. */
 const structureLayer = new Container();
 camera.addChild(structureLayer);
@@ -178,6 +184,8 @@ const spellFxLayer = new Container();
 spellFxLayer.sortableChildren = true;
 camera.addChild(spellFxLayer);
 let spellFx: SpellFxView | null = null;
+/** The damage and freeze spells' own pictures, EarthQuake's shake and the buff sparkles (spellAnims.ts). */
+let spellAnims = new SpellAnims();
 /** Units being healed: tick they reached full health (0 while still short), for the heart icon. */
 const healed = new Map<number, number>();
 const fallback = new Graphics();
@@ -335,6 +343,7 @@ function startSkirmish() {
   const sheet = EFFECT_SHEETS[basePrefix(localPlayer) as keyof typeof EFFECT_SHEETS] ?? 'Castle';
   const fxArt = hudBundle?.spellFx?.[sheet];
   spellFx = fxArt ? new SpellFxView(spellFxLayer, fxArt) : null;
+  spellAnims = new SpellAnims(worldSeed);
   const start = getPlayer(world, localPlayer)?.start ?? -1;
   if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
@@ -407,6 +416,8 @@ function onMap(b: MapBundle, hud: HudBundle) {
   structures.setArt(b.structures);
   mapName = b.name;
   fog = createFog(b.width, b.height);
+  waterView?.destroy();
+  waterView = b.groundCycles ? new WaterView(waterLayer, b.groundCycles, b.width) : null;
   fogView?.destroy();
   fogFlat.clear();
   fogView = b.fog ? new FogView(fogLayer, b.fog, b.width, b.height, CELL_W, CELL_H) : null;
@@ -1040,10 +1051,11 @@ function showSpells(hero: Unit, acts: CommandItem[]) {
 const BUFF_PIPS = [0xf8d800, 0xf83800, 0x3080f8];
 
 /**
- * Damage and freeze spells' areas as a see-through diamond or square (ours; the game draws each
- * spell's own effect, e.g. EarthQuakeEffect, which isn't ported yet). Heal auras and buffs aren't drawn.
+ * Without the ROM's effect pictures, damage and freeze spells' areas show as a see-through diamond or
+ * square (ours; with them, spellAnims.ts draws each spell's own effect). Heal auras and buffs aren't drawn.
  */
 function drawSpellAreas() {
+  if (spellFx?.hasEffects) return;
   for (const s of world.spells) {
     const def = world.spellDefs[s.spell];
     if (!def || s.radius < 0 || !spellWorks(s.spell) || s.spell <= 9) continue;
@@ -1480,6 +1492,13 @@ function followUpgrades(before: World) {
   }
 }
 
+/** The cell at the middle of the screen (EarthQuake's fall-off measures from the DS view's middle cell). */
+function viewCell(): { x: number; y: number } {
+  const x = (app.screen.width / 2 - camera.x) / camera.scale.x;
+  const y = (app.screen.height / 2 - camera.y) / camera.scale.y;
+  return { x: Math.floor(x / CELL_W), y: Math.floor(y / CELL_H) };
+}
+
 /** Run every sim tick that `ms` more of wall time allows (fewer while waiting on input). */
 function advance(ms: number) {
   acc = Math.min(acc + ms, TICK_MS * MAX_CATCHUP_TICKS);
@@ -1499,6 +1518,13 @@ function advance(ms: number) {
     }
     extras.onTick(world, animTime / TICK_MS, (u) => !hiddenByFog(u));
     spellFx?.tick(world, unitIcons(before));
+    for (const b of spellAnims.tick(world, viewCell(), (id) => spellFx?.iconShown(id, world.tick) ?? true)) {
+      extras.buffUp(animTime / TICK_MS, () => {
+        const d = drawn.find((p) => p.id === b.unit);
+        // SpellIncreaseEffect sits half a sprite right and a quarter up from the unit's box corner: 14 px above our spot.
+        return d ? { x: d.x, y: d.y - 14 } : null;
+      });
+    }
     tickEl.textContent = String(world.tick);
     hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
   }
@@ -1544,6 +1570,8 @@ app.ticker.add((t) => {
     unitAnim.delete(id);
   }
   drawSpellAreas();
+  // EarthQuake shakes the whole view sideways (camera +0x62).
+  camera.pivot.x = -spellAnims.shake(world.tick);
   for (const p of world.projectiles) overlay.circle(fxToFloat(p.x), fxToFloat(p.y) - 8, 1.5).fill(0xffffff);
   // A selected unit that just got on a transport hands the selection to the transport. likely (emulator: the
   // King's boarding left the ship selected), see docs/re-notes/transports.md
@@ -1552,6 +1580,7 @@ app.ticker.add((t) => {
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
   fogView?.setTick(animTime / TICK_MS);
+  waterView?.setTick(animTime / TICK_MS);
   // Pickups show once their cell has been explored (guess: not checked against the game's fog).
   extras.render(world, animTime / TICK_MS, (c) => !fog || fog.explored[c] === 1);
   structures.draw(world, (o) => teamColor[o] ?? o, hiddenByFog);
@@ -1583,7 +1612,9 @@ app.ticker.add((t) => {
     const type = unitTypes.get(`${unitKind.get(u.id)}@${bank}`) ?? unitTypes.get(`${unitKind.get(u.id)}@${bank & ~1}`);
     // Hit reaction: the sprite shakes sideways and turns grey for a few ticks (docs/re-notes/combat.md).
     const hit = hitFrame(hudBundle?.hitReaction, world.tick - 1 - u.lastHit + alpha);
-    const flash = hit.flash ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
+    // A frozen unit is drawn in the same grey bank for as long as it is frozen (FreezeEffect, table 0x02143188).
+    const frozen = isFrozen(world, u);
+    const flash = hit.flash || frozen ? unitTypes.get(`${unitKind.get(u.id)}@${FLASH_BANK}`) : undefined;
     if (!type) {
       fallback.circle(x, y, 8).fill(COLORS[teamColor[u.owner] ?? u.owner] ?? 0xffffff);
       continue;
@@ -1629,7 +1660,8 @@ app.ticker.add((t) => {
       const clip: ModelClipName = moving ? 'move' : target ? 'attack' : 'idle';
       if (clip !== a.clip) Object.assign(a, { clip, clipStart: animTime });
       const outline = isSelected ? bgr(u.owner === localPlayer ? OUTLINE_OWN : OUTLINE_OTHER) : undefined;
-      s.texture = type.model.texture(a.row, clipFrame(type.model.unit.clips[clip], animTime - a.clipStart), outline);
+      const model = frozen && flash?.model ? flash.model : type.model;
+      s.texture = model.texture(a.row, clipFrame(model.unit.clips[clip], animTime - a.clipStart), outline);
       s.scale.x = 1;
     } else {
       const r = animate(type.sprite, a.state, moving, animTime);
@@ -1642,8 +1674,6 @@ app.ticker.add((t) => {
     // Only sprites shake; the bars stay put (emulator).
     s.position.set(Math.round(x) + (type.model ? 0 : hit.dx), Math.round(y));
     s.zIndex = y;
-    // Ours, not the game's (FreezeEffect isn't ported yet): a frozen unit is tinted ice blue.
-    s.tint = isFrozen(world, u) ? 0x90c8ff : 0xffffff;
     // Without the game's buff icons (spellFx.ts), each buff shows as a pip over the head.
     if (!spellFx) BUFF_PIPS.forEach((color, slot) => {
       if (u.boost & (1 << slot)) overlay.rect(Math.round(x) - 7 + slot * 5, Math.round(y) - box.anchorY - 5, 4, 4).fill(color);
@@ -1659,7 +1689,7 @@ app.ticker.add((t) => {
   if (spellFx) {
     const at = new Map<number, FxUnit>();
     for (const d of nextDrawn) if (d.role !== undefined && d.role <= 6) at.set(d.id, { id: d.id, role: d.role, x: d.x, y: d.y });
-    spellFx.draw(world.tick, at);
+    spellFx.draw(world.tick, at, spellAnims.quads());
   }
   if (boxRect) {
     const l = Math.min(boxRect.x0, boxRect.x1);

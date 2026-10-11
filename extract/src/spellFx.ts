@@ -38,6 +38,31 @@ export const HERO_SPELL_KIND: Record<number, number> = {
   30: 0x18, 31: 0x1a, 32: 0x1b,
 };
 
+/** The damage and freeze spells' own pictures (client/src/spellAnims.ts): UIMgrData ids. */
+export const SPELL_FX_PICS = {
+  explosion: [0x4d9, 0x4da, 0x4db, 0x4dc, 0x4dd],
+  arrowFall: 0x4ee,
+  arrowStuck: 0x4ef,
+  bomb: 0x4ed,
+  shell: 0x4f0,
+  coconut: [0x445, 0x446, 0x447, 0x448, 0x449, 0x44a],
+  monkey: [0x4f4, 0x4f5],
+  monkeyPuff: 0x432,
+  crab: 0x4f6,
+  crabDust: [0x4f7, 0x4f8],
+  laser: [0x4e5, 0x4e6, 0x4e7, 0x4e8],
+  laserHit: [0x4e9, 0x4ea, 0x4eb],
+  roar: [0x45f, 0x460, 0x461, 0x462, 0x463, 0x464, 0x465],
+  fireball: [0x456, 0x457, 0x458, 0x459, 0x45a, 0x45b, 0x45c, 0x45d, 0x45e],
+  bolt: [0x4d6, 0x4d7, 0x4d8],
+  hammer: [0x4f1, 0x4f2],
+  freezeMinifig: 0x493,
+  freezeVehicle: 0x494,
+} as const;
+
+/** Every picture id above, for extract. */
+export const SPELL_FX_PIC_IDS: number[] = Object.values(SPELL_FX_PICS).flatMap((v) => (typeof v === 'number' ? [v] : [...v]));
+
 /** ARM9 address of the icons' 14-step bob path (12-byte records: vtable, s32 x, s32 y in 20.12). */
 const BOB_TABLE: Record<string, number> = { C5SE: 0x0215118c };
 const BOB_STEPS = 14;
@@ -50,6 +75,8 @@ export interface SpellFxArt {
   units: Record<UnitIcon, Rgba>;
   /** Icon offset per tick, pixels (0x0201FBF8). */
   bob: { x: number; y: number }[];
+  /** The spell effects' pictures by UIMgrData id (SPELL_FX_PIC_IDS). */
+  effects?: Record<number, Rgba>;
 }
 
 export function buildSpellFx(rom: UnpackedRom, sheet: EffectSheet): SpellFxArt | undefined {
@@ -88,5 +115,6 @@ export function buildSpellFx(rom: UnpackedRom, sheet: EffectSheet): SpellFxArt |
     heroIcons: Array.from({ length: HERO_ICONS }, (_, i) => picture(HERO_ICON_FIRST + i)),
     units,
     bob,
+    effects: Object.fromEntries(SPELL_FX_PIC_IDS.map((id) => [id, picture(id)])),
   };
 }

@@ -25,6 +25,8 @@ interface Burst {
   t0: number;
   x: number;
   y: number;
+  /** Where it is now, for a burst that rides on a unit; null drops it. */
+  follow?: () => { x: number; y: number } | null;
 }
 
 /** Room around a burst's anchor: the destroy studs reach about 72 px out. */
@@ -53,9 +55,21 @@ export class DeathFx {
     if (this.fx.studDestroy) this.bursts.push({ anim: this.fx.studDestroy, t0: now + 6, x: b.left + b.w / 2, y: b.top + b.h / 2 });
   }
 
+  /** Play `anim` from render tick `now`, anchored wherever `at` says each frame. */
+  play(anim: ParticleAnim, now: number, at: () => { x: number; y: number } | null): void {
+    const p = at();
+    if (p) this.bursts.push({ anim, t0: now, ...p, follow: at });
+  }
+
   /** Draw every live burst at render tick `now` into one canvas; null when nothing plays. */
   draw(now: number): { canvas: HTMLCanvasElement; x: number; y: number } | null {
-    this.bursts = this.bursts.filter((b) => now - b.t0 < b.anim.length);
+    this.bursts = this.bursts.filter((b) => {
+      if (now - b.t0 >= b.anim.length) return false;
+      if (!b.follow) return true;
+      const p = b.follow();
+      if (p) Object.assign(b, p);
+      return !!p;
+    });
     const live = this.bursts.filter((b) => now >= b.t0);
     if (!live.length) return null;
     const l = Math.floor(Math.min(...live.map((b) => b.x))) - PAD;
@@ -63,6 +77,8 @@ export class DeathFx {
     const w = Math.ceil(Math.max(...live.map((b) => b.x))) + PAD - l;
     const h = Math.ceil(Math.max(...live.map((b) => b.y))) + PAD - t;
     if (!this.img || this.img.width !== w || this.img.height !== h) {
+      // A fresh canvas, so whoever made a texture of the old one sees the change of size.
+      this.canvas = document.createElement('canvas');
       this.canvas.width = w;
       this.canvas.height = h;
       this.img = new ImageData(w, h);
