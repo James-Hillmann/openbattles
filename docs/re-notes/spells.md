@@ -160,14 +160,56 @@ Two game quirks, kept: after its first catch, 29 no longer takes ranged units; a
 is caught again on later steps (its de-duplication is broken), which refreezes it. guess: a refreeze
 restarts the 60 ticks.
 
-## Pictures (not ported)
+## Pictures
 
-The game draws each spell with its own effect: icons over buffed units (SpellIconsSpeedEffect /
-SwordEffect / ArmourEffect), `Particles/SpellIncreaseEffect.hps` when a buff lands, SpellIconsHeartEffect
-on healed units, EarthQuakeEffect, ArrowVolleyEffect and so on. The client stands in with its own
-markers for now: a see-through diamond (damage) or square (freeze) over the area, a pip per buff over
-the unit, an ice tint on frozen units and a dot for a Fireball or Thunder Hammer in flight. Planted
-trees use the map's own tree tiles.
+Found 2026-10-11 from ARM9 and a King's Speed cast in DeSmuME (mp01). Ported in `extract/src/spellFx.ts` and
+`client/src/spellFx.ts`. Both effects below draw 24 x 24 quads, centred on their spot, cut from the local
+player's faction's effects sheet: `UI/AllInOne/CastleEffects` for King and Wizard, `PirateEffects` for Captain and
+Governor, `MarsEffects` for Commander and Alien (picked at `0x0202EC9C` from the local player's entity type;
+confirmed from code). The three sheets differ only in rows 136-159, where the icons are.
+
+Pictures are found through `UI/Game/UIMgrData.bin` (confirmed): record n is 28 bytes, its +8 is the file
+offset of a picture record whose +0x0F byte is the palette bank and whose +0x14 holds s16 x, y, w, h in the
+sheet (`0x020E3D18` returns the record).
+
+### Hero cast effect (HeroStartSpellEffect, confirmed from code; timing seen in the emulator)
+
+Created on the hero when a spell starts (`0x02016BFC(kind, hero)`), it shows a swirl round the body, a dome
+over the head that turns into a gold picture of the spell, and plays the dome again when the spell ends.
+
+- Spot: the hero's cell corner + (16, 12) px, i.e. 4 px right of and 4 px below our cell-centre position.
+- Frames are UIMgrData ids 0x495-0x4A6 (cyan, bank 2): swirl 0-7, sparkles 8-9, dome 10-16. The picture is id
+  0x4A7 + kind: kind = spell id - 4 for 4-16, plus 17 -> 0x1D, 18 -> 0x1F, 19 -> 0x1E, 20-23 -> 0xD-0x10,
+  24 -> 0x11, 25 -> 0x12, 26 -> 0x13, 27 -> 0x15, 28 -> 0x16, 29 -> 0x17, 30 -> 0x18, 31 -> 0x1A, 32 -> 0x1B
+  (`HERO_SPELL_KIND`; read from each spell class's call; 13 seen in the emulator; 10-12 likely). Heals start
+  none.
+- It steps every 3 ticks: each update adds 33.3 ms and it steps at 66.7 ms + 1 (`0x0201B410`).
+- Swirl (5 px up): frames n mod 9 until 7, then (n mod 6) + 2 until the spell ends, then (n mod 3) + 9 with
+  the counter restarted at 1, hidden at 2. Dome (30 px up): 10, then 10 + (n mod 7), hidden at 6; the
+  picture (30 px up) shows from the dome's fourth frame. When the spell ends the dome plays again, the
+  picture goes at its fourth frame and the effect is removed at the sixth. `heroFxFrame` runs both machines.
+- Seen: a Speed cast's effect lasted until ~20 ticks after the 300-tick buff ended.
+
+### Unit icons (SpellIcons*Effect, confirmed from code; offsets checked against RAM)
+
+- Buffs: the stats rebuild (`0x0205F85C`) adds an icon per buff slot and removes it when the slot empties:
+  speed -> SpellIconsSpeed (id 0x4D0, a grey winged boot), or SpellIconsTradeWind for roles 5-6 (ship wheel:
+  0x4B8 if the entity record's +0x18 water flag is set, else 0x4CB); damage -> Sword (0x4D2); armour ->
+  Armour (0x4D4); chopping -> Chopping (0x4C5, axe); mining -> Mining (0x4C4, pickaxe).
+- Heals: a HealSpell pulse that heals a unit adds SpellIconsHeart (0x4CE) unless it has one; a pulse that
+  finds the unit full removes it (`0x02078944` -> `0x02078B74`). We see pulses as HP going up (likely).
+- Spot: the unit's cell corner + 12 px each way, raised by the unit's height (24 px a cell) plus 8 px for
+  minifigures (roles 0-4) or 20 px for roles 5-6. Seen: a Builder's icon at (252, 188) over its cell corner
+  (240, 208).
+- Each tick it moves along a 14-step path (ARM9 `0x0215118C`, 12-byte records: vtable, s32 x, s32 y):
+  x 0, 3, 5, 6, 6, 5, 3, 0, -3, -5, -6, -6, -5, -3 and y 0, -1, -2, -1, 0, 1, 1, 0, -1, -1, 0, 1, 2, 1.
+- Removing one (effect method 9) makes it blink: still at step 0, alpha 31 and 5 on alternate ticks, gone
+  after 11 ticks.
+
+Not ported yet: `Particles/SpellIncreaseEffect.hps` (the blue plus signs on buffed units), the damage spells'
+own pictures (EarthQuakeEffect, ArrowVolleyEffect and so on) and FreezeEffect. The client still marks those
+with a see-through diamond (damage) or square (freeze) over the area, an ice tint on frozen units and a dot
+for a Fireball or Thunder Hammer in flight. Planted trees use the map's own tree tiles.
 
 ## Forest spells (ForrestSpell 10, 11, 12; confirmed)
 

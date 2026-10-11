@@ -3,6 +3,7 @@ import { parseFont, renderText, type Font } from './font';
 import { entityLabels, parseLang, type EntityLabel } from './lang';
 import { minimapDotColors } from './minimap';
 import { readHitReaction, type HitFrame } from './hitReaction';
+import { buildSpellFx, type EffectSheet, type SpellFxArt } from './spellFx';
 import { decodeCells, decodeChars, decodePalette, decodeScreen, type CharData } from './nitro';
 import { blitTile, renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
@@ -33,6 +34,8 @@ export interface HudBundle {
   particles?: ParticleFx;
   /** Shake and flash per tick after a hit; undefined for unmapped game versions. */
   hitReaction?: HitFrame[];
+  /** Spell pictures per faction effects sheet (docs/re-notes/spells.md "Pictures"). */
+  spellFx?: Partial<Record<EffectSheet, SpellFxArt>>;
 }
 
 /**
@@ -169,7 +172,7 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const hc = decodeChars(heads);
     for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom), hitReaction: readHitReaction(rom) };
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom), hitReaction: readHitReaction(rom), spellFx: spellFxSheets(rom) };
 }
 
 /** What the top screen shows this frame. */
@@ -344,6 +347,15 @@ export function composeTopScreen(hud: HudBundle, s: TopScreenState): Rgba {
     const hp = `${Math.max(0, s.selected.hp)}/${label.maxHp}`;
     // On the 8 px tile grid, centered under the portrait.
     drawDigits(out, hud, hp, Math.floor(L.hpCenterX / 8 - hp.length / 2) * 8, L.hpY);
+  }
+  return out;
+}
+
+function spellFxSheets(rom: UnpackedRom): Partial<Record<EffectSheet, SpellFxArt>> {
+  const out: Partial<Record<EffectSheet, SpellFxArt>> = {};
+  for (const sheet of ['Castle', 'Pirate', 'Mars'] as const) {
+    const art = buildSpellFx(rom, sheet);
+    if (art) out[sheet] = art;
   }
   return out;
 }

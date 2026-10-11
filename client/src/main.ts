@@ -75,8 +75,9 @@ import {
   isWalkableCode,
   type BridgeSite,
   addAi,
+  MOVES_WATER,
 } from '@lbw/sim';
-import { FE_TEXT, priceLabel, type ActionIcon, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats } from '@lbw/extract';
+import { EFFECT_SHEETS, FE_TEXT, priceLabel, type ActionIcon, type ArmyBundle, FLASH_BANK, OUTLINE_OTHER, OUTLINE_OWN, clipFrame, modelRow, type HudBundle, type MapBundle, type Rgba, type UnitBundle, type UnitSprite, type UnitStats, type UnitIcon } from '@lbw/extract';
 import { HudView, TRAIN_COLORS, drawUnitBars, type CostAction } from './hud';
 import { animate, attack, facing, fight, type AnimState } from './unitAnim';
 import { hitFrame } from './hitShake';
@@ -98,6 +99,7 @@ import { GameSound } from './gameSound';
 import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
 import { FogView } from './fogView';
+import { SpellFxView, type FxUnit } from './spellFx';
 import { fogMinimap } from './fogMinimap';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
@@ -171,6 +173,13 @@ const unitLayer = new Container();
 /** Pickups, death bursts and the score table (matchExtras.ts). */
 const extras = new MatchExtras(unitLayer);
 camera.addChild(unitLayer);
+/** Spell pictures over heroes and units (spellFx.ts), above units like the game's 3D quads. */
+const spellFxLayer = new Container();
+spellFxLayer.sortableChildren = true;
+camera.addChild(spellFxLayer);
+let spellFx: SpellFxView | null = null;
+/** Units being healed: tick they reached full health (0 while still short), for the heart icon. */
+const healed = new Map<number, number>();
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
 /** Fog of war (above units, below bars): FogView's cell pictures, or flat grey cells without them. */
@@ -320,6 +329,12 @@ function startSkirmish() {
   placing = null;
   // Music follows the local player's faction (King 0 .. Alien 5); custom armies use their buildings' faction (guess).
   if (!appEl.classList.contains('menu')) sound.matchStart(Math.max(0, 'KWPIEA'.indexOf(basePrefix(localPlayer))));
+  // Spell pictures come from the local player's faction's effects sheet (0x0202EC9C).
+  spellFx?.destroy();
+  healed.clear();
+  const sheet = EFFECT_SHEETS[basePrefix(localPlayer) as keyof typeof EFFECT_SHEETS] ?? 'Castle';
+  const fxArt = hudBundle?.spellFx?.[sheet];
+  spellFx = fxArt ? new SpellFxView(spellFxLayer, fxArt) : null;
   const start = getPlayer(world, localPlayer)?.start ?? -1;
   if (start >= 0) centerOn(cellCenterPx(start % grid.width, 'x'), cellCenterPx(Math.floor(start / grid.width), 'y'));
 }
@@ -568,6 +583,41 @@ function hiddenByFog(u: World['units'][number]): boolean {
   if (!fog || u.owner === localPlayer || u.tracked) return false; // Tracking shows its target through fog (likely)
   const [cx, cy] = visionCell(u);
   return !isVisible(fog, cx, cy);
+}
+
+/** Heal pulses come every 7 ticks: a full unit loses its heart at the next one (HealSpell 0x02078944). */
+const HEAL_PULSE_TICKS = 7;
+/** Icon per buff slot (0x0205F85C): speed (vehicles and ships: a wheel), damage, armour, chopping, mining. */
+const BUFF_ICONS = ['speed', 'sword', 'armour', 'chop', 'mine'] as const;
+
+/**
+ * The icons each unit should show this tick (spellFx.ts): one per buff it has, and a heart while heal
+ * pulses top it up (the game adds it on a pulse that heals and takes it away on the first that finds
+ * the unit full; we see the pulses as HP going up, which also counts other healing: likely).
+ */
+function unitIcons(before: World): Map<number, Set<UnitIcon>> {
+  const out = new Map<number, Set<UnitIcon>>();
+  const add = (id: number, icon: UnitIcon) => {
+    let set = out.get(id);
+    if (!set) out.set(id, (set = new Set()));
+    set.add(icon);
+  };
+  for (const u of world.units) {
+    if (u.hp <= 0 || u.role > 6) continue;
+    BUFF_ICONS.forEach((icon, slot) => {
+      if (!(u.boost & (1 << slot))) return;
+      add(u.id, slot === 0 && (u.role === 5 || u.role === 6) ? (u.moves & MOVES_WATER ? 'wheel' : 'wind') : icon);
+    });
+    const was = before.units.find((q) => q.id === u.id);
+    if (was && u.hp > was.hp) healed.set(u.id, u.hp >= u.maxHp ? world.tick : 0);
+    else if (healed.get(u.id) === 0 && u.hp >= u.maxHp) healed.set(u.id, world.tick);
+    const full = healed.get(u.id);
+    if (full === undefined) continue;
+    if (full > 0 && world.tick - full >= HEAL_PULSE_TICKS) healed.delete(u.id);
+    else add(u.id, 'heart');
+  }
+  for (const id of healed.keys()) if (!world.units.some((u) => u.id === id)) healed.delete(id);
+  return out;
 }
 
 /** After the fog grids change: the cell pictures and the minimap. */
@@ -1448,6 +1498,7 @@ function advance(ms: number) {
       refreshFog();
     }
     extras.onTick(world, animTime / TICK_MS, (u) => !hiddenByFog(u));
+    spellFx?.tick(world, unitIcons(before));
     tickEl.textContent = String(world.tick);
     hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
   }
@@ -1591,10 +1642,10 @@ app.ticker.add((t) => {
     // Only sprites shake; the bars stay put (emulator).
     s.position.set(Math.round(x) + (type.model ? 0 : hit.dx), Math.round(y));
     s.zIndex = y;
-    // Ours, not the game's (its SpellIcons*Effect pictures aren't ported yet): a frozen unit is
-    // tinted ice blue and each buff shows as a pip over the head.
+    // Ours, not the game's (FreezeEffect isn't ported yet): a frozen unit is tinted ice blue.
     s.tint = isFrozen(world, u) ? 0x90c8ff : 0xffffff;
-    BUFF_PIPS.forEach((color, slot) => {
+    // Without the game's buff icons (spellFx.ts), each buff shows as a pip over the head.
+    if (!spellFx) BUFF_PIPS.forEach((color, slot) => {
       if (u.boost & (1 << slot)) overlay.rect(Math.round(x) - 7 + slot * 5, Math.round(y) - box.anchorY - 5, 4, 4).fill(color);
     });
     // The game shows a unit's bars while it is selected; we also show them once it is hurt.
@@ -1605,6 +1656,11 @@ app.ticker.add((t) => {
   }
   unitLayer.sortableChildren = true;
   drawn = nextDrawn;
+  if (spellFx) {
+    const at = new Map<number, FxUnit>();
+    for (const d of nextDrawn) if (d.role !== undefined && d.role <= 6) at.set(d.id, { id: d.id, role: d.role, x: d.x, y: d.y });
+    spellFx.draw(world.tick, at);
+  }
   if (boxRect) {
     const l = Math.min(boxRect.x0, boxRect.x1);
     const t = Math.min(boxRect.y0, boxRect.y1);

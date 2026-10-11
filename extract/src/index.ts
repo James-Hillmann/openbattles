@@ -29,6 +29,7 @@ export * from './armyBundle';
 export * from './effects';
 export * from './fogArt';
 export * from './hitReaction';
+export * from './spellFx';
 export * from './spells';
 export * from './sdat';
 export * from './sseq';
