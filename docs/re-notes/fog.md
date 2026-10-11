@@ -103,9 +103,12 @@ tileset at `0x02038980` (tileset picked by name at `0x020A44A0`):
 | Pirate | 8-15 / 2, 16-39 / 3, 40-47 / 3, 199-204 / 3 |
 | Mars | 8-15 / 2, 16-39 / 3, 40-47 / 3, 71-79 / 3 |
 
-The client cycles the fog colours. **open**: the ground's water/lava cycles aren't drawn yet (our
-ground is a baked picture). Where the cycle starts against our tick count isn't known; it only
-shifts the phase.
+The client cycles the fog colours, and the ground's too: extract keeps, for each cell picture that
+uses a turning colour, which pixels do (`extract/src/groundCycles.ts`), and `client/src/waterView.ts`
+lays those pixels over the baked ground and recolours them as the ranges turn (every range, 8-15
+included, since the whole BG palette turns in the game). Where the cycle starts against our tick
+count isn't known; it only shifts the phase. Seen in the browser on mp01: the water moves; not
+lined up frame by frame with the emulator (likely).
 
 ### Minimap (confirmed)
 

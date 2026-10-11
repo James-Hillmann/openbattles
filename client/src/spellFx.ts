@@ -1,6 +1,7 @@
 import { Container, Sprite, Texture } from 'pixi.js';
 import type { Rgba, SpellFxArt, UnitIcon } from '@lbw/extract';
 import { HERO_SPELL_KIND } from '@lbw/extract';
+import type { FxQuad } from './spellAnims';
 
 /**
  * Spell pictures as the game draws them (docs/re-notes/spells.md "Pictures"). All of it is drawing:
@@ -157,6 +158,11 @@ export class SpellFxView {
     private readonly art: SpellFxArt,
   ) {}
 
+  /** Whether the spell effects' pictures are there to draw. */
+  get hasEffects(): boolean {
+    return !!this.art.effects;
+  }
+
   destroy(): void {
     for (const s of this.sprites) s.destroy();
     for (const t of this.textures.values()) t.destroy(true);
@@ -195,6 +201,15 @@ export class SpellFxView {
     }
   }
 
+  /**
+   * Whether spell `spellId`'s hero effect shows the gold picture yet (HeroStartSpellEffect +0x10A,
+   * which Artillery, Coconut Storm and Roar wait for). True when the spell has no hero effect.
+   */
+  iconShown(spellId: number, tick: number): boolean {
+    const h = this.heroes.get(spellId);
+    return !h || heroFxFrame(this.heroSteps(h, tick), this.endStep(h)).icon;
+  }
+
   private heroSteps(h: HeroFx, tick: number): number {
     return Math.floor((tick - h.start + 1) / HERO_STEP_TICKS);
   }
@@ -203,9 +218,24 @@ export class SpellFxView {
     return h.end === null ? null : Math.floor((h.end - h.start + 1) / HERO_STEP_TICKS);
   }
 
-  /** Draw for game tick `tick`; `units` are where units are drawn now (dead or hidden ones left out). */
-  draw(tick: number, units: Map<number, FxUnit>): void {
+  /**
+   * Draw for game tick `tick`; `units` are where units are drawn now (dead or hidden ones left out),
+   * `quads` the spell effects' pictures (spellAnims.ts; the fog layer above covers them as in the game).
+   */
+  draw(tick: number, units: Map<number, FxUnit>, quads: readonly FxQuad[] = []): void {
     this.used = 0;
+    for (const q of quads) {
+      const img = this.art.effects?.[q.pic];
+      if (!img || q.alpha <= 0) continue;
+      const w = q.w ?? img.width;
+      const h = q.h ?? img.height;
+      const x = q.topLeft ? q.x + w / 2 : q.x;
+      const y = q.topLeft ? q.y + h / 2 : q.y;
+      const s = this.put(img, x, y, q.alpha, y + q.bias);
+      if (!s) continue;
+      s.scale.set(((q.flipX ? -1 : 1) * w) / img.width, h / img.height);
+      s.angle = q.rot ?? 0;
+    }
     for (const h of this.heroes.values()) {
       const u = units.get(h.caster);
       if (!u) continue;
@@ -229,8 +259,8 @@ export class SpellFxView {
     for (let i = this.used; i < this.sprites.length; i++) this.sprites[i]!.visible = false;
   }
 
-  private put(img: Rgba | undefined, x: number, y: number, alpha: number, z: number): void {
-    if (!img) return;
+  private put(img: Rgba | undefined, x: number, y: number, alpha: number, z: number): Sprite | undefined {
+    if (!img) return undefined;
     let s = this.sprites[this.used];
     if (!s) {
       s = new Sprite();
@@ -244,6 +274,9 @@ export class SpellFxView {
     s.alpha = alpha / 31;
     s.zIndex = z;
     s.visible = true;
+    s.scale.set(1);
+    s.angle = 0;
+    return s;
   }
 
   private texture(img: Rgba): Texture {

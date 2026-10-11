@@ -9,6 +9,7 @@ import { DeathFx, type DeathAt } from './deathFx';
  */
 export class MatchExtras {
   private deathFx: DeathFx | null = null;
+  private particles: ParticleFx | undefined;
   private deathSprite = new Sprite();
   private studFrames: Texture[] = [];
   private pickupSprites = new Map<number, Sprite>();
@@ -21,6 +22,7 @@ export class MatchExtras {
   /** New ROM effects; also drops anything still playing. */
   setParticles(fx: ParticleFx | undefined, textureFrom: (img: Rgba) => Texture): void {
     this.deathFx = fx ? new DeathFx(fx) : null;
+    this.particles = fx;
     this.studFrames = (fx?.blueStud ?? []).map(textureFrom);
     this.reset();
   }
@@ -34,6 +36,15 @@ export class MatchExtras {
   onTick(w: World, now: number, visible: (u: Unit) => boolean): void {
     if (!this.deathFx) return;
     for (const u of w.lastDead ?? []) if (visible(u)) this.deathFx.add(deathAt(u), now);
+  }
+
+  /**
+   * A unit's buff count went up: SpellIncreaseEffect plays over it, one frame a tick, following it
+   * (0x0205F6A0). `at` gives the unit's spot each frame, or null once it is gone or hidden.
+   */
+  buffUp(now: number, at: () => { x: number; y: number } | null): void {
+    const anim = this.particles?.spellIncrease;
+    if (anim && this.deathFx) this.deathFx.play(anim, now, at);
   }
 
   /** Draw the pickups and bursts for render tick `now`. `seen(cell)` hides pickups under fog. */
@@ -66,7 +77,10 @@ export class MatchExtras {
     const burst = this.deathFx?.draw(now);
     this.deathSprite.visible = !!burst;
     if (burst) {
-      if (this.deathSprite.texture.source?.resource !== burst.canvas) {
+      // DeathFx hands over a new canvas whenever its size changes.
+      const t = this.deathSprite.texture;
+      if (t.source?.resource !== burst.canvas) {
+        if (t !== Texture.EMPTY) t.destroy(true);
         this.deathSprite.texture = Texture.from(burst.canvas);
         this.deathSprite.texture.source.scaleMode = 'nearest';
       } else this.deathSprite.texture.source.update();
