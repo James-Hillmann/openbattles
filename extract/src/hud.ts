@@ -2,6 +2,7 @@ import { romFile, tryRomFile } from './bundle';
 import { parseFont, renderText, type Font } from './font';
 import { entityLabels, parseLang, type EntityLabel } from './lang';
 import { minimapDotColors } from './minimap';
+import { readHitReaction, type HitFrame } from './hitReaction';
 import { decodeCells, decodeChars, decodePalette, decodeScreen, type CharData } from './nitro';
 import { blitTile, renderCell, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
@@ -30,6 +31,8 @@ export interface HudBundle {
   commandIcons: Record<string, Rgba>;
   /** The dust cloud and flying studs over building sites (docs/re-notes/build-ui.md). */
   particles?: ParticleFx;
+  /** Shake and flash per tick after a hit; undefined for unmapped game versions. */
+  hitReaction?: HitFrame[];
 }
 
 /**
@@ -166,7 +169,7 @@ export function buildHudBundle(rom: UnpackedRom, portraitIds: readonly string[],
     const hc = decodeChars(heads);
     for (const [name, i] of Object.entries(COMMAND_ICONS)) commandIcons[name] = commandIcon(hc, pal, i);
   }
-  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom) };
+  return { frame, icons, glyphs, labels, portraits, nameFont: parseFont(romFile(rom, 'Font/MSMincho-12.NFTR')), commandIcons, particles: buildParticleFx(rom), minimapDots: minimapDotColors(rom), hitReaction: readHitReaction(rom) };
 }
 
 /** What the top screen shows this frame. */

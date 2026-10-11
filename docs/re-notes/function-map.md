@@ -11,6 +11,7 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x02001EE0` | ARM | `Bp_onEntitiesLoaded` | Callback after the file is decompressed: stores the buffer pointer, then calls `Bp_buildEntities` | likely | |
 | `0x02001F3C` | ARM | `Bp_buildEntities` | Walks 0x7C-byte entity records, switches on the kind byte at +8, allocates a 12-byte wrapper per record and adds it to a list | likely | Key function for M4 |
 | `0x020025D4` | ARM | `Bp_loadFactions` | Same pattern as `Bp_loadEntities`, for `BP\factions.fbp` | likely | |
+| `0x0201C508` | ARM | `HitFx_step` | Hit reaction effect: one record per game tick from the table at `0x02143460` into the unit's +0x88 flag, +0x89 bank, +0x8A x offset; roles 0-6 only | confirmed | docs/re-notes/combat.md "Hit reaction" |
 | `0x020EFD90` | ARM | `Res_loadAsync` | Generic resource load: takes a scope, a callback, a source-location string and line; returns a handle | guess | Called by every `Bp_load*` |
 | `0x020F16B4` | ARM | `Res_pushScope` | Called before a load with the file path and a line number | guess | Paired with `0x020F178C` |
 | `0x020F178C` | ARM | `Res_popScope` | Closes the scope opened by `Res_pushScope` | guess | |
@@ -53,6 +54,7 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x02080EF4` | ARM | `Path_astar?` | References the string `AstarSearch.cpp` | guess | Pathfinding lives near here; start M4 movement work from this |
 | `0x0203A8BC` | ARM | `Unit_showsBars` | Decides whether a unit gets bars this frame: units when selected (via the object at +0xF4) or when +0x1D4 > 0; buildings at HP <= 32% | likely (unit/building cases confirmed in the emulator) | |
 | `0x0203AA60` | ARM | (per-unit draw loop) | Calls `Unit_drawBars` for every unit that `Unit_showsBars` accepts | likely | |
+| `0x0203B238` | ARM | (unit sprite draw) | Draws a sprite unit; adds +0x8A to the screen x and uses bank +0x89 when +0x88 is set | confirmed (table poke in the emulator) | Model units ignore both |
 | `0x0203B698` | ARM | (team palette setup) | Picks each team's palette bank via the table at `0x02127E30`, patches colors 12-14 from `0x02127E48` | likely | Effect confirmed in VRAM |
 | `0x0203BED0` | ARM | `Unit_drawBars` | Health bar (+ hero charge bar) over a unit, as untextured 3D quads | confirmed | Rules in docs/re-notes/hud.md |
 | `0x0203C264` | ARM | (bar layout) | Bar width/cell count and screen position | likely | |

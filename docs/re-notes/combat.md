@@ -2,7 +2,8 @@
 
 Game: LEGO Battles (USA, `C5SE`). Found 2026-10-08 by reading ARM9 and watching a real fight in
 DeSmuME (hooks on the attack functions, King vs Wizard Swordsmen/Crossbowmen on The Pond).
-Ported to `sim/src/combat.ts`; the hit flash is in `client/src/main.ts`.
+Ported to `sim/src/combat.ts`; the hit reaction is in `client/src/hitShake.ts`, the fight loop in
+`client/src/unitAnim.ts`.
 
 **DS background:** the game time counter used here ticks at 30 Hz (every 2nd VBlank). Most game
 math is 20.12 fixed point (`x << 12`, 4096 = 1.0); the ARM9 does 64-bit `smull` then shifts right
@@ -182,14 +183,39 @@ can't be matched in a lockstep game anyway. The sim uses its own seeded RNG with
 ## Timing and animation
 
 - Game time counter: `[0x021552F4 + 4] + 0x8B4`, +1 per 2 VBlanks (30 Hz). confirmed.
-- The attack animation (`*_2` sheet: 5 rows of facings x 5 frames, then the idle pose) starts
-  about when damage lands. likely, from screenshots every 4 VBlanks; the client plays it from
-  `lastAttack` at 15 fps.
-- Hit flash: the unit is drawn with palette bank 12 of `KingFaction.NCLR`, a bank of light greys
-  (confirmed: every flashed pixel in the emulator equals a bank-12 colour after the DS's 5-bit
-  rounding, e.g. 189,197,189 shows as 184,192,184). Timing (likely, emulator, 4 hits on the King
-  and a Wizard Swordsman): starts 4-6 VBlanks after the HP change and lasts 6-7 VBlanks, so about
-  2.5 to 5.5 ticks after the damage tick. The client uses that window.
+- The attack animation (`*_2` sheet: 5 rows of facings x 5 frames, then the idle pose) loops
+  without a break for as long as a unit stands and fights, 4 VBlanks a frame. The hits land on the
+  attack cooldown (~20 ticks for the King) at any point of the loop: five King hits at ticks
+  2968/2988/3008/3028/3048 came on animation frames 1, 0, 4, 1, 7. Confirmed for melee (King vs
+  Wizard Swordsman); that ranged units loop the same way is a guess. A unit that isn't standing in
+  a fight (shooting from a walk, say) plays one swing from `lastAttack`. What happens when the
+  fight ends (the client drops to idle at once) is a guess.
+
+## Hit reaction (confirmed)
+
+When a unit takes damage the game starts a small effect on it whose frame goes up by one per game
+tick (`0x0201C508`, only for roles 0-6: minifigures, vehicles, ships; buildings get none). Each
+frame is a 4-byte record in a table at ARM9 `0x02143460`: s16 x offset in pixels, u8 palette bank,
+u8 "draw in that bank" flag. The effect copies them into the unit (+0x8A x offset, +0x89 bank,
++0x88 flag); a record with bank 0 ends it. C5SE's ten records:
+
+| frame | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| x offset | 0 | -2 | +2 | +2 | -2 | -2 | +1 | -1 | -1 | +1 |
+| grey | no | yes | yes | yes | no | no | no | no | no | no |
+
+- So the unit shakes sideways for 9 ticks and is grey for the first 3 of them. The sprite path
+  (`0x0203B238`) adds +0x8A to the screen x: poking the table's offsets to 30 moved the King's
+  sprite 30 px while its HP bars stayed put.
+- Grey is palette bank 12 of `KingFaction.NCLR`, a bank of light greys (every flashed pixel in the
+  emulator equals a bank-12 colour after the DS's 5-bit rounding, e.g. 189,197,189 shows as
+  184,192,184).
+- 3D model units (catapults etc.) run the same effect and their +0x88/+0x8A fields change the same
+  way, but nothing on screen does: with the offsets poked to 30, or every record set to grey, a
+  King catapult's pixels were identical to the unpoked run for all 12 frames after a hit.
+- Timing (likely): the grey shows 4-6 VBlanks after the HP change and lasts 6-7 VBlanks, about 2.5
+  to 5.5 ticks after the damage tick. The client puts record k at k + 1.5 to k + 2.5 ticks after
+  the damage tick, which lines records 1-3 up with that window.
 
 ## What the sim does that the game may not (guesses to check)
 
