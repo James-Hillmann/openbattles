@@ -73,6 +73,16 @@ export function aiStep(w: World, ai: AiPlayer): Command[] {
   else if ((k + 3) % 8 === 0) flags = 8;
   update(c, flags);
   ai.cycle = k >= AI_CYCLE ? 1 : k + 1;
+  // A builder leaves the pool squad when the AI first gives it something to do (the hand-out and harvest
+  // passes take pool members as idle builders). confirmed (emulator: new Builders sat in the pool from coming
+  // out until the next resources pass that gave them an order, 3 to 21 ticks)
+  const live = new Set(c.own.map((u) => u.id));
+  const assigned = ai.assigned.filter((id) => live.has(id));
+  for (const cmd of c.out) {
+    if (!('unitIds' in cmd) || cmd.kind === 'move') continue;
+    for (const id of cmd.unitIds) if (!assigned.includes(id) && c.own.some((u) => u.id === id && u.role === ROLE_BUILDER)) assigned.push(id);
+  }
+  ai.assigned = assigned.sort((a, b) => a - b);
   return c.out;
 }
 

@@ -74,11 +74,15 @@ sessions play the same. We seed it from the world seed and player id. confirmed
   second mill at another forest. confirmed (code; emulator proposals at (57,47) and (42,61))
 - Mine priority 99 (76 when bricks > 1920 or more than 10 soldiers); farm
   priority 80 when free population runs low (wants 2 if bricks > 2575). confirmed (code), likely (values in play)
-- Every 12th tick the economy pass does only its "pool chores" (0x02097054): for each builder not yet in a
-  squad, a tower at priority 76 where it stands (if a barracks exists and the spot check passes), and a walk
-  home if it is more than 15 from home. It fired once in 6000 emulator ticks, on a Builder trained 12 ticks
-  earlier (tick 1800, tower at (52,54)). Our builders have no squad-less state, so it does nothing here. Not
-  ported.
+- Every 12th tick the economy pass does only its "pool chores" (0x02097054): for each builder still in the
+  pool squad, once a barracks stands, a tower at priority 76 where it stands if the tower spot check passes
+  (when the CPU owns a mine, a failed check gets a second roll), and a walk back to the start point if it
+  is more than 15 away. A Builder is in the pool from the moment it comes out until the AI first gives it
+  an order (3 to 21 ticks in the emulator, ending on the next resources pass), so in practice this fires
+  when a Builder comes out just before a chores tick: once in 6000 ticks, at 1800, a tower at the castle
+  door (52,54). confirmed (code and emulator; the port proposed the same spot at 1416). The game also tips
+  squads that sat without a job for more than 15 squad passes back into the pool (0x0209B0A0); ours keep
+  their builders (not ported).
 - Placement: anchor next to the base, farms on the side away from the enemy, barracks, factories and
   towers toward it; spacing roll `rand(10)`: 0 below 3, 1 below 9, else 2 (farms 1); ring search up to 16
   rings (28 after 10 failures while fewer than 2 markers are given up, +8 for farms). The spot test
@@ -206,6 +210,6 @@ range of the two game runs. Known gaps: the first tower in both game runs came f
 
 - `JobAttackTaskForce` (siege groups), transports and naval landings (AIPlayer+0x58), retiring
   units when at the population cap, late-game cleanup (0x02094738).
-- Bridges and walls built by the AI (0x02094504, 0x0208C6B8), pool chores.
+- Bridges and walls built by the AI (0x02094504, 0x0208C6B8); idle squads going back to the pool.
 - Hero spell choice (guess above).
 - The game's exact AI seed.
