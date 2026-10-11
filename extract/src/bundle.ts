@@ -3,7 +3,8 @@ import { detailTilesPath, metatilePath, parseMap, parseMetatiles, withDetailTile
 import { decodeChars, decodePalette } from './nitro';
 import { renderMap, type Rgba } from './render';
 import type { UnpackedRom } from './rom';
-import { renderMinimap } from './minimap';
+import { minimapShroudRemap, renderMinimap } from './minimap';
+import { readFogArt, type FogArt } from './fogArt';
 import { TERRAIN_TREE, bakeTrees, readTreeTable, type TreeTable } from './trees';
 import { readCombatBonus, type CombatBonus } from './entities';
 import { buildStructureArt, type StructureArt } from './structures';
@@ -18,6 +19,10 @@ export interface MapBundle {
   ground: Rgba;
   /** HUD minimap, 1.5 px per cell, trees drawn from `terrain`; undefined if the map has no minimap file. */
   minimap?: Rgba;
+  /** The minimap under fog: where the local player has looked before but can't see now. */
+  minimapShroud?: Rgba;
+  /** Fog of war tiles and tables; undefined for game versions we haven't mapped. */
+  fog?: FogArt;
   /** Melee bonus tables from ARM9; null for game versions we haven't mapped. */
   combatBonus: CombatBonus | null;
   /** Skirmish start records from the map's EVNT section (see docs/re-notes/skirmish.md). */
@@ -91,11 +96,14 @@ export function buildMapBundle(rom: UnpackedRom, name: string): MapBundle {
   const map = trees ? { ...parsed, ...bakeTrees(parsed, trees) } : parsed;
   const { chars, pal, metatiles } = mapGraphics(rom, name, map.tileset);
   const minimap = renderMinimap(rom, name, map);
+  const remap = minimapShroudRemap(rom);
+  const minimapShroud = remap && renderMinimap(rom, name, map, remap);
+  const fog = readFogArt(rom, map.tileset);
   const combatBonus = readCombatBonus(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode);
   // Bridges come from the tileset's own metatiles, not the map's detail table.
   const structures = buildStructureArt(rom.arm9, rom.header.arm9.ramAddress, rom.header.gameCode, chars, pal, parseMetatiles(romFile(rom, metatilePath(map.tileset))));
   return {
-    name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, combatBonus,
+    name, width: map.width, height: map.height, terrain: map.terrain, ground: renderMap(map, chars, pal, metatiles), minimap, minimapShroud, fog, combatBonus,
     starts: map.starts, mineSites: map.mineSites, bridgeMarks: map.bridgeMarks, forestMarks: map.forestMarks, towerMarks: map.towerMarks, structures, pickups: map.pickups,
   };
 }

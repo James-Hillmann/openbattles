@@ -20,8 +20,10 @@ const TREE_COLOR = 5;
 const MINI_BANK = 9;
 
 /** ARM9 RAM addresses per game code: 16 BGR555 colors each. */
-const MINIMAP_ADDRS: Record<string, { palettes: Record<string, number>; dots: number }> = {
+const MINIMAP_ADDRS: Record<string, { palettes: Record<string, number>; dots: number; shroud: number }> = {
   C5SE: {
+    // Colour remap for cells seen before but not seen now (16 bytes; read through 0x021517C4 by 0x02026A74).
+    shroud: 0x02143d90,
     palettes: { KingTileset: 0x0212799c, PirateTileset: 0x021279bc, MarsTileset: 0x021279dc },
     // Dot colors: 4 red (measured on the red team), 5 blue (likely); 0 green, 1 yellow, 2 magenta, 3 black (team order a guess).
     dots: 0x0212797c,
@@ -50,7 +52,21 @@ export const miniCell = (p: number): number => Math.max(0, Math.floor((2 * p - 1
  */
 const NO_TREE_EDGES = (1 << 4) | (1 << 6);
 
-export function renderMinimap(rom: UnpackedRom, mapName: string, map: Pick<GameMap, 'tileset' | 'width' | 'height' | 'terrain' | 'edges'>): Rgba | undefined {
+/**
+ * Fog on the minimap (0x02026900, docs/re-notes/fog.md): a pixel whose cell is seen now keeps its
+ * colour, one seen before takes colour `shroud[c]` (darker greens, greys and blues; the tree
+ * colour turns to background), one never seen stays background. This is that remap, or undefined
+ * for unmapped game versions.
+ */
+export function minimapShroudRemap(rom: UnpackedRom): Uint8Array | undefined {
+  const a = MINIMAP_ADDRS[rom.header.gameCode];
+  if (!a) return undefined;
+  const o = a.shroud - rom.header.arm9.ramAddress;
+  return rom.arm9.slice(o, o + 16);
+}
+
+/** `remap` recolours every pixel (index c -> remap[c], 0 = background): the minimap as it looks under fog. */
+export function renderMinimap(rom: UnpackedRom, mapName: string, map: Pick<GameMap, 'tileset' | 'width' | 'height' | 'terrain' | 'edges'>, remap?: Uint8Array): Rgba | undefined {
   const { tileset, width, height, terrain, edges } = map;
   const file = tryRomFile(rom, `${mapName}miniNT.NCGR`);
   const addr = MINIMAP_ADDRS[rom.header.gameCode]?.palettes[tileset];
@@ -72,6 +88,7 @@ export function renderMinimap(rom: UnpackedRom, mapName: string, map: Pick<GameM
         if (tx >= chars.tilesWide || ty >= chars.tilesHigh) continue;
         v = chars.pixels[(ty * chars.tilesWide + tx) * 64 + (y & 7) * 8 + (x & 7)] ?? 0;
       }
+      if (remap) v = remap[v] ?? 0;
       if (v === 0) continue;
       out.data.set([...pal[v]!, 255], (y * w + x) * 4);
     }

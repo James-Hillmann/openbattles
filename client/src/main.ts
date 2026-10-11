@@ -95,6 +95,8 @@ import { GameAudio } from './audio';
 import { GameSound } from './gameSound';
 import { FE_CLICK1, UI_BACK1, UI_MENUSLIDECLICK } from './soundRules';
 import { StructureView, bridgeSitesOf, siteNear } from './structures';
+import { FogView } from './fogView';
+import { fogMinimap } from './fogMinimap';
 
 /** The player this browser controls: 0 offline, the lobby slot online. */
 let localPlayer = 0;
@@ -172,8 +174,10 @@ const extras = new MatchExtras(unitLayer);
 camera.addChild(unitLayer);
 const fallback = new Graphics();
 unitLayer.addChild(fallback);
-/** Fog of war over unexplored cells (above units, below bars). */
-const fogLayer = new Graphics();
+/** Fog of war (above units, below bars): FogView's cell pictures, or flat grey cells without them. */
+const fogLayer = new Container();
+const fogFlat = new Graphics();
+fogLayer.addChild(fogFlat);
 camera.addChild(fogLayer);
 /** Health bars and the box-select rectangle draw above units. */
 const overlay = new Graphics();
@@ -349,8 +353,14 @@ let placing: { type: number; from?: { cx: number; cy: number } } | null = null;
 let minimap: Rgba | undefined;
 /** The local player's fog (presentation only, not part of the lockstep state). */
 let fog: Fog | null = null;
-/** Most common colour of the game's fog texture (FoWTileset), measured from a screenshot. The texture itself isn't drawn yet. */
+/** Most common colour of the game's fog texture (FoWTileset): the stand-in for game versions whose fog tables we haven't mapped. */
 const FOG_COLOR = 0x98a8b0;
+let fogView: FogView | null = null;
+/** Fog's minimap pictures: what's seen now, what was seen before (MapBundle.minimapShroud). */
+let minimapShroud: Rgba | undefined;
+/** The minimap as shown: rebuilt from the fog grids when they change. */
+let minimapShown: Rgba | undefined;
+let minimapVersion = 0;
 /** Minimap dot palette index per team color: 4 red (measured), 5 blue (likely); other teams open. */
 const MINIMAP_DOT_INDEX = [4, 5];
 let minimapDots: [number, number, number][] = [];
@@ -363,6 +373,8 @@ function onMap(b: MapBundle, hud: HudBundle) {
   siteFx = hud.particles ? new SiteFx(hud.particles) : null;
   extras.setParticles(hud.particles, textureFrom);
   minimap = b.minimap;
+  minimapShroud = b.minimapShroud;
+  minimapShown = undefined;
   minimapDots = hud.minimapDots ?? [];
   combatBonus = b.combatBonus;
   mapSize = { w: b.ground.width, h: b.ground.height };
@@ -377,6 +389,10 @@ function onMap(b: MapBundle, hud: HudBundle) {
   structures.setArt(b.structures);
   mapName = b.name;
   fog = createFog(b.width, b.height);
+  fogView?.destroy();
+  fogFlat.clear();
+  fogView = b.fog ? new FogView(fogLayer, b.fog, b.width, b.height, CELL_W, CELL_H) : null;
+  refreshFog();
   centerOn(mapSize.w / 2, mapSize.h / 2);
   startSkirmish();
 }
@@ -551,9 +567,27 @@ function hiddenByFog(u: World['units'][number]): boolean {
   return !isVisible(fog, cx, cy);
 }
 
-/** Flat grey over every cell no unit has seen yet (the game draws its FoWTileset texture there, with soft edges). */
-function drawFog() {
-  fogLayer.clear();
+/** After the fog grids change: the cell pictures and the minimap. */
+function refreshFog() {
+  if (!fog) return;
+  if (fogView) fogView.update(fog);
+  else drawFlatFog();
+  if (!minimap) return;
+  const next = fogMinimap(minimap, minimapShroud, fog);
+  if (minimapShown && sameBytes(next.data, minimapShown.data)) return;
+  minimapShown = next;
+  minimapVersion++;
+}
+
+function sameBytes(a: Uint8ClampedArray, b: Uint8ClampedArray): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** Game versions without fog tables: flat grey over every cell no unit has seen yet. */
+function drawFlatFog() {
+  fogFlat.clear();
   if (!fog) return;
   for (let cy = 0; cy < fog.height; cy++) {
     for (let cx = 0; cx < fog.width; cx++) {
@@ -561,11 +595,11 @@ function drawFog() {
       // Merge runs of fogged cells in a row into one rectangle.
       let end = cx;
       while (end + 1 < fog.width && !fog.explored[cy * fog.width + end + 1]) end++;
-      fogLayer.rect(cx * CELL_W, cy * CELL_H, (end - cx + 1) * CELL_W, CELL_H);
+      fogFlat.rect(cx * CELL_W, cy * CELL_H, (end - cx + 1) * CELL_W, CELL_H);
       cx = end;
     }
   }
-  fogLayer.fill(FOG_COLOR);
+  fogFlat.fill(FOG_COLOR);
 }
 
 // --- Buildings ------------------------------------------------------------------
@@ -1406,7 +1440,10 @@ function advance(ms: number) {
     alert.observe(before.units, world.units, localPlayer, performance.now());
     if (!appEl.classList.contains('menu')) sound.tick(before, world, localPlayer, heard);
     if (r.hash !== null) hashLog.set(world.tick, r.hash);
-    if (fog) updateFog(fog, world, localPlayer);
+    if (fog) {
+      updateFog(fog, world, localPlayer);
+      refreshFog();
+    }
     extras.onTick(world, animTime / TICK_MS, (u) => !hiddenByFog(u));
     tickEl.textContent = String(world.tick);
     hashEl.textContent = hashWorld(world).toString(16).padStart(8, '0');
@@ -1460,7 +1497,7 @@ app.ticker.add((t) => {
   selection.prune((id) => world.units.some((u) => u.id === id && !isInside(u)));
   pruneSites();
   workedSites = new Set(world.units.flatMap((u) => (u.job?.kind === 'inside' && u.job.tree < 0 ? [u.job.building] : [])));
-  drawFog();
+  fogView?.setTick(animTime / TICK_MS);
   // Pickups show once their cell has been explored (guess: not checked against the game's fog).
   extras.render(world, animTime / TICK_MS, (c) => !fog || fog.explored[c] === 1);
   structures.draw(world, (o) => teamColor[o] ?? o, hiddenByFog);
@@ -1589,7 +1626,8 @@ app.ticker.add((t) => {
     selected: selectedEntity >= 0 && firstSelected ? { entity: selectedEntity, hp: firstSelected.hp } : undefined,
     timeMs: animTime,
     minimap: minimap && {
-      image: minimap,
+      image: minimapShown ?? minimap,
+      version: minimapVersion,
       // World px -> minimap px: 1.5 px per 24x16 cell, i.e. x / 16 and y * 3 / 32.
       view: {
         x: Math.floor(-camera.x / camera.scale.x / 16),

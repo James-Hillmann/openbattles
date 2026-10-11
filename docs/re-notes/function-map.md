@@ -69,6 +69,12 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x020A15B8` | Thumb | `Fog_update` | Clears the visible grid, stamps every vision circle, stamps moved circles into the explored grid | likely | Result matches RAM |
 | `0x020A1694` | Thumb | `Fog_stampCircle` | Filled midpoint circle of cells, four row spans per step | confirmed | Port matches RAM cell for cell |
 | `0x020A1650` | Thumb | `Fog_span` | Sets or clears one clipped row span in a BitArray2D | likely | |
+| `0x02039FB4` | ARM | `FogBg_drawScreen` | Writes the fog BG2 screen copy (`0x02152940`) a cell (3 x 2 tiles) at a time | confirmed | fog.md |
+| `0x0203A318` | ARM | `FogBg_cellCode` | 10-bit code from the fog state of a cell and its 4 neighbours | confirmed | Tiles match RAM 768/768 |
+| `0x0203A460` | ARM | `FogBg_cellTiles` | Code -> picture (`0x0213C81C`) -> 6 tile numbers (`0x0213C6FC`) | confirmed | |
+| `0x02026900` | ARM | `Minimap_redrawRows` | A quarter of the minimap's rows per call, with the fog remap at `0x02143D90` | confirmed | fog.md |
+| `0x02028590` | ARM | `Palette_cycle` | Rotates palette ranges every N game ticks | confirmed | fog.md "Colour cycling" |
+| `0x02038980` | ARM | (map load) | Sets up the tileset's palette cycles | confirmed | |
 | `0x020EEB04` | ARM | `BitArray2D_test` | Bit x of row y (row pointer table at +0x14) | likely | |
 | `0x020EEB3C` | ARM | `BitArray2D_set` | Sets or clears bit x of row y | likely | |
 | `0x02075B9C` | ARM | `Rules_onBricks` | Mode 2: >= 10000 bricks wins, others lose | confirmed | |

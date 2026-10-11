@@ -1,7 +1,7 @@
 # Fog of war
 
 Game code `C5SE`. Ported in `sim/src/fog.ts`; the client draws it in
-`client/src/main.ts`. Confidence per claim: **confirmed** (seen in DeSmuME),
+`client/src/fogView.ts`. Confidence per claim: **confirmed** (seen in DeSmuME),
 **likely** (read from the code), **guess**.
 
 ## Where it lives (confirmed)
@@ -63,14 +63,66 @@ footprint); the port always passes 0. **open**
 
 ## Drawing
 
-- Main view: unexplored cells are covered with the grey `FoWTileset.NCGR`
-  texture on main BG2, with a soft, bumpy edge (confirmed by screenshot). We
-  draw flat grey (the texture's most common colour, 152/168/176) per cell.
-  The texture and edge tiles are **open**.
-- Minimap: unexplored stays panel background; the game redraws a few rows per
-  frame. Explored but not currently visible looks darker (seen once, **likely**).
-  Our minimap doesn't show fog yet. **open**
-- Enemy units outside the visible grid: the client hides them. **guess**, not
-  checked in the emulator.
+### Main view (confirmed)
+
+Fog is main BG2 (8bpp, priority 1, over the 3D/unit layers), tiles from `FoWTileset.NCGR`
+(256 tiles, loaded at tile 0; the first ~96 are overwritten by the BG's own map) in **colours
+0-15 of the map's tileset palette** (`KingTileset.NCLR` etc.; Mars and Pirate have their own fog
+colours). The game keeps a 32 x 26 tile copy of the screen at `0x02152940` (row pointers at
+`0x02151FB0`) and writes it a cell at a time (`0x02039FB4`): each map cell is 3 x 2 tiles,
+lined up with the ground's cells.
+
+Which six tiles a cell gets (`0x0203A318` -> `0x0203A460`):
+
+1. Fog state of five cells, the cell above, left, the cell itself, right and below: 2 if in the
+   visible grid, else 1 if in the explored grid, else 0. Cells off the map are 0.
+2. Code = up | left << 2 | self << 4 | right << 6 | down << 8 (10 bits).
+3. `codes[code]` (1024 bytes at `0x0213C81C`) picks one of 48 cell pictures; a picture is 6 tile
+   numbers (288 bytes at `0x0213C6FC`), top row then bottom row.
+
+The pictures: a solid grey cloud for never seen, a **50% checker of it for seen before but not
+now** (so explored ground shows through, dimmed), nothing for seen now (picture 11, tile 100,
+which is blank), and puffy edge pieces between them. A settings flag (`0x020092A8` +0 or +0x1F,
+or a per-player check at `0x020A221C`) makes every in-map cell count as 2: fog off.
+
+Check: from a RAM dump of a mp01 game, building every cell's tiles from the two grids and the two
+tables gives the game's screen copy **768 of 768 tiles exact**, also after filling the explored
+grid with random bits (`out/fogcheck.py`, scratch). The client draws the same pictures
+(`client/src/fogView.ts`, tables read from the user's ARM9 by `extract/src/fogArt.ts`).
+
+### Colour cycling (confirmed)
+
+The fog shimmers because palette colours 8-15 rotate: every 2 game ticks colour i takes colour
+i + 1's value and 15 takes 8's (`0x02028590`, timed against the game tick counter in the
+emulator). The same mechanism animates water and lava on the ground; the cycles are set up per
+tileset at `0x02038980` (tileset picked by name at `0x020A44A0`):
+
+| tileset | colours / period in ticks |
+|---|---|
+| King | 8-15 / 2, 16-39 / 3, 40-47 / 3, 67-71 / 3, 239-244 / 2 |
+| Pirate | 8-15 / 2, 16-39 / 3, 40-47 / 3, 199-204 / 3 |
+| Mars | 8-15 / 2, 16-39 / 3, 40-47 / 3, 71-79 / 3 |
+
+The client cycles the fog colours. **open**: the ground's water/lava cycles aren't drawn yet (our
+ground is a baked picture). Where the cycle starts against our tick count isn't known; it only
+shifts the phase.
+
+### Minimap (confirmed)
+
+The minimap is sub BG3 (scrolled to (136,40)); its tiles are rebuilt from the map's minimap data
+a quarter of the rows per call (`0x02026900`, rows 0-23, 24-47, 48-71, 72-95 in turn). Per pixel,
+with the cell rule from hud.md: seen now keeps its colour, never seen is colour 0 (panel shows
+through), seen before takes `remap[colour]` from the 16 bytes at `0x02143D90`
+(0,10,1,10,8,0,9,9,8,9,10,...): darker greens, greys and blues, the tree colour goes to background.
+Check: against an emulator screenshot with random explored bits, 4657 drawn pixels, the only
+mismatches are the view frame and unit dots.
+
+Unit dots: enemies are drawn only when their cell is in the visible grid (`0x02025C14` tests it);
+own and allied units always. The client's dots follow the units it draws, which matches.
+
+### Units
+
+- Enemy units outside the visible grid: the client hides them. **likely** for the main view
+  (the minimap's dot rule above), not watched in the emulator.
 - `User::FogCircle` objects also come from map event records (`0x020A5DC0`);
   campaign maps may use them to reveal areas. Not needed for skirmish.
