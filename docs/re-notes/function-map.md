@@ -11,7 +11,14 @@ Keep names in `Module_verbNoun` style so they sort into groups.
 | `0x02001EE0` | ARM | `Bp_onEntitiesLoaded` | Callback after the file is decompressed: stores the buffer pointer, then calls `Bp_buildEntities` | likely | |
 | `0x02001F3C` | ARM | `Bp_buildEntities` | Walks 0x7C-byte entity records, switches on the kind byte at +8, allocates a 12-byte wrapper per record and adds it to a list | likely | Key function for M4 |
 | `0x020025D4` | ARM | `Bp_loadFactions` | Same pattern as `Bp_loadEntities`, for `BP\factions.fbp` | likely | |
+| `0x02016BFC` | ARM | `Fx_startHeroSpell` | Starts the hero cast effect with a spell picture kind | confirmed | |
+| `0x0201B410` | ARM | `HeroStartSpellEffect_update` | Hero cast effect: swirl, dome and gold spell picture, one step every 3 ticks | confirmed | docs/re-notes/spells.md "Pictures" |
 | `0x0201C508` | ARM | `HitFx_step` | Hit reaction effect: one record per game tick from the table at `0x02143460` into the unit's +0x88 flag, +0x89 bank, +0x8A x offset; roles 0-6 only | confirmed | docs/re-notes/combat.md "Hit reaction" |
+| `0x0201FBF8` | ARM | `SpellIconsEffect_update` | Icon over a buffed or healed unit: 14-step bob from `0x0215118C`, blink-out on removal | confirmed | |
+| `0x020200B8` | ARM | `SpellIconsEffect_setKind` | Picks the icon picture (UIMgrData id) and its lift above the unit | confirmed | |
+| `0x0202EC9C` | ARM | (effects sheet) | Loads Castle/Pirate/MarsEffects by the local player's faction | confirmed | |
+| `0x0205F85C` | ARM | (buff icons) | Adds or removes one icon effect per buff slot | confirmed | |
+| `0x020E3D18` | Thumb | `UiMgr_picture` | UIMgrData record n -> picture record | confirmed | |
 | `0x020EFD90` | ARM | `Res_loadAsync` | Generic resource load: takes a scope, a callback, a source-location string and line; returns a handle | guess | Called by every `Bp_load*` |
 | `0x020F16B4` | ARM | `Res_pushScope` | Called before a load with the file path and a line number | guess | Paired with `0x020F178C` |
 | `0x020F178C` | ARM | `Res_popScope` | Closes the scope opened by `Res_pushScope` | guess | |
