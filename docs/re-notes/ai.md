@@ -74,11 +74,15 @@ sessions play the same. We seed it from the world seed and player id. confirmed
   second mill at another forest. confirmed (code; emulator proposals at (57,47) and (42,61))
 - Mine priority 99 (76 when bricks > 1920 or more than 10 soldiers); farm
   priority 80 when free population runs low (wants 2 if bricks > 2575). confirmed (code), likely (values in play)
-- Every 12th tick the economy pass does only its "pool chores" (0x02097054): for each builder not yet in a
-  squad, a tower at priority 76 where it stands (if a barracks exists and the spot check passes), and a walk
-  home if it is more than 15 from home. It fired once in 6000 emulator ticks, on a Builder trained 12 ticks
-  earlier (tick 1800, tower at (52,54)). Our builders have no squad-less state, so it does nothing here. Not
-  ported.
+- Every 12th tick the economy pass does only its "pool chores" (0x02097054): for each builder still in the
+  pool squad, once a barracks stands, a tower at priority 76 where it stands if the tower spot check passes
+  (when the CPU owns a mine, a failed check gets a second roll), and a walk back to the start point if it
+  is more than 15 away. A Builder is in the pool from the moment it comes out until the AI first gives it
+  an order (3 to 21 ticks in the emulator, ending on the next resources pass), so in practice this fires
+  when a Builder comes out just before a chores tick: once in 6000 ticks, at 1800, a tower at the castle
+  door (52,54). confirmed (code and emulator; the port proposed the same spot at 1416). The game also tips
+  squads that sat without a job for more than 15 squad passes back into the pool (0x0209B0A0); ours keep
+  their builders (not ported).
 - Placement: anchor next to the base, farms on the side away from the enemy, barracks, factories and
   towers toward it; spacing roll `rand(10)`: 0 below 3, 1 below 9, else 2 (farms 1); ring search up to 16
   rings (28 after 10 failures while fewer than 2 markers are given up, +8 for farms). The spot test
@@ -126,7 +130,17 @@ When no plan went to a builder on an odd pass, the CPU rolls `AI_rand(4)` and do
      shipyard proposer runs between them whenever the barracks proposer said no *or no shipyard stands*, and
      its answer replaces the barracks', so without a shipyard the special factory is always tried as well
      (emulator: barracks 99 and special factory 50 proposed on the same pass, tick 25). confirmed
-   - Shipyard: needs the island test (0x02093A50), not traced; it never fired on mp01. Not ported.
+   - Shipyard (`0x0209576C`): the "island test" (`0x02093A50`) just counts the map's shipyard spots
+     (MARK records of type 6; none on The Pond, 22 on River Crossing, 4 to 22 on 15 of the 30 maps) and the
+     proposer gives up below 4. With fewer than 2 shipyards and none being built: an army whose specials are
+     all ships (Pirates, Imperial; AITeamStats +0x43, `0x02093CA4`) wants one at priority 99 and a second at
+     75, and never proposes a special factory. Other armies want one only to carry troops (the transport
+     wishes, not ported) or else on maps with 9 or more spots while they have none, at 50. The spot: a random
+     mark (`AI_rand(n - 1)`, so never the last) on the main cell's land area (the map's region plane, map
+     +0x2EC) with no own shipyard closer than 7, then the placement search within 16 of it; the placement
+     anchor leaves shipyards where asked. confirmed (code; emulator: the Wizard CPU on River Crossing
+     proposed shipyards from tick 25 and built one at tick 3243, by a mark on its own island; the port built
+     one at 2651)
 4. **Upgrade timer.** Counts passes; past the interval (40 at start, 1 after any tower appears,
    reset to 60 or 20 by case 1) it upgrades the Tower I nearest the base that is at least 100 ticks
    old (a Tower II once there are enough). confirmed
@@ -157,8 +171,21 @@ with more than 4 soldiers and no lumber mill, 600 for a late mine. likely
   (the move command's mode 2: units fight what they meet on the way), fight back when hit, regroup
   within 6 cells, hold. The hero idles near base, wandering `rand(2r+10)-r-5` cells (r = 6), and
   retreats under 700 HP. confirmed (code)
-- Hero spells: the real choice list is built around 0x02097780 and not traced. Our version casts a
-  random castable spell at the nearest enemy within 5 cells once the charge is almost full. **guess**
+- Hero spells (`0x02098650` -> choose `0x0209752C`, target `0x02097AD4`, cast `0x020979E8`): the CPU writes a
+  wish list of spell categories (spell record +0x10) with weights and picks, at random among the best, one
+  of its spells: spell 3 (a small heal the computer's list always adds) and the hero's four. Below 50 HP:
+  attack (0) at 20 in a squad under 3, teleport (8) at 90 under 3 or 40 under 5. Otherwise it needs charge
+  within 500 of full; not threatened (no squad member fighting, enemy strength within 7 at most 2): speed,
+  chop and mine buffs (4, 5, 6) at 20 with 4 more cells of range. Threatened: if the enemies within 5 outweigh
+  the squad, attack at 60 (80 above three times) and armor (2) at 80; else armor at 80 near its goal (within
+  20 past the goal's radius) or speed at 20 further off, and attack at 40 (80 when the enemies within 5 are
+  worth over three times the hero). The target is a unit within range by category: the enemy (0), enemy
+  special (1) or non-special enemy (7) with the most HP, the own unit with the most (2) or least (3) HP, the
+  last unbuffed own unit (4) or Builder (5), the first own Mine (6). Only point spells (record +0x08 bit 0) are
+  cast, at that unit's cell or the hero's own when none was found, and self spells (bit 0x40); unit-aimed
+  spells are chosen but never cast. The cast step draws one unused AI_rand(40). confirmed (code; emulator: the
+  idle Wizard hero chose Speed (spell 5) with range 9 every 260 ticks, 296, 556, 816 ..., and the port now
+  does the same at 270, 530, 790 ...)
 
 Our addition (guess): units walk in straight segments with a short A* (movement.md), so a squad
 sent straight across a lake stops at the shore. Advancing, regrouping and far-off fights steer by
@@ -196,6 +223,5 @@ range of the two game runs. Known gaps: the first tower in both game runs came f
 
 - `JobAttackTaskForce` (siege groups), transports and naval landings (AIPlayer+0x58), retiring
   units when at the population cap, late-game cleanup (0x02094738).
-- Bridges and walls built by the AI (0x02094504, 0x0208C6B8), the shipyard proposer, pool chores.
-- Hero spell choice (guess above).
+- Bridges and walls built by the AI (0x02094504, 0x0208C6B8); idle squads going back to the pool.
 - The game's exact AI seed.

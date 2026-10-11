@@ -45,10 +45,22 @@ export interface AiPlayer {
   marks: number[];
   /** Map MARK type-3 points (static map data, not hashed): the tower spots it proposes towers at. */
   towerMarks: number[];
+  /** Map MARK type-6 points (static map data, not hashed): the shipyard spots (0x02093A50). */
+  shipMarks: number[];
+  /**
+   * The map's region plane (map +0x2EC; static map data, not hashed): one id per cell, the same id for cells of
+   * one land area. Empty when the map has none (test worlds): every cell then counts as one area.
+   */
+  regions: number[];
   /** Entities there at the start (ids up to this) never count as "created". */
   seen: number;
   /** Sites the "entity created" handler has run for, until they finish. */
   fired: number[];
+  /**
+   * Builders the AI has given an order, by id (sorted). Until then a builder is in the game's pool squad
+   * (squad 0), where only the pool chores look at it.
+   */
+  assigned: number[];
   /** Cells (y * width + x) of the own and enemy start points. */
   home: number;
   enemyHome: number;
@@ -170,7 +182,10 @@ export const AI_CYCLE = 13;
 export const aiTrace: { log: ((tick: number, player: number, what: string) => void) | null } = { log: null };
 
 /** A new computer opponent for `player` against `enemy`. */
-export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = []): AiPlayer {
+export function newAi(
+  player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = [],
+  shipMarks: readonly number[] = [], regions: ArrayLike<number> = [],
+): AiPlayer {
   return {
     player,
     enemy,
@@ -192,8 +207,11 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     asmPhase: 0,
     marks: [...marks],
     towerMarks: [...towerMarks],
+    shipMarks: [...shipMarks],
+    regions: Array.from(regions),
     seen: 0,
     fired: [],
+    assigned: [],
     home,
     enemyHome,
   };
@@ -218,7 +236,7 @@ export function aiRand(ai: AiPlayer, n: number): number {
 /** Mix every AI field into the world hash, in a fixed order. */
 export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void {
   for (const a of ais) {
-    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired]) mix(v);
+    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired, a.assigned.length, ...a.assigned]) mix(v);
     const s = a.stats;
     for (const v of [s.lastBricks, s.incomeAvg, s.ringPos, s.income, s.builderShare, s.military, s.buildings, s.away, ...s.ring]) mix(v);
     const b = a.brain;

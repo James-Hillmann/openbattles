@@ -1,9 +1,9 @@
-import { isBuilding, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_STABLES, ROLE_TRANSPORT } from '../economy';
-import { canTarget, spellTarget } from '../spells';
+import { isBuilding, isInside, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_STABLES, ROLE_TRANSPORT } from '../economy';
+import { TAP_POINT, TAP_SELF } from '../spells';
 import { isWalkable } from '../terrain';
 import { findById } from '../combat';
 import type { Unit } from '../state';
-import { aiRand, type AiSquad, type AiTarget } from './state';
+import { aiRand, aiTrace, type AiSquad, type AiTarget } from './state';
 import { at, cellOfXY, cheb, clamp, cx, cy, enemies, H, issueMove, manhattan, strengthNear, W, type Ctx } from './ctx';
 
 /*
@@ -245,7 +245,7 @@ function stepSquad(c: Ctx, s: AiSquad): void {
         const idle = us.filter((u) => u.tx === null && u.target === null).map((u) => u.id);
         if (idle.length) issueMove(c, idle, waypoint(c, mid, t.cell, us[0]!.moves), 2);
       }
-      if (s.timer % 4 === 0) heroAbility(c, us);
+      if (s.timer % 4 === 0) heroAbility(c, s, us);
       break;
     }
     case 10: { // regroup
@@ -279,7 +279,7 @@ function stepSquad(c: Ctx, s: AiSquad): void {
           if (s.state === 8) c.out.push({ kind: 'attack', unitIds: idle.map((u) => u.id), target: nearestOf(c, foes, s.goal).id });
           else issueMove(c, idle.map((u) => u.id), s.goal, 2);
         }
-        heroAbility(c, us);
+        heroAbility(c, s, us);
       } else if (s.timer >= 20 || s.state === 8) setState(s, s.prev === 5 || s.prev === 8 ? (s.job >= 0 ? 2 : 4) : s.prev);
       break;
     }
@@ -310,31 +310,132 @@ function heroIdle(c: Ctx, s: AiSquad, us: readonly Unit[]): void {
   if (!hero) return setState(s, 1);
   if (hero.hp < HERO_RETREAT_HP && cheb(c, at(c, hero), c.ai.home) > GROUP_RADIUS) issueMove(c, [hero.id], c.ai.home, 0);
   else if (hero.tx === null && hero.target === null) scatter(c, [hero], c.ai.home, GROUP_RADIUS, 2);
-  if (s.timer % 8 === 0) heroAbility(c, us);
+  // The game's hero job tries a spell every 4th of its own steps (0x02090614), which came to every 260 ticks in
+  // the emulator (ticks 296, 556, 816 ...); our squad timer runs twice as fast, so every 8th. confirmed
+  if (s.timer % 8 === 0) heroAbility(c, s, us);
+}
+
+/** The spell the computer's list always adds in front of the hero's own (0x02002D6C): a small heal. */
+const AI_EXTRA_SPELL = 3;
+
+/**
+ * HeroAbility_choose (0x0209752C). The CPU writes a wish list of spell categories (the spell record's
+ * +0x10) with weights, scores each spell it has (spell 3 first, then the hero's) by the best weight for its
+ * category, and picks at random among the best (AI_rand). confirmed (code)
+ *
+ * - Hero below 50 HP: in a squad of fewer than 3, category 0 (attack) at 20; fewer than 5, category 8
+ *   (teleport) at 90 with fewer than 3, else 40.
+ * - Else, below full charge minus 500, nothing. Not threatened (no squad member fighting and enemy strength
+ *   within 7 of the hero at most 2): categories 4, 5 and 6 (speed, chop and mine buffs) at 20, with 4 more
+ *   cells of search range.
+ * - Threatened: enemy strength within 5 above the squad's strength: category 0 at 60 (80 above three
+ *   times it) and category 2 (armor) at 80. Otherwise category 2 at 80 if within 20 of the squad's goal
+ *   (beyond its radius), else category 4 at 20; and category 0 at 40 (80 when the enemies within 5 are worth
+ *   more than three times the hero's own strength).
+ */
+function chooseSpell(c: Ctx, s: AiSquad, us: readonly Unit[], hero: Unit): { spell: number; range: number } | null {
+  const wishes: [number, number][] = [];
+  let extra = 0;
+  const here = at(c, hero);
+  const n = us.length;
+  if (hero.hp < 50) {
+    if (n < 3) wishes.push([0, 20]);
+    if (n < 5) wishes.push([8, n < 3 ? 90 : 40]);
+  } else if (hero.charge < hero.maxCharge - 500 || !threatened(c, us, hero)) {
+    if (hero.charge < hero.maxCharge - 500) return null;
+    wishes.push([4, 20], [5, 20], [6, 20]);
+    extra = 4;
+  } else {
+    const foes = strengthNear(c, here, 5);
+    if (foes > s.strength) {
+      wishes.push([0, foes > 3 * s.strength ? 80 : 60], [2, 80]);
+    } else {
+      const goal = c.ai.targets.find((x) => x.id === s.target);
+      let d = 0;
+      if (goal || s.job >= 0) {
+        const r = goal ? goal.radius : 6;
+        const cell = goal ? goal.cell : s.goal;
+        if (cell >= 0) {
+          d = manhattan(c, here, cell);
+          d = d > r ? d - r : 1;
+        }
+      }
+      wishes.push(d < 21 ? [2, 80] : [4, 20]);
+      wishes.push([0, foes > 3 * hero.priority ? 80 : 40]);
+    }
+  }
+  const list = [AI_EXTRA_SPELL, ...hero.spells.filter((id) => id !== 0)];
+  let best = 0;
+  let picks: number[] = [];
+  for (const id of list) {
+    const d = c.w.spellDefs[id];
+    if (!d) continue;
+    const score = wishes.reduce((m, [cat, w]) => (cat === d.category && w > m ? w : m), 0);
+    if (score === 0 || score < best) continue;
+    if (score > best) picks = [];
+    picks.push(id);
+    best = score;
+  }
+  if (!picks.length) return null;
+  const spell = picks[picks.length > 1 ? aiRand(c.ai, picks.length) : 0]!;
+  return { spell, range: c.w.spellDefs[spell]!.range + extra };
+}
+
+/** 0x02097A94: a squad member is fighting, or the enemy strength within 7 of the hero is above 2. */
+function threatened(c: Ctx, us: readonly Unit[], hero: Unit): boolean {
+  return us.some((u) => u.target !== null) || strengthNear(c, at(c, hero), 7) > 2;
 }
 
 /**
- * HeroAbility_choose / _cast (0x0209752C, 0x020979E8): with charge to spare and enemies within 5
- * cells, cast one of the hero's spells at the nearest. The game weighs spell categories by the
- * strengths on both sides; that weighting isn't ported (guess: any castable spell, picked by AI_rand).
+ * HeroAbility target (0x02097AD4, search 0x02098304): units within `range` (Chebyshev) of the hero, in the
+ * row-by-row order of the map scan, by the spell's category: 0 the enemy unit with the most HP, 1 the
+ * enemy special (role 6) with the most HP, 7 the enemy unit with the most HP that isn't a special, 2 the own
+ * unit with the most HP, 3 the own unit with the least, 4 the last own unit without a buff on it, 5 the last
+ * own Builder without one, 6 the first own Mine. Ties keep the first found. Other categories find nothing.
+ * Buildings never count except a mine for 6. confirmed (code)
  */
-function heroAbility(c: Ctx, us: readonly Unit[]): void {
+function spellTargetUnit(c: Ctx, hero: Unit, cat: number, range: number): Unit | undefined {
+  const here = at(c, hero);
+  const order = (a: Unit, b: Unit) => at(c, a) - at(c, b);
+  const near = c.w.units.filter((u) => u.hp > 0 && !isInside(u) && cheb(c, at(c, u), here) <= range).sort(order);
+  const own = (u: Unit) => u.owner === c.ai.player;
+  const unitOnly = (u: Unit) => !isBuilding(u);
+  const most = (us: Unit[]) => us.reduce<Unit | undefined>((b, u) => (!b || u.hp > b.hp ? u : b), undefined);
+  const least = (us: Unit[]) => us.reduce<Unit | undefined>((b, u) => (!b || u.hp < b.hp ? u : b), undefined);
+  const unbuffed = (u: Unit) => u.boost === 0;
+  switch (cat) {
+    case 0: return most(near.filter((u) => !own(u) && unitOnly(u)));
+    case 1: return most(near.filter((u) => !own(u) && u.role === 6));
+    case 7: return most(near.filter((u) => !own(u) && unitOnly(u) && u.role !== 6));
+    case 2: return most(near.filter((u) => own(u) && unitOnly(u)));
+    case 3: return least(near.filter((u) => own(u) && unitOnly(u)));
+    case 4: return near.filter((u) => own(u) && unitOnly(u) && unbuffed(u)).at(-1);
+    case 5: return near.filter((u) => own(u) && u.role === ROLE_BUILDER && unbuffed(u)).at(-1);
+    case 6: return near.find((u) => own(u) && u.role === 9);
+    default: return undefined;
+  }
+}
+
+/**
+ * HeroAbility (0x02098650 -> 0x0209752C, cast 0x020979E8). After the choice the cast step draws AI_rand(40)
+ * (unused) and casts only two kinds of spell: those aimed at a point (record +0x08 bit 0) at the chosen unit's
+ * cell, or the hero's own cell when nothing was found, and the self-cast ones (bit 0x40). Spells aimed at a
+ * unit (own unit, enemy, Builder, Mine, vehicle) are chosen but never cast. confirmed (code)
+ */
+function heroAbility(c: Ctx, s: AiSquad, us: readonly Unit[]): void {
   const hero = us.find((u) => u.role === ROLE_HERO);
-  if (!hero || hero.charge < hero.maxCharge - 500) return;
-  const foes = enemies(c).filter((e) => cheb(c, at(c, e), at(c, hero)) <= 5);
-  if (!foes.length) return;
-  const foe = nearestOf(c, foes, at(c, hero));
-  const ok = hero.spells.filter((id) => {
-    const d = c.w.spellDefs[id];
-    if (!d || d.cost >= hero.charge) return false;
-    const mode = spellTarget(d);
-    return mode !== 'unit' || canTarget(c.w, d, c.ai.player, foe);
-  });
-  if (!ok.length) return;
-  const id = ok[ok.length > 1 ? aiRand(c.ai, ok.length) : 0]!;
-  const d = c.w.spellDefs[id]!;
-  const mode = spellTarget(d);
-  c.out.push({ kind: 'cast', caster: hero.id, spell: id, target: mode === 'unit' ? foe.id : 0, x: foe.x, y: foe.y });
+  if (!hero) return;
+  const pick = chooseSpell(c, s, us, hero);
+  if (!pick) return;
+  const d = c.w.spellDefs[pick.spell]!;
+  aiRand(c.ai, 40);
+  aiTrace.log?.(c.w.tick, c.ai.player, 'hero spell ' + d.id + ' range ' + pick.range + ' hp ' + hero.hp + ' charge ' + hero.charge);
+  if (d.flags & TAP_POINT) {
+    const t = spellTargetUnit(c, hero, d.category, pick.range) ?? hero;
+    c.out.push({ kind: 'cast', caster: hero.id, spell: d.id, target: 0, x: t.x, y: t.y });
+  } else if (d.flags & TAP_SELF) {
+    c.out.push({ kind: 'cast', caster: hero.id, spell: d.id, target: 0, x: hero.x, y: hero.y });
+  }
 }
 
 // ---------------------------------------------------------------- JobScout
