@@ -69,7 +69,7 @@ export const avail = (c: Ctx): number => (c.ai.stats.lastBricks < reserve(c) ? 0
  * TowerSpotOK (0x02093664): a tower may go here when an own building stands within 6 and the
  * strength (+0x70) of everything within 6, any side, plus rand(60) is under 225. confirmed (rolls)
  */
-function towerSpotOk(c: Ctx, cell: number): boolean {
+export function towerSpotOk(c: Ctx, cell: number): boolean {
   const x = cx(c, cell), y = cy(c, cell);
   let v = 0;
   for (const u of c.w.units) {

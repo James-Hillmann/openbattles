@@ -5,9 +5,9 @@ import { MOVES_GROUND, isWalkableCode } from '../terrain';
 import { fpH, fpW } from '../footprint';
 import type { Unit } from '../state';
 import { aiRand, aiTrace, type AiRequest } from './state';
-import { avail, computeReserve, finishSites, mainCell, setMainCell, tryOther } from './buildings';
+import { avail, computeReserve, finishSites, mainCell, setMainCell, towerSpotOk, tryOther } from './buildings';
 import {
-  at, builders, cellOfXY, constructing, constructingCount, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
+  at, builders, cellOfXY, constructing, constructingCount, issueMove, centre, cheb, clamp, cx, cy, finishedOfRole, freePop, freeSlots, H, isHarvesting, isIdleBuilder, kindsOfRole, manhattan,
   nearestTree, ofRole, pushRequest, queuedOfRole, typeOf, W, type Ctx,
 } from './ctx';
 
@@ -182,11 +182,24 @@ function towerPlanner(c: Ctx): void {
 }
 
 /**
- * PoolChores (0x02097054): towers at priority 76 where builders without a squad stand, and walking
- * them home. The pool was empty at all 175 calls in the emulator, and our builders have no
- * squad-less state, so this does nothing here.
+ * PoolChores (0x02097054), the economy pass on ticks that are a multiple of 12: for each builder still in the
+ * pool squad (one the AI hasn't given an order yet, in practice a Builder fresh out of the castle), once a
+ * barracks stands, a tower at priority 76 where it stands if the tower spot check passes, else, when the CPU
+ * owns a mine, a second roll of the same check there; and a builder more than 15 cells (Manhattan) from the
+ * start point walks back to it. confirmed (code; emulator: at tick 1800 the 9th Builder, out at 1785, got a
+ * tower proposed at (52,54) by the castle door). The game also tips squads idle for more than 15 squad
+ * passes back into the pool (0x0209B0A0); ours keep their builders. Not ported.
  */
-function poolChores(_c: Ctx): void {}
+function poolChores(c: Ctx): void {
+  const pool = builders(c).filter((u) => u.job === null && !c.ai.assigned.includes(u.id));
+  for (const u of pool) {
+    const here = at(c, u);
+    if (kindsOfRole(c, ROLE_TOWER).length && ofRole(c, ROLE_BARRACKS).length) {
+      if (towerSpotOk(c, here) || (ofRole(c, ROLE_MINE).length > 0 && towerSpotOk(c, here))) propose(c, ROLE_TOWER, here, 76);
+    }
+    if (manhattan(c, here, c.ai.home) > 15) issueMove(c, [u.id], c.ai.home, 0);
+  }
+}
 
 /** RebuyHero (0x02094A7C): a dead hero is bought back first, at priority 100. */
 function rebuyHero(c: Ctx): void {
