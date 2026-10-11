@@ -45,6 +45,13 @@ export interface AiPlayer {
   marks: number[];
   /** Map MARK type-3 points (static map data, not hashed): the tower spots it proposes towers at. */
   towerMarks: number[];
+  /** Map MARK type-6 points (static map data, not hashed): the shipyard spots (0x02093A50). */
+  shipMarks: number[];
+  /**
+   * The map's region plane (map +0x2EC; static map data, not hashed): one id per cell, the same id for cells of
+   * one land area. Empty when the map has none (test worlds): every cell then counts as one area.
+   */
+  regions: number[];
   /** Entities there at the start (ids up to this) never count as "created". */
   seen: number;
   /** Sites the "entity created" handler has run for, until they finish. */
@@ -170,7 +177,10 @@ export const AI_CYCLE = 13;
 export const aiTrace: { log: ((tick: number, player: number, what: string) => void) | null } = { log: null };
 
 /** A new computer opponent for `player` against `enemy`. */
-export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = []): AiPlayer {
+export function newAi(
+  player: PlayerId, enemy: PlayerId, seed: number, home: number, enemyHome: number, marks: readonly number[], towerMarks: readonly number[] = [],
+  shipMarks: readonly number[] = [], regions: ArrayLike<number> = [],
+): AiPlayer {
   return {
     player,
     enemy,
@@ -192,6 +202,8 @@ export function newAi(player: PlayerId, enemy: PlayerId, seed: number, home: num
     asmPhase: 0,
     marks: [...marks],
     towerMarks: [...towerMarks],
+    shipMarks: [...shipMarks],
+    regions: Array.from(regions),
     seen: 0,
     fired: [],
     home,

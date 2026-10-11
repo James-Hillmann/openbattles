@@ -305,7 +305,8 @@ function placementAnchor(c: Ctx, role: number, cell: number, size: number): numb
   } else if (role === ROLE_BARRACKS) {
     x += s * fx * sx + sx;
     y += s * fy * sy + sy;
-  } else if (role === ROLE_STABLES || role === ROLE_SHIPYARD) {
+  } else if (role === ROLE_STABLES) {
+    // (Shipyards keep the requested cell: the switch in 0x02096C2C has no case for them.)
     if (manhattan(c, cell, home) <= 15) {
       x += Math.max(s, 2) * fx * sx + 5 * sx;
       y += Math.max(s, 2) * fy * sy + 5 * sy;
@@ -314,8 +315,9 @@ function placementAnchor(c: Ctx, role: number, cell: number, size: number): numb
     x += Math.min(s, 2) * fx * sx;
     y += Math.min(s, 2) * fy * sy;
   }
-  x = clamp(x, 2, W(c) - fpW(size));
-  y = clamp(y, 2, H(c) - fpH(size));
+  // Kept off the far edges by one more than the footprint, and at least 2 from the near ones.
+  x = clamp(x, 2, W(c) - fpW(size) - 1);
+  y = clamp(y, 2, H(c) - fpH(size) - 1);
   return cellOfXY(c, x, y);
 }
 

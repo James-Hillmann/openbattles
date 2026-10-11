@@ -3,7 +3,7 @@ import { isTower, MAX_BUILDINGS, MAX_TOWERS, ROLE_TOWER, ROLE_TOWER2, ROLE_TOWER
 import type { Unit } from '../state';
 import { aiRand } from './state';
 import { at, builders, constructing, cellOfXY, cx, cy, enemies, isHarvesting, isIdleBuilder, kindsOfRole, manhattan, typeOf, W, type Ctx } from './ctx';
-import { issueBuild, propose } from './economy';
+import { issueBuild, placementSearch, propose } from './economy';
 
 /*
  * What the CPU builds besides builders' basics (farms, mines, the lumber mill): towers, more
@@ -127,10 +127,8 @@ function productionBranch(c: Ctx): void {
   // proposed nothing *or no shipyard stands*, then the special factory when the last answer was no. The
   // shipyard proposer's answer replaces the barracks', so without a shipyard the special factory is
   // always tried too (the emulator showed barracks 99 and special factory 50 proposed on the same pass).
-  // The shipyard proposer needs the island test (0x02093A50), which we haven't traced; it found no
-  // islands on The Pond and never proposed. Not ported: it answers no.
   let done = barracksProposer(c);
-  if (!done || cnt(c, ROLE_SHIPYARD) === 0) done = false;
+  if (kindsOfRole(c, ROLE_SHIPYARD).length && (!done || cnt(c, ROLE_SHIPYARD) === 0)) done = shipyardProposer(c);
   if (!done) specialFactoryProposer(c);
 }
 
@@ -187,9 +185,50 @@ function barracksProposer(c: Ctx): boolean {
   return false;
 }
 
-/** SpecialFactoryProposer (0x020959E0): up to two, the second when rich. */
+/**
+ * The army's specials are all ships (AITeamStats +0x43, 0x02093CA4): every role-6 unit moves on water and
+ * none flies. Then the special factory is never proposed and shipyards get priority. confirmed (code)
+ */
+function navalArmy(c: Ctx): boolean {
+  const specials = kindsOfRole(c, 6).map((k) => typeOf(c, k)).filter((t) => t !== undefined);
+  return specials.length > 0 && specials.every((t) => ((t.moves ?? 0) & 8) !== 0 && t.layer !== 1);
+}
+
+/** The map's region of a cell (land areas); without a region plane every cell is one area. */
+const regionOf = (c: Ctx, cell: number) => (c.ai.regions.length ? c.ai.regions[cell]! : 0);
+
+/**
+ * ShipyardProposer (0x0209576C). Only on maps with 4 or more shipyard spots (MARK type 6, the "island test"
+ * 0x02093A50), with fewer than 2 shipyards and none being built. An army of ships wants its first at priority
+ * 99 and a second at 75. Any other army builds one only to carry troops (the transport wishes, not ported),
+ * or otherwise on maps with 9 or more spots while it has none, at priority 50. The spot is one of the marks
+ * on the main cell's land area with no own shipyard closer than 7 (Manhattan), picked with `AI_rand(n - 1)`
+ * (so never the last of several), then the CPU's placement search within 16 of it. confirmed (code; emulator:
+ * the Wizard CPU on River Crossing proposed shipyards at priority 50 from tick 25 and built one at tick 3243)
+ */
+function shipyardProposer(c: Ctx): boolean {
+  const ai = c.ai;
+  if (planned(c) === ROLE_SHIPYARD || ai.shipMarks.length < 4) return false;
+  const n = cnt(c, ROLE_SHIPYARD);
+  if (n > 1 || building(c, ROLE_SHIPYARD)) return false;
+  const naval = navalArmy(c);
+  let prio = 50;
+  if (naval) prio = n === 0 ? 99 : 75;
+  else if (ai.shipMarks.length < 9 || n !== 0) return false;
+  const kind = kindsOfRole(c, ROLE_SHIPYARD)[0];
+  if (kind === undefined) return false;
+  const area = regionOf(c, mainCell(c));
+  const yards = c.own.filter((u) => u.role === ROLE_SHIPYARD);
+  const spots = ai.shipMarks.filter((m) => regionOf(c, m) === area && !yards.some((y) => manhattan(c, at(c, y), m) < 7));
+  if (!spots.length) return false;
+  const mark = spots[spots.length > 1 ? aiRand(ai, spots.length - 1) : 0]!;
+  const spot = placementSearch(c, kind, mark, 16, 0);
+  return spot >= 0 && propose(c, ROLE_SHIPYARD, spot, prio);
+}
+
+/** SpecialFactoryProposer (0x020959E0): up to two, the second when rich. Never for an army of ships. */
 function specialFactoryProposer(c: Ctx): boolean {
-  if (planned(c) === ROLE_FACTORY) return false;
+  if (planned(c) === ROLE_FACTORY || navalArmy(c)) return false;
   const nf = cnt(c, ROLE_FACTORY);
   if (nf >= 2) return false;
   const av = avail(c);

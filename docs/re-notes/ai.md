@@ -126,7 +126,17 @@ When no plan went to a builder on an odd pass, the CPU rolls `AI_rand(4)` and do
      shipyard proposer runs between them whenever the barracks proposer said no *or no shipyard stands*, and
      its answer replaces the barracks', so without a shipyard the special factory is always tried as well
      (emulator: barracks 99 and special factory 50 proposed on the same pass, tick 25). confirmed
-   - Shipyard: needs the island test (0x02093A50), not traced; it never fired on mp01. Not ported.
+   - Shipyard (`0x0209576C`): the "island test" (`0x02093A50`) just counts the map's shipyard spots
+     (MARK records of type 6; none on The Pond, 22 on River Crossing, 4 to 22 on 15 of the 30 maps) and the
+     proposer gives up below 4. With fewer than 2 shipyards and none being built: an army whose specials are
+     all ships (Pirates, Imperial; AITeamStats +0x43, `0x02093CA4`) wants one at priority 99 and a second at
+     75, and never proposes a special factory. Other armies want one only to carry troops (the transport
+     wishes, not ported) or else on maps with 9 or more spots while they have none, at 50. The spot: a random
+     mark (`AI_rand(n - 1)`, so never the last) on the main cell's land area (the map's region plane, map
+     +0x2EC) with no own shipyard closer than 7, then the placement search within 16 of it; the placement
+     anchor leaves shipyards where asked. confirmed (code; emulator: the Wizard CPU on River Crossing
+     proposed shipyards from tick 25 and built one at tick 3243, by a mark on its own island; the port built
+     one at 2651)
 4. **Upgrade timer.** Counts passes; past the interval (40 at start, 1 after any tower appears,
    reset to 60 or 20 by case 1) it upgrades the Tower I nearest the base that is at least 100 ticks
    old (a Tower II once there are enough). confirmed
@@ -196,6 +206,6 @@ range of the two game runs. Known gaps: the first tower in both game runs came f
 
 - `JobAttackTaskForce` (siege groups), transports and naval landings (AIPlayer+0x58), retiring
   units when at the population cap, late-game cleanup (0x02094738).
-- Bridges and walls built by the AI (0x02094504, 0x0208C6B8), the shipyard proposer, pool chores.
+- Bridges and walls built by the AI (0x02094504, 0x0208C6B8), pool chores.
 - Hero spell choice (guess above).
 - The game's exact AI seed.
