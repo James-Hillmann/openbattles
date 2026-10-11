@@ -21,7 +21,7 @@ One 0x14-byte record per spell at ARM9 `0x02126CB0`, 35 records, index = spell i
 | +0x07 | u8 | area radius in cells | confirmed |
 | +0x08 | u8 | what the player taps, see "Targeting" | likely |
 | +0x0C | u32 | charge cost | confirmed |
-| +0x10 | u16 | unknown (maybe an AI category) | guess |
+| +0x10 | u16 | the computer's spell category (read as a byte by its spell choice, ai.md "Hero spells"): 0 attack, 1 hot wire / vehicle attack, 2 armor, 3 heal, 4 speed, 5 chop, 6 mine, 7 forest, 8 teleport, 9 lightning/fireball areas, 10 tracking, 11 none | confirmed (code) |
 | +0x12 | u16 | duration in ticks for damage, freeze, hot wire and tracking spells | confirmed |
 
 A settings byte (`[0x020092A8]+8` / `+9`) makes range and +0x12 x1.5; it looks like a cheat brick. Not ported.
