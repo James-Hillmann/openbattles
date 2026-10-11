@@ -111,7 +111,7 @@ describe('hero charge', () => {
     const w = world();
     const hero = spawnUnit(w, 0, ...at(5, 5), HERO);
     const guard = spawnUnit(w, 0, ...at(6, 5), { ...GUARD, spells: [5] });
-    cast(w, hero.id, 3, 6, 5);
+    cast(w, hero.id, 4, 6, 5); // (spell 3 is the exception: any hero may cast it, see orderCast)
     cast(w, guard.id, 5, 6, 5);
     expect(w.spells.filter((s) => s.spell !== 2)).toHaveLength(0);
   });

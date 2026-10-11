@@ -100,7 +100,9 @@ export interface CastOrder {
 export function orderCast(w: World, player: PlayerId, o: CastOrder): void {
   const caster = findById(w.units, o.caster);
   const def = w.spellDefs[o.spell];
-  if (!caster || caster.owner !== player || !def || !caster.spells.includes(o.spell) || !spellWorks(def.id)) return;
+  // Spell 3 (a small heal) is on no hero's strip, but the computer's spell list adds it (0x02002D6C) and the
+  // cast command doesn't check the hero's list, so any hero may cast it. confirmed (code)
+  if (!caster || caster.owner !== player || !def || !(caster.spells.includes(o.spell) || (o.spell === 3 && caster.maxCharge > 0)) || !spellWorks(def.id)) return;
   let mode = spellTarget(def);
   const t = mode === 'unit' && o.target ? findById(w.units, o.target) : undefined;
   if (mode === 'unit') {
