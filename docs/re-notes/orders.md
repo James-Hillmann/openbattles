@@ -117,6 +117,15 @@ and fills the selection from them in this order until it has 9: hero (role 0), r
 buildings and no units selects one building. Adding a unit to a full selection (`0x020E339C`) is
 refused. confirmed (code). Order within one role: entity-list order, likely.
 
+Emulator check (2026-10-12, The Pond, King + 4 Builders, py-desmume): a box around all five selects
+all five, and the top screen lists them in a 3x3 portrait grid (room for 9). Patching the seven
+`cmp r0, #9` in the box select (`0x020E26F8`, `0x020E272C`, `0x020E2760`, `0x020E2794`,
+`0x020E27C8`, `0x020E27FC`, `0x020E2830`; Thumb `cmp` immediates, one per role list) to 3 makes the
+same box select exactly 3, the King first; patched to 1 it selects only the King. So the box select
+really stops at the immediate, and the shipped value is 9. confirmed (code + emulator). A real
+10-unit box was not run: getting past pop 4 needs Farms, and the CPU attacks first.
+Ours (`client/src/selection.ts`) matches: a big drag-select keeps 9 units, by role.
+
 ## Battle alert ("Alert Notice")
 
 - `Unit_setHp` (`0x0205E7D4`): when HP goes down, the unit lives, its attacker count (+0x1D4) is
