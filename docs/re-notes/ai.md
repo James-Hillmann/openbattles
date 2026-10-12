@@ -80,9 +80,14 @@ sessions play the same. We seed it from the world seed and player id. confirmed
   is more than 15 away. A Builder is in the pool from the moment it comes out until the AI first gives it
   an order (3 to 21 ticks in the emulator, ending on the next resources pass), so in practice this fires
   when a Builder comes out just before a chores tick: once in 6000 ticks, at 1800, a tower at the castle
-  door (52,54). confirmed (code and emulator; the port proposed the same spot at 1416). The game also tips
-  squads that sat without a job for more than 15 squad passes back into the pool (0x0209B0A0); ours keep
-  their builders (not ported).
+  door (52,54). confirmed (code and emulator; the port proposed the same spot at 1416).
+- Idle builders back to the pool (0x0209B0A0): when the pool is empty, a chores pass walks the builder squads
+  in order; one with no job whose members all stand idle counts a pass up (squad +0x90, zeroed whenever the
+  squad gets an order, 0x0209B578), and the first whose count was already above 15 (AIResources +0x58) goes
+  back into the pool (0x0209DBE4), which ends the walk; the chores then run for it at once. Ours keep the
+  counter per builder, in id order. confirmed (code; emulator on River Crossing: squads went back at ticks
+  4586, 15924, 16078, 16676 and 18600, and at 15924 a pool tower was proposed where the builder stood; the
+  port's first two on the same map came at 11004 and 11472, the economy having drifted by then)
 - Placement: anchor next to the base, farms on the side away from the enemy, barracks, factories and
   towers toward it; spacing roll `rand(10)`: 0 below 3, 1 below 9, else 2 (farms 1); ring search up to 16
   rings (28 after 10 failures while fewer than 2 markers are given up, +8 for farms). The spot test
@@ -104,8 +109,10 @@ sessions play the same. We seed it from the world seed and player id. confirmed
 - Repair: damaged own buildings get the nearest idle builder. likely
 - Army units (`AIBrain_pickArmyUnit` 0x0208BF70): melee by default; ranged when melee > ranged + 4;
   mounted when ranged > 3 and bricks > 200; 50% chance of a special when bricks > 750, a special slot
-  is free, fewer than 10 free unit slots, and a special factory exists. Water-only specials are
-  skipped on land maps. Army queue holds 4, builder queue 10. confirmed (code), likely (thresholds in play)
+  is free, fewer than 10 free unit slots, and a special factory exists. Water-only units (ships) are on
+  the list only while a ferry request waits (with none, the game's naval-map test 0x02093D80 decides; not
+  ported, so we drop them then). Transports: see "Ferries". Army queue holds 4, builder queue 10. confirmed
+  (code), likely (thresholds in play)
 - The producer trains at the nearest idle finished factory, one unit per factory at a time. confirmed
 
 ## Buildings and towers (AIResources "try other" 0x0209524C)
@@ -134,8 +141,8 @@ When no plan went to a builder on an odd pass, the CPU rolls `AI_rand(4)` and do
      (MARK records of type 6; none on The Pond, 22 on River Crossing, 4 to 22 on 15 of the 30 maps) and the
      proposer gives up below 4. With fewer than 2 shipyards and none being built: an army whose specials are
      all ships (Pirates, Imperial; AITeamStats +0x43, `0x02093CA4`) wants one at priority 99 and a second at
-     75, and never proposes a special factory. Other armies want one only to carry troops (the transport
-     wishes, not ported) or else on maps with 9 or more spots while they have none, at 50. The spot: a random
+     75, and never proposes a special factory. Other armies want one only to carry troops (see "Ferries")
+     or else on maps with 9 or more spots while they have none, at 50. The spot: a random
      mark (`AI_rand(n - 1)`, so never the last) on the main cell's land area (the map's region plane, map
      +0x2EC) with no own shipyard closer than 7, then the placement search within 16 of it; the placement
      anchor leaves shipyards where asked. confirmed (code; emulator: the Wizard CPU on River Crossing
@@ -191,6 +198,51 @@ Our addition (guess): units walk in straight segments with a short A* (movement.
 sent straight across a lake stops at the shore. Advancing, regrouping and far-off fights steer by
 waypoints 12 cells along a walkable route. How the game's CPU gets around water is not traced.
 
+## Ferries (TransportRequestMgr 0x0209EB48, requests 0x0209F234)
+
+Code in `sim/src/ai/ferry.ts`. A squad whose goal lies on land some of its walkers can't reach (the map's region
+plane) asks for a ferry and the CPU's transports carry it over. confirmed (code), with the emulator run below.
+
+- **Asking.** When a squad gets its goal it notes whether some member can't walk there (squad +0x5C,
+  0x0209C328). In the advance state such a squad makes a request (0x0209C604 -> 0x0209ECA4: id counter from
+  100, the tick, the goal cell) that every own transport not on another request joins at once, then waits in
+  state 9. While it still needs the ferry the squad steps its request itself on its passes (0x0209C704); the
+  manager steps the others.
+- **Transports.** The army pick (0x0208BF70) asks for a transport straight away while there are fewer than 2
+  transports (counting queued and training ones) and fewer than requests, and then a full army queue doesn't
+  stop the request (0x0208BAA8). A special pick on a map with more than 4 shipyard markers is a transport while
+  the CPU owns none; ships are only on the list while a request waits, so before that the pick comes up empty.
+- **Manager**, on the dispatcher's flag-8 ticks: on ticks divisible by 6, every transport on no request joins
+  the oldest request still waiting for its squad (0x0209EEF8), or, with no requests at all, takes whoever it
+  carries to a random marker on the home island and puts them ashore (0x0209EE18). Other ticks it steps the
+  requests and deletes finished ones.
+- **Request states** (+0x48): 0 waiting for a ship; 1 (a ship joined) hands the squad its two landing spots;
+  3 ferrying; 2 closing (the squad goes on, state 7, and ships bring back anyone still aboard, then leave);
+  4 done. A request with no ships left is done.
+- **Landing spots** are shipyard markers (MARK type 6, 0x02093AD8): by the squad, the marker nearest the first
+  member that can't walk to the goal; on the far side a random one (`AI_rand(n - 1)`) on the goal's land. Each
+  comes with the first water a ship can reach within 7 of it. Every 3rd and 7th wait a ship tries open water
+  next to the member instead.
+- **A ship** (+0x04 state): sails to the near spot, calls the squad's members on that land aboard (a load
+  order), and leaves once nobody is left to board, there is no room for anyone left, or everyone left stands
+  idle (0x020A0978). It sails to the far spot, unloads within 2 cells of its water, and goes back. Counters
+  for sailing orders, unload tries and boarding waits (+0x28, +0x2C, +0x30) above 12 make it pick new spots
+  or, every 3rd or 6th try, shove off to a random spot within 6 or 10 (0x020A0ACC).
+- **Landing.** Once members stand on the far land and the goal is there, the squad drops the ferry and walks
+  on (0x0209C484). The game also asks that less than 20 strength guards the goal (0x02088190); not ported.
+- **The squad** in state 9 walks its members to their landing spot every 15 steps (0x0209C754), the near one
+  or, for those already across, the far one, when more than 4 cells off.
+- guess: open water near a spot is the first ship cell in ring order (the game asks its pathfinder,
+  0x0207F194); a ship that only chases what it spotted on its own counts as idle (ours can stick chasing a
+  target on land).
+
+Emulator (River Crossing, Wizard CPU vs an idle King, `ferry3.py`): the first request at tick 3650, its
+transport out at 4783 and a second at 5210 when a second request came (4612); ships cycled through the
+markers (27,72), (26,56), (40,57), (34,56) and (43,63) by the CPU's island and (69,39) and (54,26) across;
+loads of 1 to 4 went over and came off at (69,44). The game's first ship sat at the shipyard for ~1800 ticks
+before it moved (its own pathing). The port on the same map: the request at 3650 too, the transport at 4891,
+4 aboard at (45,64) at 5002 and ashore at (55,40) at 5288, then two more ferries before the CPU won at 7029.
+
 ## Checking against the game
 
 Run in DeSmuME (py-desmume, tools/emu) with the human idle, King vs Wizard CPU on mp01, from a fresh profile,
@@ -221,7 +273,7 @@ range of the two game runs. Known gaps: the first tower in both game runs came f
 
 ## Not ported yet
 
-- `JobAttackTaskForce` (siege groups), transports and naval landings (AIPlayer+0x58), retiring
-  units when at the population cap, late-game cleanup (0x02094738).
-- Bridges and walls built by the AI (0x02094504, 0x0208C6B8); idle squads going back to the pool.
+- `JobAttackTaskForce` (siege groups), ships fighting (naval armies), retiring units when at the
+  population cap, late-game cleanup (0x02094738).
+- Bridges and walls built by the AI (0x02094504, 0x0208C6B8).
 - The game's exact AI seed.

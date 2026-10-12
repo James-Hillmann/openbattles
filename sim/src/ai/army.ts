@@ -5,6 +5,7 @@ import { findById } from '../combat';
 import type { Unit } from '../state';
 import { aiRand, aiTrace, type AiSquad, type AiTarget } from './state';
 import { at, cellOfXY, cheb, clamp, cx, cy, enemies, H, issueMove, manhattan, strengthNear, W, type Ctx } from './ctx';
+import { dropFerry, ferryGoal, needsFerry, requestFerry, squadFerryStep } from './ferry';
 
 /*
  * The CPU's army: ArmySquadManager (0x020986F4), squads, the attack / defend / scout jobs and the
@@ -101,7 +102,10 @@ export function addTarget(c: Ctx, cat: number, cell: number, radius: number, pri
 }
 
 function newSquad(c: Ctx, job: number, target: number): AiSquad {
-  const s: AiSquad = { id: c.ai.nextSquad++, state: job < 0 ? 12 : 2, prev: 12, timer: 0, units: [], job, jobState: 0, target, goal: -1, last: -1, need: 0, strength: 0 };
+  const s: AiSquad = {
+    id: c.ai.nextSquad++, state: job < 0 ? 12 : 2, prev: 12, timer: 0, units: [], job, jobState: 0, target, goal: -1, last: -1, need: 0, strength: 0,
+    ferryNeed: 0, ferry: -1, ferryLoad: -1, ferryDrop: -1,
+  };
   const t = c.ai.targets.find((x) => x.id === target);
   if (t) s.need = t.required;
   c.ai.squads.push(s);
@@ -199,6 +203,8 @@ function stepSquad(c: Ctx, s: AiSquad): void {
   const us = squadUnits(c, s);
   s.strength = us.reduce((t, u) => t + u.priority, 0);
   if (s.job === JOB_SCOUT) return stepScout(c, s, us);
+  // A squad with a ferry request steps it itself while it still needs the ferry (0x0209C704).
+  if (s.ferry >= 0 && s.ferryNeed) squadFerryStep(c, s);
   const t = targetOf(c, s);
   switch (s.state) {
     case 12:
@@ -222,7 +228,9 @@ function stepSquad(c: Ctx, s: AiSquad): void {
         } else {
           s.jobState = 1;
           setState(s, 7);
-          issueMove(c, us.map((u) => u.id), t.cell, 2);
+          // Given its goal, the squad notes whether some member can't walk there (0x0209C328).
+          s.ferryNeed = needsFerry(c, s, t.cell) ? 1 : 0;
+          if (!s.ferryNeed) issueMove(c, us.map((u) => u.id), t.cell, 2);
         }
       } else if (s.timer >= 2 * GATHER_STEPS) setState(s, 1);
       // Every 16 steps the gathered units spread out toward the goal (Squad_scatterAround from the gather
@@ -235,6 +243,12 @@ function stepSquad(c: Ctx, s: AiSquad): void {
       break;
     case 7: { // advance
       if (!t || us.length === 0) return setState(s, 1);
+      // Across water: ask for a ferry, then wait for it in state 9 (0x02099016).
+      if (s.ferryNeed) {
+        if (s.ferry < 0) s.ferry = requestFerry(c, s);
+        setState(s, 9);
+        break;
+      }
       const mid = centroid(c, us);
       if (us.some((u) => cheb(c, at(c, u), mid) > 2 * GROUP_RADIUS)) {
         setState(s, 10);
@@ -246,6 +260,16 @@ function stepSquad(c: Ctx, s: AiSquad): void {
         if (idle.length) issueMove(c, idle, waypoint(c, mid, t.cell, us[0]!.moves), 2);
       }
       if (s.timer % 4 === 0) heroAbility(c, s, us);
+      break;
+    }
+    case 9: { // wait for the ferry (0x020993AC): every 15 steps the members walk to the landing spots
+      const r = c.ai.ferries.find((x) => x.id === s.ferry);
+      if (!t || !r) {
+        dropFerry(c, s);
+        setState(s, 7);
+        break;
+      }
+      if (r.ships.length > 0 && s.timer % 15 === 0) ferryWalk(c, s, us, t.cell);
       break;
     }
     case 10: { // regroup
@@ -283,6 +307,18 @@ function stepSquad(c: Ctx, s: AiSquad): void {
       } else if (s.timer >= 20 || s.state === 8) setState(s, s.prev === 5 || s.prev === 8 ? (s.job >= 0 ? 2 : 4) : s.prev);
       break;
     }
+  }
+}
+
+/**
+ * Members waiting for a ferry walk to their landing spot (Squad_moveUnits 0x0209C754, state 9): idle ones, or
+ * all once the squad has waited 75 steps, when more than 4 cells off.
+ */
+function ferryWalk(c: Ctx, s: AiSquad, us: readonly Unit[], goal: number): void {
+  for (const u of us) {
+    if (u.role === ROLE_TRANSPORT || u.carrier !== 0 || (u.tx !== null && s.timer <= 75)) continue;
+    const to = ferryGoal(c, s, u, goal);
+    if (manhattan(c, at(c, u), to) > 4) issueMove(c, [u.id], to, 2);
   }
 }
 

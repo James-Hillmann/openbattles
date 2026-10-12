@@ -6,6 +6,7 @@ import { at, centre, type Ctx } from './ctx';
 import { brainEconomy, producerUpdate, resourcesUpdate } from './economy';
 import { onCreated } from './buildings';
 import { addTarget, armyUpdate, attackPlanning, awayPercent, CAT_ATTACK, CAT_HOME } from './army';
+import { ferryUpdate } from './ferry';
 
 export * from './state';
 export { JOB_ATTACK, JOB_DEFEND, JOB_SCOUT } from './army';
@@ -98,7 +99,10 @@ function update(c: Ctx, flags: number): void {
   }
   if (flags & 1) resourcesUpdate(c);
   if (flags & 2) brainUpdate(c);
-  if (flags & 8) expireTargets(c);
+  if (flags & 8) {
+    ferryUpdate(c);
+    expireTargets(c);
+  }
 }
 
 /** AIBrain_update (0x0208B168): economy every 4th update, the squads two updates later, planning every other. */

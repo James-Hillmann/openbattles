@@ -1,4 +1,4 @@
-import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_WALL, trains } from '../economy';
+import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_TRANSPORT, ROLE_WALL, trains } from '../economy';
 import { ringSearch } from '../ring';
 import { mayBuild } from '../structures';
 import { MOVES_GROUND, isWalkableCode } from '../terrain';
@@ -506,10 +506,17 @@ export function brainEconomy(c: Ctx): void {
   } else if (br.bonus > 15) br.bonus--;
 }
 
-/** AIBrain_requestArmyUnit (0x0208BAA8). Transport wishes (island maps) are not ported. */
+/** Own transports plus those asked for or training. */
+const transportsHad = (c: Ctx) => ofRole(c, ROLE_TRANSPORT).length + queuedOfRole(c, c.ai.armyQ, ROLE_TRANSPORT);
+
+/**
+ * AIBrain_requestArmyUnit (0x0208BAA8). While there are fewer transports than ferry requests, a full queue
+ * doesn't stop it (the pick then makes room for a transport).
+ */
 function requestArmyUnit(c: Ctx, freeU: number, freeS: number): void {
   const q = c.ai.armyQ;
-  if (q.length >= ARMY_QUEUE || c.me.bricks < 75) return;
+  const wish = c.ai.ferries.length > 0 && transportsHad(c) < c.ai.ferries.length;
+  if ((!wish && q.length >= ARMY_QUEUE) || c.me.bricks < 75) return;
   const kind = pickArmyUnit(c, freeU, freeS);
   if (kind < 0) return;
   const t = typeOf(c, kind)!;
@@ -529,12 +536,20 @@ function requestArmyUnit(c: Ctx, freeU: number, freeS: number): void {
  * AIBrain_pickArmyUnit (0x0208BF70): melee by default, ranged once melee leads by more than 4,
  * mounted once there are more than 3 ranged (and over 200 bricks), half the time a random special
  * when rich with a special factory. confirmed (44 logged decisions)
+ *
+ * Transports: with ferry requests waiting and fewer than 2 transports (and fewer than requests) it asks for
+ * a transport straight away; and a special pick on a map with more than 4 shipyard markers is a transport while
+ * the CPU has none. Ships (transports included) are only on the list while some request waits, so with no
+ * request that pick comes up empty. confirmed (code)
  */
 function pickArmyUnit(c: Ctx, freeU: number, freeS: number): number {
   const bricks = c.me.bricks;
-  let special = false;
+  const reqs = c.ai.ferries.length;
+  const had = transportsHad(c);
+  const forced = reqs > 0 && had < reqs && had < 2;
+  let special = forced;
   const factory = finishedOfRole(c, ROLE_STABLES).length + finishedOfRole(c, ROLE_SHIPYARD).length > 0;
-  if (bricks > 750 && freeS !== 0 && freeU < 10 && factory && aiRand(c.ai, 10) > 4) special = true;
+  if (!special && bricks > 750 && freeS !== 0 && freeU < 10 && factory && aiRand(c.ai, 10) > 4) special = true;
   let role: number;
   if (!special && freeU !== 0) {
     const melee = ofRole(c, 2).length + queuedOfRole(c, c.ai.armyQ, 2);
@@ -542,11 +557,12 @@ function pickArmyUnit(c: Ctx, freeU: number, freeS: number): number {
     if (bricks > 200 && ranged > 3) role = 4;
     else if (melee !== 0 && melee > ranged + 4) role = 3;
     else role = 2;
-  } else role = 6;
-  // Specials that swim (ships) only on maps with water routes: the naval filter is not ported, so drop them.
+  } else role = forced || (ofRole(c, ROLE_TRANSPORT).length === 0 && freeS !== 0 && c.ai.shipMarks.length > 4) ? ROLE_TRANSPORT : 6;
+  // Ships only while a ferry request waits (0x0208BF70's list filter; with no request the game's naval-map test
+  // 0x02093D80 decides, which is not ported, so ships are dropped then).
   const list = kindsOfRole(c, role).filter((k) => {
     const t = typeOf(c, k)!;
-    return !(((t.moves ?? 0) & 0b1000) !== 0 && t.layer === 0 && ((t.moves ?? 0) & 0b0001) === 0);
+    return reqs > 0 || !(((t.moves ?? 0) & 0b1000) !== 0 && t.layer === 0 && ((t.moves ?? 0) & 0b0001) === 0);
   });
   if (!list.length) return -1;
   return list[list.length > 1 ? aiRand(c.ai, list.length) : 0]!;
