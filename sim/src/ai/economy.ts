@@ -181,17 +181,41 @@ function towerPlanner(c: Ctx): void {
   if (c.own.filter(near).length > 4) propose(c, ROLE_TOWER, mainCell(c), 50);
 }
 
+/** Pool passes a squad may stand idle before it goes back to the pool (AIResources +0x58, set to 15). */
+const IDLE_PASSES = 15;
+
 /**
  * PoolChores (0x02097054), the economy pass on ticks that are a multiple of 12: for each builder still in the
  * pool squad (one the AI hasn't given an order yet, in practice a Builder fresh out of the castle), once a
  * barracks stands, a tower at priority 76 where it stands if the tower spot check passes, else, when the CPU
  * owns a mine, a second roll of the same check there; and a builder more than 15 cells (Manhattan) from the
  * start point walks back to it. confirmed (code; emulator: at tick 1800 the 9th Builder, out at 1785, got a
- * tower proposed at (52,54) by the castle door). The game also tips squads idle for more than 15 squad
- * passes back into the pool (0x0209B0A0); ours keep their builders. Not ported.
+ * tower proposed at (52,54) by the castle door).
+ *
+ * When the pool is empty, the pass first walks the builder squads in order (0x0209B0A0): one with no job whose
+ * members all stand idle counts a pass up, and the first whose count was already above 15 goes back into the
+ * pool (0x0209DBE4), which ends the walk. Ours keep one counter per builder, in id order. confirmed (code;
+ * emulator on River Crossing: an idle squad went back to the pool at tick 15924, and a pool tower was proposed
+ * where its builder stood the same tick)
  */
 function poolChores(c: Ctx): void {
-  const pool = builders(c).filter((u) => u.job === null && !c.ai.assigned.includes(u.id));
+  const ai = c.ai;
+  let pool = builders(c).filter((u) => u.job === null && !ai.assigned.includes(u.id));
+  if (!pool.length) {
+    for (let i = 0; i < ai.assigned.length; i++) {
+      const u = c.own.find((v) => v.id === ai.assigned[i]);
+      if (!u || !isIdleBuilder(u) || ai.res.repairers.includes(u.id)) continue;
+      const n = ai.idle[i] ?? 0;
+      ai.idle[i] = n + 1;
+      if (n > IDLE_PASSES) {
+        aiTrace.log?.(c.w.tick, ai.player, `idle builder ${u.id} back to the pool`);
+        ai.assigned.splice(i, 1);
+        ai.idle.splice(i, 1);
+        pool = [u];
+        break;
+      }
+    }
+  }
   for (const u of pool) {
     const here = at(c, u);
     if (kindsOfRole(c, ROLE_TOWER).length && ofRole(c, ROLE_BARRACKS).length) {

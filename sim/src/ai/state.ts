@@ -61,6 +61,12 @@ export interface AiPlayer {
    * (squad 0), where only the pool chores look at it.
    */
   assigned: number[];
+  /**
+   * Idle counter of each assigned builder (same order as ): the game's resource squad counter +0x90,
+   * counted up by the pool pass while the squad has no job and its members stand idle, and zeroed when the squad
+   * is given an order (0x0209B578).
+   */
+  idle: number[];
   /** Cells (y * width + x) of the own and enemy start points. */
   home: number;
   enemyHome: number;
@@ -212,6 +218,7 @@ export function newAi(
     seen: 0,
     fired: [],
     assigned: [],
+    idle: [],
     home,
     enemyHome,
   };
@@ -236,7 +243,7 @@ export function aiRand(ai: AiPlayer, n: number): number {
 /** Mix every AI field into the world hash, in a fixed order. */
 export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void {
   for (const a of ais) {
-    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired, a.assigned.length, ...a.assigned]) mix(v);
+    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired, a.assigned.length, ...a.assigned, ...a.idle]) mix(v);
     const s = a.stats;
     for (const v of [s.lastBricks, s.incomeAvg, s.ringPos, s.income, s.builderShare, s.military, s.buildings, s.away, ...s.ring]) mix(v);
     const b = a.brain;
