@@ -61,6 +61,15 @@ export interface AiPlayer {
    * (squad 0), where only the pool chores look at it.
    */
   assigned: number[];
+  /**
+   * Idle counter of each assigned builder (same order as ): the game's resource squad counter +0x90,
+   * counted up by the pool pass while the squad has no job and its members stand idle, and zeroed when the squad
+   * is given an order (0x0209B578).
+   */
+  idle: number[];
+  /** Ferry requests (TransportRequestMgr, AIPlayer +0x58) and the last request id (mgr +0x00). */
+  ferries: AiFerry[];
+  nextFerry: number;
   /** Cells (y * width + x) of the own and enemy start points. */
   home: number;
   enemyHome: number;
@@ -171,6 +180,41 @@ export interface AiSquad {
   /** Strength needed (+0x18) and current strength (+0x58). */
   need: number;
   strength: number;
+  /** Needs a ferry to reach its goal (+0x5C), its request id or -1 (+0x60), and the landing spots it walks to (+0x6C, +0x74). */
+  ferryNeed: number;
+  ferry: number;
+  ferryLoad: number;
+  ferryDrop: number;
+}
+
+/** A ferry request (TransportRequestItem, 0x0209F10C). */
+export interface AiFerry {
+  /** Id (+0x18), state 0-4 (+0x48), closing (+0x1C), squad id or -1 (+0x44), tick asked (+0x08) and goal cell (+0x4C). */
+  id: number;
+  state: number;
+  done: number;
+  squad: number;
+  born: number;
+  dest: number;
+  /** Its ships (+0x38). */
+  ships: AiShip[];
+}
+
+/** A ship on a ferry request (0x38-byte entry made in 0x020A016C). */
+export interface AiShip {
+  id: number;
+  /** 0 new, 1 to the landing spot, 2 loaded, 3 back to the landing spot, 4 boarding, 5 unloading (+0x04). */
+  state: number;
+  /** Landing spot on the goal's island and by the squad (+0x08, +0x10), and the water next to each (+0x18, +0x20). */
+  unload: number;
+  load: number;
+  unloadW: number;
+  loadW: number;
+  /** Sailing orders (+0x28), unload tries (+0x2C), boarding waits (+0x30), stuck flag (+0x34). */
+  sails: number;
+  drops: number;
+  waits: number;
+  stuck: number;
 }
 
 export const AI_CYCLE = 13;
@@ -200,7 +244,7 @@ export function newAi(
     res: { plan: { kind: -1, prio: 0, cell: -1 }, wait: 0, harvests: 0, fails: 0, claimed: [], mines: 1, repairers: [], upInterval: 40, upCount: 0, towersClaimed: [], role: 20, reserve: 0, main: -1 },
     armyQ: [],
     builderQ: [],
-    squads: [{ id: 0, state: 12, prev: 12, timer: 0, units: [], job: -1, jobState: 0, target: 0, goal: -1, last: -1, need: 0, strength: 0 }],
+    squads: [{ id: 0, state: 12, prev: 12, timer: 0, units: [], job: -1, jobState: 0, target: 0, goal: -1, last: -1, need: 0, strength: 0, ferryNeed: 0, ferry: -1, ferryLoad: -1, ferryDrop: -1 }],
     targets: [],
     nextSquad: 1,
     nextTarget: 1,
@@ -212,6 +256,9 @@ export function newAi(
     seen: 0,
     fired: [],
     assigned: [],
+    idle: [],
+    ferries: [],
+    nextFerry: 100,
     home,
     enemyHome,
   };
@@ -236,7 +283,7 @@ export function aiRand(ai: AiPlayer, n: number): number {
 /** Mix every AI field into the world hash, in a fixed order. */
 export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void {
   for (const a of ais) {
-    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired, a.assigned.length, ...a.assigned]) mix(v);
+    for (const v of [a.player, a.enemy, a.cycle, a.seedHi, a.seedLo, a.builderPct, a.awayPct, a.events, a.nextSquad, a.nextTarget, a.asmPhase, a.home, a.enemyHome, a.seen, a.fired.length, ...a.fired, a.assigned.length, ...a.assigned, ...a.idle]) mix(v);
     const s = a.stats;
     for (const v of [s.lastBricks, s.incomeAvg, s.ringPos, s.income, s.builderShare, s.military, s.buildings, s.away, ...s.ring]) mix(v);
     const b = a.brain;
@@ -249,7 +296,13 @@ export function hashAi(ais: readonly AiPlayer[], mix: (v: number) => void): void
     }
     mix(a.squads.length);
     for (const q of a.squads) {
-      for (const v of [q.id, q.state, q.prev, q.timer, q.job, q.jobState, q.target, q.goal, q.last, q.need, q.strength, q.units.length, ...q.units]) mix(v);
+      for (const v of [q.id, q.state, q.prev, q.timer, q.job, q.jobState, q.target, q.goal, q.last, q.need, q.strength, q.ferryNeed, q.ferry, q.ferryLoad, q.ferryDrop, q.units.length, ...q.units]) mix(v);
+    }
+    mix(a.nextFerry);
+    mix(a.ferries.length);
+    for (const r of a.ferries) {
+      for (const v of [r.id, r.state, r.done, r.squad, r.born, r.dest, r.ships.length]) mix(v);
+      for (const e of r.ships) for (const v of [e.id, e.state, e.unload, e.load, e.unloadW, e.loadW, e.sails, e.drops, e.waits, e.stuck]) mix(v);
     }
     mix(a.targets.length);
     for (const t of a.targets) for (const v of [t.id, t.cat, t.cell, t.radius, t.required, t.prio, t.born]) mix(v);

@@ -6,6 +6,7 @@ import { at, centre, type Ctx } from './ctx';
 import { brainEconomy, producerUpdate, resourcesUpdate } from './economy';
 import { onCreated } from './buildings';
 import { addTarget, armyUpdate, attackPlanning, awayPercent, CAT_ATTACK, CAT_HOME } from './army';
+import { ferryUpdate } from './ferry';
 
 export * from './state';
 export { JOB_ATTACK, JOB_DEFEND, JOB_SCOUT } from './army';
@@ -76,13 +77,15 @@ export function aiStep(w: World, ai: AiPlayer): Command[] {
   // A builder leaves the pool squad when the AI first gives it something to do (the hand-out and harvest
   // passes take pool members as idle builders). confirmed (emulator: new Builders sat in the pool from coming
   // out until the next resources pass that gave them an order, 3 to 21 ticks)
+  // An order zeroes the builder's idle counter (its squad's +0x90).
   const live = new Set(c.own.map((u) => u.id));
-  const assigned = ai.assigned.filter((id) => live.has(id));
+  const idle = new Map(ai.assigned.map((id, i) => [id, ai.idle[i] ?? 0] as const));
   for (const cmd of c.out) {
     if (!('unitIds' in cmd) || cmd.kind === 'move') continue;
-    for (const id of cmd.unitIds) if (!assigned.includes(id) && c.own.some((u) => u.id === id && u.role === ROLE_BUILDER)) assigned.push(id);
+    for (const id of cmd.unitIds) if (c.own.some((u) => u.id === id && u.role === ROLE_BUILDER)) idle.set(id, 0);
   }
-  ai.assigned = assigned.sort((a, b) => a - b);
+  ai.assigned = [...idle.keys()].filter((id) => live.has(id)).sort((a, b) => a - b);
+  ai.idle = ai.assigned.map((id) => idle.get(id)!);
   return c.out;
 }
 
@@ -96,7 +99,10 @@ function update(c: Ctx, flags: number): void {
   }
   if (flags & 1) resourcesUpdate(c);
   if (flags & 2) brainUpdate(c);
-  if (flags & 8) expireTargets(c);
+  if (flags & 8) {
+    ferryUpdate(c);
+    expireTargets(c);
+  }
 }
 
 /** AIBrain_update (0x0208B168): economy every 4th update, the squads two updates later, planning every other. */

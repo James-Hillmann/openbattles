@@ -3,10 +3,11 @@
  * it gets, with the tick, plus its bricks now and then. For comparing with the game in DeSmuME
  * (docs/re-notes/ai.md "Checking against the game").
  *
- *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both] [--bricks] [--trace]
+ *   npx tsx tools/ai/run.ts your.nds [map=mp01] [ticks=6000] [you=King] [cpu=Wizard] [--both] [--bricks] [--trace] [--ferry]
  *
  * Player 0 (you) stays idle unless --both, which makes both players computers. --bricks prints every
- * change to the CPU's bricks, --trace its building proposals, plans handed out and harvest targets.
+ * change to the CPU's bricks, --trace its building proposals, plans handed out and harvest targets, --ferry
+ * its transports and ferry requests whenever they change (the same layout as the emulator tracker's).
  */
 import { readFileSync } from 'node:fs';
 import { buildArmyBundle, buildMapBundle, buildUnitBundle, tryRomFile, unpackRom, type UnitStats } from '../../extract/src/index';
@@ -15,6 +16,7 @@ import { addAi, aiTrace, createSkirmish, getPlayer, step, type EntityType, type 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const both = process.argv.includes('--both');
 const logBricks = process.argv.includes('--bricks');
+const logFerry = process.argv.includes('--ferry');
 if (process.argv.includes('--trace')) aiTrace.log = (tick, player, what) => console.log(`t${tick} P${player} ${what}`);
 const [romPath, mapName = 'mp01', ticksArg = '6000', youArmy = 'King', cpuArmy = 'Wizard'] = args;
 if (!romPath) throw new Error('usage: run.ts rom.nds [map] [ticks] [you] [cpu] [--both]');
@@ -65,11 +67,25 @@ const seen = new Set<number>();
 const ticks = Number(ticksArg);
 const cellOf = (u: { x: number; y: number }) => `(${Math.floor(u.x / 65536 / 24)},${Math.floor(u.y / 65536 / 16)})`;
 let lastBricks = -1;
+let lastFerry = '';
+const xy = (cell: number) => (cell < 0 ? '-' : `(${cell % map.width},${Math.floor(cell / map.width)})`);
 for (let t = 0; t < ticks; t++) {
   step(w, []);
   const cpu = getPlayer(w, 1)!;
   if (logBricks && cpu.bricks !== lastBricks) console.log(`${w.tick} P1 bricks ${lastBricks} -> ${cpu.bricks}`);
   lastBricks = cpu.bricks;
+  if (logFerry) {
+    const ai = w.ai.find((a) => a.player === 1)!;
+    const ships = w.units.filter((u) => u.owner === 1 && u.role === 5 && u.hp > 0).map((u) => `${cellOf(u)}${u.cargo.length}`);
+    const reqs = ai.ferries.map((r) => {
+      const q = ai.squads.find((x) => x.id === r.squad);
+      const es = r.ships.map((e) => `${e.id}:${e.state} ${xy(e.unload)}${xy(e.load)} w${xy(e.unloadW)}${xy(e.loadW)} ${e.sails}/${e.drops}/${e.waits}`);
+      return `[${r.id} st${r.state}${r.done ? ' done' : ''} sq${q ? `${q.id}:s${q.state}n${q.units.length}` : '-'} ${es.join(' ')}]`;
+    });
+    const line = `ships ${ships.join(' ')} reqs ${reqs.join(' ')}`;
+    if (line !== lastFerry) console.log(`${w.tick} ${line}`);
+    lastFerry = line;
+  }
   for (const u of w.units) {
     if (seen.has(u.id)) continue;
     seen.add(u.id);

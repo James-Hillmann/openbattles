@@ -109,6 +109,10 @@ The same container code serves the Base and Lumber Mill (Builders go inside them
   guards its cell like after any finished order. guess (not traced for these two cases).
 - **Not done**: the transport's own Load button (the ship goes to pick units up).
 
+## The computer
+
+The CPU uses transports to ferry squads to goals on other islands: ai.md "Ferries".
+
 ## Memory layout (unit)
 
 | offset | what | confidence |

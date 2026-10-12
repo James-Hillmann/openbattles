@@ -1,4 +1,4 @@
-import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_WALL, trains } from '../economy';
+import { canPlace, isBuilding, isFinished, ROLE_BARRACKS, ROLE_BASE, ROLE_BUILDER, ROLE_FARM, ROLE_HERO, ROLE_LUMBER_MILL, ROLE_MINE, ROLE_SHIPYARD, ROLE_STABLES, ROLE_TRANSPORT, ROLE_WALL, trains } from '../economy';
 import { ringSearch } from '../ring';
 import { mayBuild } from '../structures';
 import { MOVES_GROUND, isWalkableCode } from '../terrain';
@@ -181,17 +181,41 @@ function towerPlanner(c: Ctx): void {
   if (c.own.filter(near).length > 4) propose(c, ROLE_TOWER, mainCell(c), 50);
 }
 
+/** Pool passes a squad may stand idle before it goes back to the pool (AIResources +0x58, set to 15). */
+const IDLE_PASSES = 15;
+
 /**
  * PoolChores (0x02097054), the economy pass on ticks that are a multiple of 12: for each builder still in the
  * pool squad (one the AI hasn't given an order yet, in practice a Builder fresh out of the castle), once a
  * barracks stands, a tower at priority 76 where it stands if the tower spot check passes, else, when the CPU
  * owns a mine, a second roll of the same check there; and a builder more than 15 cells (Manhattan) from the
  * start point walks back to it. confirmed (code; emulator: at tick 1800 the 9th Builder, out at 1785, got a
- * tower proposed at (52,54) by the castle door). The game also tips squads idle for more than 15 squad
- * passes back into the pool (0x0209B0A0); ours keep their builders. Not ported.
+ * tower proposed at (52,54) by the castle door).
+ *
+ * When the pool is empty, the pass first walks the builder squads in order (0x0209B0A0): one with no job whose
+ * members all stand idle counts a pass up, and the first whose count was already above 15 goes back into the
+ * pool (0x0209DBE4), which ends the walk. Ours keep one counter per builder, in id order. confirmed (code;
+ * emulator on River Crossing: an idle squad went back to the pool at tick 15924, and a pool tower was proposed
+ * where its builder stood the same tick)
  */
 function poolChores(c: Ctx): void {
-  const pool = builders(c).filter((u) => u.job === null && !c.ai.assigned.includes(u.id));
+  const ai = c.ai;
+  let pool = builders(c).filter((u) => u.job === null && !ai.assigned.includes(u.id));
+  if (!pool.length) {
+    for (let i = 0; i < ai.assigned.length; i++) {
+      const u = c.own.find((v) => v.id === ai.assigned[i]);
+      if (!u || !isIdleBuilder(u) || ai.res.repairers.includes(u.id)) continue;
+      const n = ai.idle[i] ?? 0;
+      ai.idle[i] = n + 1;
+      if (n > IDLE_PASSES) {
+        aiTrace.log?.(c.w.tick, ai.player, `idle builder ${u.id} back to the pool`);
+        ai.assigned.splice(i, 1);
+        ai.idle.splice(i, 1);
+        pool = [u];
+        break;
+      }
+    }
+  }
   for (const u of pool) {
     const here = at(c, u);
     if (kindsOfRole(c, ROLE_TOWER).length && ofRole(c, ROLE_BARRACKS).length) {
@@ -482,10 +506,17 @@ export function brainEconomy(c: Ctx): void {
   } else if (br.bonus > 15) br.bonus--;
 }
 
-/** AIBrain_requestArmyUnit (0x0208BAA8). Transport wishes (island maps) are not ported. */
+/** Own transports plus those asked for or training. */
+const transportsHad = (c: Ctx) => ofRole(c, ROLE_TRANSPORT).length + queuedOfRole(c, c.ai.armyQ, ROLE_TRANSPORT);
+
+/**
+ * AIBrain_requestArmyUnit (0x0208BAA8). While there are fewer transports than ferry requests, a full queue
+ * doesn't stop it (the pick then makes room for a transport).
+ */
 function requestArmyUnit(c: Ctx, freeU: number, freeS: number): void {
   const q = c.ai.armyQ;
-  if (q.length >= ARMY_QUEUE || c.me.bricks < 75) return;
+  const wish = c.ai.ferries.length > 0 && transportsHad(c) < c.ai.ferries.length;
+  if ((!wish && q.length >= ARMY_QUEUE) || c.me.bricks < 75) return;
   const kind = pickArmyUnit(c, freeU, freeS);
   if (kind < 0) return;
   const t = typeOf(c, kind)!;
@@ -505,12 +536,20 @@ function requestArmyUnit(c: Ctx, freeU: number, freeS: number): void {
  * AIBrain_pickArmyUnit (0x0208BF70): melee by default, ranged once melee leads by more than 4,
  * mounted once there are more than 3 ranged (and over 200 bricks), half the time a random special
  * when rich with a special factory. confirmed (44 logged decisions)
+ *
+ * Transports: with ferry requests waiting and fewer than 2 transports (and fewer than requests) it asks for
+ * a transport straight away; and a special pick on a map with more than 4 shipyard markers is a transport while
+ * the CPU has none. Ships (transports included) are only on the list while some request waits, so with no
+ * request that pick comes up empty. confirmed (code)
  */
 function pickArmyUnit(c: Ctx, freeU: number, freeS: number): number {
   const bricks = c.me.bricks;
-  let special = false;
+  const reqs = c.ai.ferries.length;
+  const had = transportsHad(c);
+  const forced = reqs > 0 && had < reqs && had < 2;
+  let special = forced;
   const factory = finishedOfRole(c, ROLE_STABLES).length + finishedOfRole(c, ROLE_SHIPYARD).length > 0;
-  if (bricks > 750 && freeS !== 0 && freeU < 10 && factory && aiRand(c.ai, 10) > 4) special = true;
+  if (!special && bricks > 750 && freeS !== 0 && freeU < 10 && factory && aiRand(c.ai, 10) > 4) special = true;
   let role: number;
   if (!special && freeU !== 0) {
     const melee = ofRole(c, 2).length + queuedOfRole(c, c.ai.armyQ, 2);
@@ -518,11 +557,12 @@ function pickArmyUnit(c: Ctx, freeU: number, freeS: number): number {
     if (bricks > 200 && ranged > 3) role = 4;
     else if (melee !== 0 && melee > ranged + 4) role = 3;
     else role = 2;
-  } else role = 6;
-  // Specials that swim (ships) only on maps with water routes: the naval filter is not ported, so drop them.
+  } else role = forced || (ofRole(c, ROLE_TRANSPORT).length === 0 && freeS !== 0 && c.ai.shipMarks.length > 4) ? ROLE_TRANSPORT : 6;
+  // Ships only while a ferry request waits (0x0208BF70's list filter; with no request the game's naval-map test
+  // 0x02093D80 decides, which is not ported, so ships are dropped then).
   const list = kindsOfRole(c, role).filter((k) => {
     const t = typeOf(c, k)!;
-    return !(((t.moves ?? 0) & 0b1000) !== 0 && t.layer === 0 && ((t.moves ?? 0) & 0b0001) === 0);
+    return reqs > 0 || !(((t.moves ?? 0) & 0b1000) !== 0 && t.layer === 0 && ((t.moves ?? 0) & 0b0001) === 0);
   });
   if (!list.length) return -1;
   return list[list.length > 1 ? aiRand(c.ai, list.length) : 0]!;
